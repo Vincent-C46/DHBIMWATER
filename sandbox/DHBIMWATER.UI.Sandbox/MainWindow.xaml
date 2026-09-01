@@ -40,6 +40,14 @@
                                    FontWeight="Normal"
                                    LargeIcon="pack://application:,,,/DHBIMWATER.UI;component/Resources/Icons/revit.png"
                                    Command="{Binding OpenGuideLineViewCommand}"/>
+                    <fluent:Button Header="관로&#x0a;모델링"
+                                   FontWeight="Normal"
+                                   Command="{Binding OpenPipeAlignmentModelingViewCommand}"
+                                   LargeIcon="pack://application:,,,/DHBIMWATER.UI;component/Resources/Icons/pipe.png"/>
+                    <fluent:Button Header="관로&#x0a;배치"
+                                   FontWeight="Normal"
+                                   Command="{Binding OpenPipeLayoutViewCommand}"
+                                   LargeIcon="pack://application:,,,/DHBIMWATER.UI;component/Resources/Icons/pipe_2.png"/>
                 </fluent:RibbonGroupBox>
                 
                 <fluent:RibbonGroupBox Header="수량산출">

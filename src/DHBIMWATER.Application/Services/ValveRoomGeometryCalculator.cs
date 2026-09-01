@@ -182,6 +182,17 @@ public class ValveRoomGeometryCalculator
             throw new ArgumentException("밸브실 치수와 두께는 0보다 커야 합니다.");
         if (d.RoomType == "제수밸브실" && (dto.SluiceSpec is null || string.IsNullOrWhiteSpace(dto.SluiceSpec.BeamTypeName) || string.IsNullOrWhiteSpace(dto.SluiceSpec.ColumnTypeName)))
             throw new ArgumentException("제수밸브실은 보와 기둥 유형을 선택해야 합니다.");
+        foreach (var pit in dto.DrainPits)
+        {
+            if (pit.LengthX <= 0 || pit.WidthY <= 0 || pit.Depth <= 0)
+                throw new ArgumentException("드레인 피트 길이·폭·깊이는 0보다 커야 합니다.");
+            if (!DrainPitGeometry.IsInsideBounds(pit, 0, 0, pl.InnerLength, pl.InnerWidth))
+                throw new ArgumentException("드레인 피트는 내부공간 범위 안에 완전히 들어와야 합니다.");
+        }
+        for (var i = 0; i < dto.DrainPits.Count; i++)
+            for (var j = i + 1; j < dto.DrainPits.Count; j++)
+                if (Overlaps(dto.DrainPits[i], dto.DrainPits[j]))
+                    throw new ArgumentException("드레인 피트끼리 XY 평면에서 겹칠 수 없습니다.");
     }
 
     private static SlabDefinition Slab(ValveRoomGeometryRequestDto dto, double centerX, double centerY, double width, double length, double thickness, double z, string part) => new()
@@ -225,7 +236,13 @@ public class ValveRoomGeometryCalculator
     };
 
     private static IReadOnlyList<Point2D> Rectangle(double x, double y, double width, double length) =>
-        new[] { new Point2D(x - width / 2, y - length / 2), new Point2D(x + width / 2, y - length / 2), new Point2D(x + width / 2, y + length / 2), new Point2D(x - width / 2, y + length / 2) };
+            new[] { new Point2D(x - width / 2, y - length / 2), new Point2D(x + width / 2, y - length / 2), new Point2D(x + width / 2, y + length / 2), new Point2D(x - width / 2, y + length / 2) };
+
+    private static bool Overlaps(DrainPitDefinition left, DrainPitDefinition right) =>
+        left.TopCenter.X - left.LengthX / 2 < right.TopCenter.X + right.LengthX / 2 &&
+        left.TopCenter.X + left.LengthX / 2 > right.TopCenter.X - right.LengthX / 2 &&
+        left.TopCenter.Y - left.WidthY / 2 < right.TopCenter.Y + right.WidthY / 2 &&
+        left.TopCenter.Y + left.WidthY / 2 > right.TopCenter.Y - right.WidthY / 2;
 
     // 기초 상단~상부슬래브 상단 높이. 입력 내부 높이는 상부슬래브 하단까지이며, 중간슬래브가 있으면 1F 안목 + 중간슬래브 두께 + 2F 안목 + 상부슬래브 두께.
     private static double RoomHeight(ValveRoomGeometryRequestDto dto) =>

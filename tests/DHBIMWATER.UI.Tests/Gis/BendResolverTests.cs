@@ -292,6 +292,34 @@ public class BendResolverTests
     }
 
     [Fact]
+    public void Trim_planner_places_one_bend_for_vertices_merged_into_the_same_node()
+    {
+        var (alignments, graph, resolutions, snapTolerance) = BuildMergedBendScenario();
+
+        var plan = BendTrimPlanner.Plan(alignments, graph, resolutions, snapTolerance);
+
+        var placement = Assert.Single(plan.Placements);
+        Assert.Equal(1, placement.VertexIndex);
+        Assert.NotEqual(VertexTrim.None, plan.Plans[0].Trims[1]);
+        Assert.Equal(VertexTrim.None, plan.Plans[0].Trims[2]);
+        Assert.Contains("겹친 정점 1곳", Assert.Single(plan.Warnings));
+    }
+
+    [Fact]
+    public void Trim_planner_prefers_merged_vertex_with_a_bend_kind()
+    {
+        var bendKinds = new string?[] { null, null, "45°", null };
+        var (alignments, graph, resolutions, snapTolerance) = BuildMergedBendScenario(bendKinds);
+
+        var plan = BendTrimPlanner.Plan(alignments, graph, resolutions, snapTolerance);
+
+        var placement = Assert.Single(plan.Placements);
+        Assert.Equal(2, placement.VertexIndex);
+        Assert.Equal(VertexTrim.None, plan.Plans[0].Trims[1]);
+        Assert.NotEqual(VertexTrim.None, plan.Plans[0].Trims[2]);
+    }
+
+    [Fact]
     public void Bend_orientation_follows_each_horizontal_control_point()
     {
         var tangents = BendOrientation.Tangents(
@@ -332,4 +360,35 @@ public class BendResolverTests
 
     private static double Dot(Vector3D a, Vector3D b)
         => a.X * b.X + a.Y * b.Y + a.Z * b.Z;
+
+    private static (PipeAlignment[] Alignments, PipeNetworkGraph Graph, IReadOnlyList<BendResolution> Resolutions, double SnapTolerance)
+        BuildMergedBendScenario(IReadOnlyList<string?>? bendKinds = null)
+    {
+        const double angleDeg = 45d;
+        const double snapTolerance = 0.01d;
+        const double closeDistance = 0.005d;
+        var angleRad = angleDeg * Math.PI / 180d;
+        var closeAngleRad = angleRad / 2d;
+        var directionX = Math.Cos(angleRad);
+        var directionY = Math.Sin(angleRad);
+        var vertices = new[]
+        {
+            new Point3D(0, 0, 0),
+            new Point3D(10, 0, 0),
+            new Point3D(10 + closeDistance * Math.Cos(closeAngleRad), closeDistance * Math.Sin(closeAngleRad), 0),
+            new Point3D(10 + 10 * directionX, 10 * directionY, 0)
+        };
+        var alignments = new[]
+        {
+            new PipeAlignment(vertices, PipeKindCatalog.Water1, 100, "test.xlsx", "1",
+                new Dictionary<string, string>(), bendKinds)
+        };
+        var graph = PipeNetworkBuilder.Build(alignments, snapTolerance);
+        var nodes = PipeNetworkClassifier.Classify(graph);
+        var resolutions = BendResolver.ResolveAll(
+            nodes,
+            Settings(10, fittings: new BendFittingEntry(100, angleDeg, BendForm.AType, 130, 210)));
+
+        return (alignments, graph, resolutions, snapTolerance);
+    }
 }

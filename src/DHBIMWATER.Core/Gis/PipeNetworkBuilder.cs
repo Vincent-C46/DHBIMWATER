@@ -36,7 +36,8 @@ public static class PipeNetworkBuilder
                 var end = alignment.Vertices[v];
                 // 허용오차보다 짧은 선분은 중복 정점으로 보고 버린다(길이 0 간선 방지).
                 if (start.DistanceTo(end) <= tolerance) continue;
-                segments.Add(new RawSegment(i, start, end, alignment.DiameterMm, alignment.PipeKind));
+                var diameterMm = AlignmentDiameterProfile.DiameterAtVertex(alignment, v - 1);
+                segments.Add(new RawSegment(i, start, end, diameterMm, alignment.PipeKind));
             }
         }
         return segments;

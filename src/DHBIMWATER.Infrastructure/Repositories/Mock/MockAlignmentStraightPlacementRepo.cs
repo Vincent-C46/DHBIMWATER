@@ -9,7 +9,7 @@ internal sealed class MockAlignmentStraightPlacementRepo : IAlignmentStraightPla
         string? outerDiameterParameterName = null, string? thicknessParameterName = null, PipeInfoParameterContext? info = null,
         IProgress<PipeAlignmentProgress>? progress = null)
     {
-        var count = alignments.Select((x, i) => AlignmentIntervalSampler.SampleSegments(x.Vertices, intervalM, trims is not null && i < trims.Count ? trims[i] : null).Count).Sum();
+        var count = alignments.Select((x, i) => AlignmentIntervalSampler.SampleSegments(x, intervalM, trims is not null && i < trims.Count ? trims[i] : null).Count).Sum();
         progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingStraights, count, count));
         return new AlignmentStraightPlacementResult(count, Array.Empty<string>());
     }

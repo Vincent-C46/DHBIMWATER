@@ -2,6 +2,7 @@ using Autodesk.Revit.DB;
 using DHBIMWATER.Application.DTOs.Gis;
 using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Infrastructure.Helpers;
+using System.IO;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling;
@@ -22,7 +23,7 @@ public sealed class RevitPipeAlignmentCommandRepo : IPipeAlignmentCommandRepo
         {
             var alignment = definition.Alignments[alignmentIndex];
             var zOffsetM = definition.Origin.GetZOffsetM(alignment);
-            if (alignment.Vertices.Count < 2) { warnings.Add($"{alignment.SourceFile} 레코드 {alignment.RecordNumber}: 정점이 2개 미만이라 건너뛰었습니다."); continue; }
+            if (alignment.Vertices.Count < 2) { warnings.Add($"{Path.GetFileName(alignment.SourceFile)} 레코드 {alignment.RecordNumber}: 정점이 2개 미만이라 건너뛰었습니다."); continue; }
             var lines = new List<GeometryObject>();
             for (var i = 1; i < alignment.Vertices.Count; i++)
             {
@@ -31,7 +32,7 @@ public sealed class RevitPipeAlignmentCommandRepo : IPipeAlignmentCommandRepo
                 if (start.DistanceTo(end) < MinimumSegmentFeet) { skipped++; continue; }
                 lines.Add(Line.CreateBound(start, end));
             }
-            if (lines.Count == 0) { warnings.Add($"{alignment.SourceFile} 레코드 {alignment.RecordNumber}: 유효한 구간이 없어 건너뛰었습니다."); continue; }
+            if (lines.Count == 0) { warnings.Add($"{Path.GetFileName(alignment.SourceFile)} 레코드 {alignment.RecordNumber}: 유효한 구간이 없어 건너뛰었습니다."); continue; }
             var shape = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
             shape.SetShape(lines);
             shape.Name = $"관로_{alignment.PipeKind}_{alignment.RecordNumber}";
@@ -42,7 +43,7 @@ public sealed class RevitPipeAlignmentCommandRepo : IPipeAlignmentCommandRepo
             SetLength(shape, "DH_연장", CalculateLengthMm(alignment.Vertices));
             SetNumber(shape, "DH_시점표고", alignment.Vertices[0].Z);
             SetNumber(shape, "DH_종점표고", alignment.Vertices[^1].Z);
-            SetText(shape, "DH_원본파일", alignment.SourceFile);
+            SetText(shape, "DH_원본파일", Path.GetFileName(alignment.SourceFile));
             SetText(shape, "DH_레코드번호", alignment.RecordNumber);
             created++;
             progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingStraights, alignmentIndex + 1, definition.Alignments.Count));

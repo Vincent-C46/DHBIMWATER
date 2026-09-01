@@ -35,11 +35,18 @@ public sealed class AnalyzePipeNetworkUseCase
 
         var graph = PipeNetworkBuilder.Build(loaded.Alignments, request.SnapToleranceMm / 1000d);
         var nodes = PipeNetworkClassifier.Classify(graph);
-        var resolutions = BendResolver.ResolveAll(nodes, settings).ToDictionary(x => x.NodeId);
+        var authority = BendAuthorityPolicy.Evaluate(loaded.Alignments, graph, nodes, settings, request.SnapToleranceMm / 1000d);
+        warnings.AddRange(authority.Warnings);
+        var resolutions = authority.Kept.ToDictionary(x => x.NodeId);
 
         var standard = resolutions.Values.Count(x => x.Kind == BendResolutionKind.Standard);
         var none = resolutions.Values.Count(x => x.Kind == BendResolutionKind.None);
         var unresolved = resolutions.Values.Count(x => x.Kind == BendResolutionKind.Unresolved);
+        var angleCounts = resolutions.Values
+            .Where(x => x.Kind == BendResolutionKind.Standard)
+            .GroupBy(x => x.StandardAngleDeg)
+            .OrderByDescending(g => g.Key)
+            .ToDictionary(g => g.Key, g => g.Count());
         var conflicts = resolutions.Values.Where(x => !x.IsSizeConsistent).ToList();
 
         if (resolutions.Values.Any(x => x.Kind != BendResolutionKind.None) && resolutions.Values.All(x => !x.HasFittingSize))
@@ -55,7 +62,9 @@ public sealed class AnalyzePipeNetworkUseCase
             graph.Edges.Count,
             nodes.GroupBy(x => x.Kind.ToString()).ToDictionary(g => g.Key, g => g.Count()),
             standard, none, unresolved,
+            authority.SuppressedCount,
             conflicts.Count,
+            angleCounts,
             BuildAttention(nodes, resolutions),
             warnings);
     }
@@ -80,7 +89,10 @@ public sealed class AnalyzePipeNetworkUseCase
     private static double LayingLength(IReadOnlyDictionary<int, BendResolution> resolutions, int nodeId)
         => resolutions.TryGetValue(nodeId, out var r) && r.Kind != BendResolutionKind.None ? r.LayingLengthMm : 0d;
 
-    /// <summary>사용자가 눈으로 확인해야 하는 절점만 담는다. 정상 Tee/Cross/Straight는 집계에만 반영한다.</summary>
+    /// <summary>
+    /// 사용자가 눈으로 확인해야 하는 절점을 담는다. 정상 Tee/Cross/Straight/Reducer는 집계에만 반영한다.
+    /// 곡관이 판정된 절점은 정상이라도 항상 담는다 — 모델링을 돌리지 않고 곡관 배치를 검증하는 용도다.
+    /// </summary>
     private static IReadOnlyList<PipeNetworkNodeReport> BuildAttention(IReadOnlyList<NodeClassification> nodes, IReadOnlyDictionary<int, BendResolution> resolutions)
     {
         var reports = new List<(int Order, PipeNetworkNodeReport Report)>();
@@ -93,6 +105,8 @@ public sealed class AnalyzePipeNetworkUseCase
                 _ when bend is { IsSizeConsistent: false } => 1,
                 NodeKind.TooManyBranches => 2,
                 NodeKind.EndPoint => 3,
+                // 곡관이 실제로 판정된 절점. 위 0~3에 안 걸린 정상 곡관이 여기로 온다.
+                _ when bend is not null && bend.Kind != BendResolutionKind.None => 4,
                 _ => -1
             };
             if (order < 0) continue;

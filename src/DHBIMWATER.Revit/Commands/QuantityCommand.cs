@@ -28,7 +28,6 @@ namespace DHBIMWATER.Revit.Commands
             {
                 Assembly assembly = Assembly.Load("DHBoost.Revit");
 
-                // DHBoost.Revit은 자체 Costura 패킹본이라 하위 어셈블리(DHBoost.UI 등)를 내부 리졸버로 푼다.
                 // 바이트 배열로 로드된 어셈블리는 <Module> 정적 생성자가 자동 실행되지 않아 그 리졸버가
                 // 등록되지 않으므로, 타입 해석 전에 모듈 초기화를 강제한다.
                 RuntimeHelpers.RunModuleConstructor(assembly.ManifestModule.ModuleHandle);

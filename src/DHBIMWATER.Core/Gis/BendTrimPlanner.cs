@@ -72,11 +72,32 @@ public static class BendTrimPlanner
         var placeable = resolutions
             .Where(x => x.Kind != BendResolutionKind.None && x.HasFittingSize && x.LayingLengthMm > 0)
             .ToDictionary(x => x.NodeId);
-        var lookup = new NodeLookup(graph.Nodes, snapTolerance);
+        var lookup = new AlignmentVertexNodeLookup(graph.Nodes, snapTolerance);
+        var representatives = new Dictionary<int, (int AlignmentIndex, int VertexIndex)>();
+        for (var a = 0; a < alignments.Count; a++)
+        {
+            var vertices = alignments[a].Vertices;
+            for (var v = 1; v < vertices.Count - 1; v++)
+            {
+                var nodeId = lookup.Find(vertices[v]);
+                if (nodeId is null || !placeable.ContainsKey(nodeId.Value)) continue;
+
+                if (!representatives.TryGetValue(nodeId.Value, out var current))
+                {
+                    representatives[nodeId.Value] = (a, v);
+                    continue;
+                }
+
+                if (!HasBendKind(alignments[current.AlignmentIndex], current.VertexIndex)
+                    && HasBendKind(alignments[a], v))
+                    representatives[nodeId.Value] = (a, v);
+            }
+        }
 
         var plans = new List<AlignmentBendPlan>(alignments.Count);
         var placements = new List<BendPlacement>();
         var warnings = new List<string>();
+        var skippedDuplicates = new List<(int AlignmentIndex, int VertexIndex)>();
 
         for (var a = 0; a < alignments.Count; a++)
         {
@@ -89,20 +110,35 @@ public static class BendTrimPlanner
             {
                 var nodeId = lookup.Find(vertices[v]);
                 if (nodeId is null || !placeable.TryGetValue(nodeId.Value, out var bend)) continue;
+                if (representatives[nodeId.Value] != (a, v))
+                {
+                    skippedDuplicates.Add((a, v));
+                    continue;
+                }
 
-                var upstream = Direction(vertices[v], vertices[v - 1]);
-                var downstream = Direction(vertices[v], vertices[v + 1]);
-                if (upstream is null || downstream is null) continue;
+                var upstream = DirectionSkippingNear(vertices, v, -1, snapTolerance);
+                var downstream = DirectionSkippingNear(vertices, v, +1, snapTolerance);
+                if (upstream is null || downstream is null)
+                {
+                    warnings.Add($"{Path.GetFileName(alignments[a].SourceFile)} 레코드 {alignments[a].RecordNumber} {AlignmentVertexLabel.Format(alignments[a], v)}: 스냅 허용오차 밖의 이웃 정점을 찾지 못해 곡관 자리를 비웠습니다.");
+                    continue;
+                }
 
                 var shortLeg = bend.LayingLengthMm;
                 var longLeg = bend.LongLegLengthMm;
+                var upstreamDiameter = AlignmentDiameterProfile.DiameterAtVertex(alignments[a], v - 1);
+                var downstreamDiameter = AlignmentDiameterProfile.DiameterAtVertex(alignments[a], v);
+                var bendDiameter = Math.Max(upstreamDiameter, downstreamDiameter);
+                if (Math.Abs(upstreamDiameter - downstreamDiameter) > 1e-6)
+                    warnings.Add($"{Path.GetFileName(alignments[a].SourceFile)} 레코드 {alignments[a].RecordNumber} {AlignmentVertexLabel.Format(alignments[a], v)}: 곡관 자리에서 DN이 {upstreamDiameter:0.##}→{downstreamDiameter:0.##}으로 바뀝니다. 이경곡관 미지원이라 DN{bendDiameter:0.##}으로 배치합니다.");
 
+                var polylineDeflectionDeg = 180d - AngleDegrees(upstream, downstream);
                 BendArcPoints points;
                 try
                 {
                     points = BendArcGeometry.ComputeForAlignment(
                         vertices[v], upstream, downstream,
-                        bend.StandardAngleDeg, bend.DeflectionDeg,
+                        bend.StandardAngleDeg, polylineDeflectionDeg,
                         bend.CenterlineRadiusMm, shortLeg, longLeg);
                 }
                 catch (ArgumentException)
@@ -116,17 +152,17 @@ public static class BendTrimPlanner
                 trims[v] = new VertexTrim(shortLeg * MmToCoordinate, longLeg * MmToCoordinate);
 
                 // P1~P5 각 점의 접선 방향에서 rot_XY_n/rot_XZ_n(도)을 구한다. P1·P2/P4·P5는 직선 구간이라 같은 값이다.
-                var tangents = BendOrientation.Tangents(upstream, downstream, bend.DeflectionDeg);
+                var tangents = BendOrientation.Tangents(upstream, downstream, polylineDeflectionDeg);
                 var rotXy = new double[tangents.Count];
                 var rotXz = new double[tangents.Count];
                 for (var i = 0; i < tangents.Count; i++) (rotXy[i], rotXz[i]) = BendOrientation.Compute(tangents[i]);
 
                 placements.Add(new BendPlacement(
                     nodeId.Value, a, v, bend.StandardAngleDeg,
-                    alignments[a].DiameterMm, alignments[a].PipeKind,
+                    bendDiameter, alignments[a].PipeKind,
                     points, shortLeg, longLeg,
                     bend.WallThicknessMm, bend.IsAcceptable, rotXy, rotXz,
-                    bend.DeflectionDeg, bend.EffectiveAllowableDeg, bend.ResidualDeg,
+                    polylineDeflectionDeg, bend.EffectiveAllowableDeg, bend.ResidualDeg,
                     bend.CenterlineRadiusMm, bend.LayingLengthMm, bend.JointType, bend.ApplicationMode,
                     bend.Form, bend.WeightKg));
             }
@@ -134,7 +170,26 @@ public static class BendTrimPlanner
             plans.Add(new AlignmentBendPlan(a, trims));
         }
 
+        warnings.AddRange(BuildDuplicateWarnings(alignments, skippedDuplicates));
         return new BendTrimPlan(plans, placements, warnings);
+    }
+
+    private static bool HasBendKind(PipeAlignment alignment, int vertexIndex)
+        => alignment.VertexBendKinds is { } kinds
+           && vertexIndex < kinds.Count
+           && !string.IsNullOrWhiteSpace(kinds[vertexIndex]);
+
+    private static IEnumerable<string> BuildDuplicateWarnings(
+        IReadOnlyList<PipeAlignment> alignments,
+        IReadOnlyList<(int AlignmentIndex, int VertexIndex)> skipped)
+    {
+        foreach (var group in skipped.GroupBy(x => x.AlignmentIndex))
+        {
+            var alignment = alignments[group.Key];
+            var examples = string.Join(", ", group.Take(5).Select(x => AlignmentVertexLabel.Format(alignment, x.VertexIndex)));
+            var suffix = group.Count() > 5 ? $", 외 {group.Count() - 5}건" : string.Empty;
+            yield return $"{Path.GetFileName(alignment.SourceFile)} 레코드 {alignment.RecordNumber}: 좌표가 스냅 허용오차 안으로 겹친 정점 {group.Count()}곳은 곡관을 1개만 배치했습니다 — {examples}{suffix}.";
+        }
     }
 
     private static Vector3D? Direction(Point3D from, Point3D to)
@@ -143,46 +198,26 @@ public static class BendTrimPlanner
         return vector.Length <= DegenerateEpsilon ? null : vector.Normalize();
     }
 
-    /// <summary>좌표→절점 역조회. 허용오차 크기의 격자로 후보를 좁혀 정점 수에 선형으로 동작한다.</summary>
-    private sealed class NodeLookup
+    /// <summary>
+    /// 곡관 방향을 뽑을 이웃 정점을 고른다. 기준 정점에서 스냅 허용오차 이내에 있는 정점은
+    /// PipeNetworkBuilder가 선분째 버린 좌표 노이즈이므로 건너뛰고 바깥으로 계속 걸어간다.
+    /// (2026-09-01 회귀: 2.49mm 떨어진 정점으로 방향을 잡아 하류 방향이 52˚ 어긋났다.)
+    /// </summary>
+    private static Vector3D? DirectionSkippingNear(
+        IReadOnlyList<Point3D> vertices, int index, int step, double tolerance)
     {
-        private readonly Dictionary<(long X, long Y, long Z), List<NetworkNode>> _cells = new();
-        private readonly double _tolerance;
-        private readonly double _cell;
-
-        public NodeLookup(IReadOnlyList<NetworkNode> nodes, double tolerance)
+        for (var i = index + step; i >= 0 && i < vertices.Count; i += step)
         {
-            _tolerance = tolerance;
-            _cell = tolerance;
-            foreach (var node in nodes)
-            {
-                var key = Key(node.Position);
-                if (!_cells.TryGetValue(key, out var bucket)) _cells[key] = bucket = new List<NetworkNode>();
-                bucket.Add(node);
-            }
+            if (vertices[index].DistanceTo(vertices[i]) <= tolerance) continue;
+            return Direction(vertices[index], vertices[i]);
         }
-
-        public int? Find(Point3D point)
-        {
-            var (x, y, z) = Key(point);
-            NetworkNode? best = null;
-            var bestDistance = double.MaxValue;
-            // 점이 셀 경계에 붙어 있을 수 있으므로 이웃 셀까지 본다.
-            for (var dx = -1; dx <= 1; dx++)
-                for (var dy = -1; dy <= 1; dy++)
-                    for (var dz = -1; dz <= 1; dz++)
-                    {
-                        if (!_cells.TryGetValue((x + dx, y + dy, z + dz), out var bucket)) continue;
-                        foreach (var node in bucket)
-                        {
-                            var distance = node.Position.DistanceTo(point);
-                            if (distance <= _tolerance && distance < bestDistance) { best = node; bestDistance = distance; }
-                        }
-                    }
-            return best?.Id;
-        }
-
-        private (long X, long Y, long Z) Key(Point3D point)
-            => ((long)Math.Floor(point.X / _cell), (long)Math.Floor(point.Y / _cell), (long)Math.Floor(point.Z / _cell));
+        return null;
     }
+
+    private static double AngleDegrees(Vector3D first, Vector3D second)
+    {
+        var dot = first.X * second.X + first.Y * second.Y + first.Z * second.Z;
+        return Math.Acos(Math.Clamp(dot, -1d, 1d)) * 180d / Math.PI;
+    }
+
 }

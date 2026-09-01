@@ -7,7 +7,8 @@ public enum PipeAlignmentOutputMode { DirectShape, Adaptive, PipingSystem }
 
 /// <summary>엑셀 시트 1개를 관로 선형으로 읽기 위한 열 매핑. X·Y·Z는 필수, Station은 선택.</summary>
 /// <param name="StationColumnIndex">선택. 체이니지 정렬 검증용.</param>
-public sealed record ExcelAlignmentMapping(string SheetName, int HeaderRow, int DataStartRow, int XColumnIndex, int YColumnIndex, int ZColumnIndex, int? StationColumnIndex);
+public sealed record ExcelAlignmentMapping(string SheetName, int HeaderRow, int DataStartRow, int XColumnIndex, int YColumnIndex, int ZColumnIndex, int? StationColumnIndex,
+    StationParseMode StationMode = StationParseMode.Station, double NumberChainIntervalM = 20d, int? BendKindColumnIndex = null, int? VertexDiameterColumnIndex = null);
 
 /// <summary>입력 파일 1개와 그 파일의 필드 매핑. null 필드는 해당 값을 읽지 않는다. ExcelMapping이 있으면 엑셀 리더가 재읽기 시에도 이를 사용한다.</summary>
 /// <param name="ManualDiameterMm">직경 필드로 해석하지 못했을 때(엑셀처럼 필드 자체가 없는 경우 포함) 대신 쓸 수동 입력값. null 또는 0 이하면 쓰지 않는다.</param>

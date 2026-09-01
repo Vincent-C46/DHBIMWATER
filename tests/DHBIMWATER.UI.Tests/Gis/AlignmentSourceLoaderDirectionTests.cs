@@ -25,6 +25,7 @@ public sealed class AlignmentSourceLoaderDirectionTests
         Assert.Equal(new Point3D(2, 0, 0), result.Alignments[1].Vertices[0]);
         Assert.Equal(new Point3D(1, 0, 0), result.Alignments[1].Vertices[1]);
         Assert.Equal(new Point3D(0, 0, 0), result.Alignments[1].Vertices[^1]);
+        Assert.Equal([20d, 10d, 0d], result.Alignments[1].VertexStationM);
     }
 
     [Fact]
@@ -41,7 +42,7 @@ public sealed class AlignmentSourceLoaderDirectionTests
 
     private static PipeAlignment Feature(string recordNumber) => new(
         new[] { new Point3D(0, 0, 0), new Point3D(1, 0, 0), new Point3D(2, 0, 0) },
-        string.Empty, 0, "sample.shp", recordNumber, new Dictionary<string, string>());
+        string.Empty, 0, "sample.shp", recordNumber, new Dictionary<string, string>(), VertexStationM: [0d, 10d, 20d]);
 
     private sealed class StubReader(params PipeAlignment[] features) : IAlignmentSourceReader
     {

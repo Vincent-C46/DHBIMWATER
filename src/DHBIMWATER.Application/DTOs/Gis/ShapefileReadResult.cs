@@ -19,4 +19,5 @@ public sealed record ShapefileReadResult(
     int VertexCount,
     int SegmentCount,
     IReadOnlyList<string> Warnings,
-    IReadOnlyDictionary<string, string>? SampleAttributes);
+    IReadOnlyDictionary<string, string>? SampleAttributes,
+    string? ProjectionSummary = null);

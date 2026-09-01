@@ -2,6 +2,7 @@ using DHBIMWATER.Application.DTOs.Revit.ValveRoom;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.UI.Base;
 using DHBIMWATER.UI.Commands;
+using DHBIMWATER.Core.Geometry;
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Input;
@@ -58,10 +59,14 @@ public class ValveRoomViewModel : ViewModelBase
         ColumnTypeNames = new ObservableCollection<string>(new[] { "(사용 안 함)" });
         BeamTypeNames = new ObservableCollection<string>(new[] { "(사용 안 함)" });
         VoidAxes = new ObservableCollection<string>(new[] { "X", "Y" });
+        DrainPitCorners = new ObservableCollection<string>(new[] { "좌상단", "좌하단", "우상단", "우하단" });
         LoadTypeNames();
 
         ResetCommand = new RelayCommand(_ => ApplyPreset());
         CreateCommand = new RelayCommand(_ => RequestCreate());
+        AddDrainPitCommand = new RelayCommand(_ => { var pit = new DrainPitItemViewModel(); DrainPits.Add(pit); SelectedDrainPit = pit; });
+        RemoveDrainPitCommand = new RelayCommand(_ => { if (SelectedDrainPit != null) DrainPits.Remove(SelectedDrainPit); });
+        PickDrainPitLocationCommand = new RelayCommand(_ => PickDrainPitLocationAction?.Invoke(), _ => SelectedDrainPit != null);
         ApplyPreset();
     }
 
@@ -69,8 +74,17 @@ public class ValveRoomViewModel : ViewModelBase
     public ObservableCollection<string> ColumnTypeNames { get; }
     public ObservableCollection<string> BeamTypeNames { get; }
     public ObservableCollection<string> VoidAxes { get; }
+    public ObservableCollection<string> DrainPitCorners { get; }
     public ICommand ResetCommand { get; }
     public ICommand CreateCommand { get; }
+    public ObservableCollection<DrainPitItemViewModel> DrainPits { get; } = new();
+    private DrainPitItemViewModel? _selectedDrainPit;
+    public DrainPitItemViewModel? SelectedDrainPit { get => _selectedDrainPit; set => SetProperty(ref _selectedDrainPit, value); }
+    public ICommand AddDrainPitCommand { get; }
+    public ICommand RemoveDrainPitCommand { get; }
+    public ICommand PickDrainPitLocationCommand { get; }
+    public Action? PickDrainPitLocationAction { get; set; }
+    public Action<ValveRoomRequestDto>? CreateModelAction { get; set; }
     public Action? CloseAction { get; set; }
     public ValveRoomRequestDto? RequestedCreate { get; private set; }
 
@@ -89,6 +103,7 @@ public class ValveRoomViewModel : ViewModelBase
             OnPropertyChanged(nameof(SingleHeightVisibility));
             OnPropertyChanged(nameof(AirValveVisibility));
             OnPropertyChanged(nameof(PlainConcreteVisibility));
+            OnPropertyChanged(nameof(DrainPitVisibility));
             OnPropertyChanged(nameof(Summary));
             OnPropertyChanged(nameof(PlanImagePath));
             OnPropertyChanged(nameof(SectionImagePath));
@@ -156,6 +171,14 @@ public class ValveRoomViewModel : ViewModelBase
     public Visibility SingleHeightVisibility => IsMud && HasIntermediateSlab ? Visibility.Collapsed : Visibility.Visible;
     public Visibility AirValveVisibility => IsAir ? Visibility.Visible : Visibility.Collapsed;
     public Visibility PlainConcreteVisibility => IsAir ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility DrainPitVisibility => IsAir ? Visibility.Collapsed : Visibility.Visible;
+
+    public void ApplyPickedLocation(Point2D? point)
+    {
+        if (point == null || SelectedDrainPit == null) return;
+        SelectedDrainPit.CenterX = point.X;
+        SelectedDrainPit.CenterY = point.Y;
+    }
 
     // TODO: Resources/ValveRoomImages/ 폴더와 "{종류}_평면도.png" 등의 참고도가 아직 없어 현재는 빈 칸으로 표시된다.
     private const string ImageBasePath = "pack://application:,,,/DHBIMWATER.UI;component/Resources/ValveRoomImages/";
@@ -257,6 +280,11 @@ public class ValveRoomViewModel : ViewModelBase
             InnerWidth = InnerWidth,
             InnerLength = InnerLength,
             InnerHeight = InnerHeight,
+            DrainPits = DrainPits.Select(p => new DrainPitDefinition
+            {
+                TopCenter = ResolveDrainPitCenter(p),
+                LengthX = p.LengthX, WidthY = p.WidthY, Depth = p.Depth, Name = p.Name
+            }).ToList(),
             AirSpec = IsAir ? new AirValveRoomSpecDto(MainPipeDiameter, FoundationTopToPipeCenterDepth, SelectedVoidAxis) : null,
             // 타입 전용 입력은 선택된 밸브실 타입에 해당하는 쪽만 채운다.
             MudSpec = IsMud
@@ -269,7 +297,8 @@ public class ValveRoomViewModel : ViewModelBase
                     SelectedColumnTypeName == "(사용 안 함)" ? string.Empty : SelectedColumnTypeName)
                 : null
         };
-        CloseAction?.Invoke();
+        if (CreateModelAction != null) CreateModelAction(RequestedCreate);
+        else CloseAction?.Invoke();
     }
     private void LoadTypeNames()
     {
@@ -277,6 +306,13 @@ public class ValveRoomViewModel : ViewModelBase
             ColumnTypeNames.Add(name);
         foreach (var name in _typeQueryRepo.GetBeamTypeNames().Where(name => !string.IsNullOrWhiteSpace(name)).Distinct())
             BeamTypeNames.Add(name);
+    }
+
+    private Point3D ResolveDrainPitCenter(DrainPitItemViewModel pit)
+    {
+        var x = pit.Corner is "우상단" or "우하단" ? InnerLength - pit.LengthX / 2 : pit.LengthX / 2;
+        var y = pit.Corner is "좌상단" or "우상단" ? InnerWidth - pit.WidthY / 2 : pit.WidthY / 2;
+        return new Point3D(x, y, FoundationTopEl * 1000);
     }
 
     private void SetAndRefresh<T>(ref T field, T value)

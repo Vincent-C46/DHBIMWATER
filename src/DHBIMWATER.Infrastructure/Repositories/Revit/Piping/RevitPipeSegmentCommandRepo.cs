@@ -21,6 +21,7 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
     public PipeCreationResult CreateNetwork(PipeNetworkDefinition network)
     {
         var document = _document() ?? throw new InvalidOperationException("활성 Revit 문서가 없습니다.");
+        var hostLevel = ResolveNearestLevel(document, UC.MmToFt(network.Elevation));
         var families = network.SegmentFamilies
             ?? throw new InvalidOperationException("직관·단관 패밀리 지정이 없습니다. 모델링 창에서 패밀리를 선택하세요.");
 
@@ -37,7 +38,7 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         var placedInstances = new List<FamilyInstance>();
 
         // 1) 절점 부속을 먼저 배치하고 커넥터를 실측해 엣지별 차감량을 만든다.
-        var trims = PlaceNodeFittings(document, network, families, placedInstances);
+        var trims = PlaceNodeFittings(document, network, families, placedInstances, hostLevel);
 
         // 2) 엣지마다 구간을 분해해 직관·단관을 놓는다.
         var warnings = new List<string>();
@@ -45,8 +46,9 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         var spanCache = new Dictionary<ElementId, double?>();
         var straightCount = 0;
         var shortCount = 0;
-        foreach (var edge in network.Edges)
+        for (var edgeIndex = 0; edgeIndex < network.Edges.Count; edgeIndex++)
         {
+            var edge = network.Edges[edgeIndex];
             var startXyz = ToXyz(edge.Start, edge.Elevation, network.ReferencePoint);
             var endXyz = ToXyz(edge.End, edge.Elevation, network.ReferencePoint);
             var lengthMm = edge.Start.DistanceTo(edge.End);
@@ -59,7 +61,15 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
 
             var plan = PipeSegmentPlan.Build(lengthMm, occupied, families.StraightLengthMm);
             if (plan.Errors.Count > 0)
-                throw new InvalidOperationException($"[{FormatEdge(edge)}] {string.Join(" ", plan.Errors)}");
+            {
+                var errors = plan.Errors.Distinct().Take(2).ToList();
+                var remainingCount = plan.Errors.Distinct().Skip(2).Count();
+                if (remainingCount > 0) errors.Add($"그 외 {remainingCount}건");
+                throw new InvalidOperationException(
+                    $"배관 #{edgeIndex + 1}에 부속을 놓을 수 없습니다.{Environment.NewLine}{Environment.NewLine}" +
+                    $"{string.Join(Environment.NewLine, errors)}{Environment.NewLine}{Environment.NewLine}" +
+                    $"위치: {FormatEdge(edge)}");
+            }
             warnings.AddRange(plan.Warnings.Select(x => $"[{FormatEdge(edge)}] {x}"));
 
             var direction = (endXyz - startXyz).Normalize();
@@ -67,7 +77,7 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             foreach (var placement in plan.Segments)
             {
                 var center = startXyz + direction * UC.MmToFt(placement.CenterMm);
-                var instance = PlaceAt(document, segment, center, rotation);
+                var instance = PlaceAt(document, segment, center, rotation, hostLevel);
                 placedInstances.Add(instance);
 
                 // 직관·단관이 같은 패밀리이므로 길이 구동과 검증 경로도 하나다.
@@ -98,7 +108,7 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             var end = ToXyz(edge.End, edge.Elevation, network.ReferencePoint);
             var direction = (end - start).Normalize();
             var point = ToXyz(fitting.Position, fitting.Elevation, network.ReferencePoint);
-            var instance = PlaceAt(document, symbol, point, Math.Atan2(direction.Y, direction.X));
+            var instance = PlaceAt(document, symbol, point, Math.Atan2(direction.Y, direction.X), hostLevel);
             var connectors = GetMepConnectors(instance);
             if (connectors.Count == 1)
             {
@@ -133,7 +143,7 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
     /// <summary>절점마다 곡관·T형을 배치하고, 각 레그 방향의 커넥터까지 거리를 (절점, 엣지)별 차감량으로 돌려준다.</summary>
     private static Dictionary<(Guid NodeId, Guid EdgeId), double> PlaceNodeFittings(
         Document document, PipeNetworkDefinition network, PipeSegmentFamilySelection families,
-        ICollection<FamilyInstance> placedInstances)
+        ICollection<FamilyInstance> placedInstances, Level? hostLevel)
     {
         var trims = new Dictionary<(Guid, Guid), double>();
         foreach (var node in network.Nodes)
@@ -166,7 +176,7 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                     continue;   // EndPoint·Inline은 부속이 없고, Cross는 생성 전 검증에서 걸러진다.
             }
 
-            var instance = PlaceAt(document, symbol, origin, 0);
+            var instance = PlaceAt(document, symbol, origin, 0, hostLevel);
             placedInstances.Add(instance);
             var connectors = GetMepConnectors(instance);
             if (connectors.Count != expectedConnectors)
@@ -245,7 +255,7 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
     /// <summary>인라인 부속이면 커넥터 간 길이, 1포트 위치 부속이면 null. 그 외 커넥터 수는 지원하지 않는다.</summary>
     private static double? InlineConnectorSpanMm(Document document, FamilySymbol symbol)
     {
-        var probe = PlaceAt(document, symbol, XYZ.Zero, 0);
+        var probe = PlaceAt(document, symbol, XYZ.Zero, 0, null);
         try
         {
             var connectors = GetMepConnectors(probe);
@@ -268,7 +278,7 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
     /// 길이는 배치 시점에 파라미터로 구동하므로 여기서 길이를 검증하지 않는다.</summary>
     private static void ValidateSegmentSymbol(Document document, FamilySymbol symbol, string lengthParameterName)
     {
-        var probe = PlaceAt(document, symbol, XYZ.Zero, 0);
+        var probe = PlaceAt(document, symbol, XYZ.Zero, 0, null);
         try
         {
             var connectors = GetMepConnectors(probe);
@@ -292,10 +302,21 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         }
     }
 
-    private static FamilyInstance PlaceAt(Document document, FamilySymbol symbol, XYZ point, double rotation)
+    /// <summary>표고(ft)에 가장 가까운 Level. Level 없으면 null.</summary>
+    private static Level? ResolveNearestLevel(Document document, double elevationFt)
+        => new FilteredElementCollector(document)
+            .OfClass(typeof(Level))
+            .Cast<Level>()
+            .OrderBy(x => Math.Abs(x.Elevation - elevationFt))
+            .FirstOrDefault();
+
+    private static FamilyInstance PlaceAt(
+        Document document, FamilySymbol symbol, XYZ point, double rotation, Level? level)
     {
         if (!symbol.IsActive) { symbol.Activate(); document.Regenerate(); }
-        var instance = document.Create.NewFamilyInstance(point, symbol, StructuralType.NonStructural);
+        var instance = level is null
+            ? document.Create.NewFamilyInstance(point, symbol, StructuralType.NonStructural)
+            : document.Create.NewFamilyInstance(point, symbol, level, StructuralType.NonStructural);
         document.Regenerate();
         if (Math.Abs(rotation) > 1e-9)
         {

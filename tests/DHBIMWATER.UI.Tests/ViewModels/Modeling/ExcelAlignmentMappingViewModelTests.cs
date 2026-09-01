@@ -24,6 +24,7 @@ public sealed class ExcelAlignmentMappingViewModelTests
         Assert.Equal(1, vm.YColumn?.Index);
         Assert.Equal(2, vm.ZColumn?.Index);
         Assert.Equal(3, vm.StationColumn?.Index);
+        Assert.Equal(5, vm.BendKindColumn?.Index);
     }
 
     [Fact]
@@ -57,9 +58,9 @@ public sealed class ExcelAlignmentMappingViewModelTests
         public IReadOnlyList<string> GetSheetNames(string filePath) => ["관로1", "관로2"];
         public IReadOnlyList<IReadOnlyList<string?>> PreviewRows(string filePath, string sheetName, int maxRows) =>
         [
-            [" East ", "NORTH", "표 고", "STA", "사용자 X"],
-            ["1", "2", "3", "0+000", "4"],
-            ["5", "6", "7", "0+010", "8"]
+            [" East ", "NORTH", "표 고", "측점", "사용자 X", "곡관유형"],
+            ["1", "2", "3", "0+000", "4", ""],
+            ["5", "6", "7", "0+010", "8", "45˚"]
         ];
         public ShapefileReadResult Read(string filePath) => throw new NotSupportedException();
         public ShapefileReadResult Read(string filePath, ExcelAlignmentMapping mapping) => throw new NotSupportedException();

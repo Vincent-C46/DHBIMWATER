@@ -93,4 +93,72 @@ public sealed class ExcelAlignmentReaderFieldTests : IDisposable
         Assert.Equal("직경", AlignmentAttributeParser.GuessDiameterField(names));
         Assert.Equal("관종", AlignmentAttributeParser.GuessKindField(names));
     }
+
+    [Fact]
+    public void Station방식과_NumberChain방식으로_누가거리를_다르게_해석한다()
+    {
+        Assert.Equal(1030d, StationTextParser.Parse("1+030.0", StationParseMode.Station, 20d));
+        Assert.Equal(270d, StationTextParser.Parse("NO.12+030", StationParseMode.NumberChain, 20d));
+        Assert.Equal(270d, StationTextParser.Parse("12+030", StationParseMode.NumberChain, 20d));
+    }
+
+    [Fact]
+    public void 측점_숫자와_원본_전체경로를_함께_보존한다()
+    {
+        var alignment = Read().Features.Single();
+
+        Assert.Equal([0d, 20d, 40d], alignment.VertexStationM);
+        Assert.Equal(Path.GetFullPath(_path), alignment.SourceFile);
+    }
+
+    [Fact]
+    public void 정점별_곡관종류와_DN을_행순서대로_읽는다()
+    {
+        var result = new ExcelAlignmentReader().Read(_path,
+            new ExcelAlignmentMapping("관로1", 1, 2, 1, 2, 3, 0, BendKindColumnIndex: 6, VertexDiameterColumnIndex: 4));
+        var alignment = result.Features.Single();
+
+        Assert.Equal(["예비1", "예비2", "예비3"], alignment.VertexBendKinds);
+        Assert.Equal([300d, 300d, 400d], alignment.VertexDiameterMm);
+        Assert.Equal(["D300", "D300", "D400"], alignment.VertexDiameterRawValues);
+    }
+
+    [Fact]
+    public void 희소_DN은_원본표기와_mm를_함께_전방채움한다()
+    {
+        using (var workbook = new XLWorkbook())
+        {
+            var sheet = workbook.Worksheets.Add("희소");
+            string[] header = ["측점", "X", "Y", "Z", "호칭지름\n(DN)", "곡관유형"];
+            for (var c = 0; c < header.Length; c++) sheet.Cell(1, c + 1).Value = header[c];
+            for (var i = 0; i < 6; i++)
+            {
+                sheet.Cell(i + 2, 1).Value = $"0+0{i}0";
+                sheet.Cell(i + 2, 2).Value = i * 10;
+                sheet.Cell(i + 2, 3).Value = 0;
+                sheet.Cell(i + 2, 4).Value = 0;
+            }
+            sheet.Cell(2, 5).Value = "DN300";
+            sheet.Cell(5, 5).Value = "DN500";
+            workbook.SaveAs(_path);
+        }
+
+        var result = new ExcelAlignmentReader().Read(_path,
+            new ExcelAlignmentMapping("희소", 1, 2, 1, 2, 3, 0, BendKindColumnIndex: 5, VertexDiameterColumnIndex: 4));
+        var alignment = result.Features.Single();
+
+        Assert.Equal([300d, 300d, 300d, 500d, 500d, 500d], alignment.VertexDiameterMm);
+        Assert.Equal(["DN300", "DN300", "DN300", "DN500", "DN500", "DN500"], alignment.VertexDiameterRawValues);
+        Assert.Equal(["0+000", "0+010", "0+020", "0+030", "0+040", "0+050"], alignment.VertexStationTexts);
+    }
+
+    [Fact]
+    public void 선택열을_사용안함으로_두면_정점목록이_null이다()
+    {
+        var alignment = Read().Features.Single();
+
+        Assert.Null(alignment.VertexBendKinds);
+        Assert.Null(alignment.VertexDiameterMm);
+        Assert.Null(alignment.VertexDiameterRawValues);
+    }
 }

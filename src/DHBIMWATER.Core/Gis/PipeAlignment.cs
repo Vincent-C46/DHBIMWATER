@@ -9,7 +9,15 @@ public sealed record PipeAlignment(
     double DiameterMm,
     string SourceFile,
     string RecordNumber,
-    IReadOnlyDictionary<string, string> Attributes);
+    IReadOnlyDictionary<string, string> Attributes,
+    IReadOnlyList<string?>? VertexBendKinds = null,
+    IReadOnlyList<double?>? VertexDiameterMm = null,
+    IReadOnlyList<string?>? VertexDiameterRawValues = null,
+    IReadOnlyList<string?>? VertexStationTexts = null,
+    /// <summary>정점별 원본 측점(m). 측점열 없으면 null. 해석 실패 정점도 null.</summary>
+    IReadOnlyList<double?>? VertexStationM = null);
+
+public enum StationParseMode { Station, NumberChain }
 
 /// <summary>원본 데이터의 Z가 관의 어느 위치를 가리키는지. 배치 시 전부 중심선 Z로 환산한다.</summary>
 public enum ZDatum

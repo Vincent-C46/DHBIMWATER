@@ -1,3 +1,5 @@
+using DHBIMWATER.Application.DTOs.Gis;
+using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Infrastructure.Repositories.Gis;
@@ -107,6 +109,125 @@ public class AlignmentPlacementSupportTests
     }
 
     [Fact]
+    public void SampleSegments_ignores_collinear_source_vertices_and_keeps_six_meter_maximum()
+    {
+        var vertices = new[]
+        {
+            new Point3D(0, 0, 0), new Point3D(3, 0, 0), new Point3D(6, 0, 0),
+            new Point3D(9, 0, 0), new Point3D(13, 0, 0)
+        };
+
+        var alignment = new PipeAlignment(vertices, "상수1종", 100, "test.xlsx", "1", new Dictionary<string, string>());
+        var segments = AlignmentIntervalSampler.SampleSegments(alignment, 6);
+
+        Assert.Equal(new[] { 0d, 6d, 12d }, segments.Select(x => x.DistanceFromStart));
+        Assert.Equal(new[] { 6d, 6d, 1d }, segments.Select(x => x.Start.DistanceTo(x.End)));
+    }
+
+    [Fact]
+    public void SampleSegments_merges_millimeter_noise_within_half_degree()
+    {
+        var vertices = new[]
+        {
+            new Point3D(0, 0.001, -0.001), new Point3D(3, -0.001, 0.001),
+            new Point3D(6, 0.001, -0.001), new Point3D(9, -0.001, 0.001),
+            new Point3D(13, 0.001, -0.001)
+        };
+        var alignment = new PipeAlignment(vertices, "상수1종", 100, "test.xlsx", "1", new Dictionary<string, string>());
+
+        var segments = AlignmentIntervalSampler.SampleSegments(alignment, 6);
+
+        Assert.Equal(new[] { 0d, 6d, 12d }, segments.Select(x => x.DistanceFromStart));
+        Assert.Equal(3, segments.Count);
+        Assert.InRange(segments[0].Start.DistanceTo(segments[0].End), 5.99999, 6d);
+        Assert.InRange(segments[1].Start.DistanceTo(segments[1].End), 5.99999, 6d);
+        Assert.InRange(segments[2].Start.DistanceTo(segments[2].End), 1d, 1.00001);
+    }
+
+    [Fact]
+    public void SampleSegments_preserves_direction_change_over_half_degree()
+    {
+        const double angleRad = Math.PI / 180d;
+        var corner = new Point3D(3, 0, 0);
+        var vertices = new[]
+        {
+            new Point3D(0, 0, 0), corner,
+            new Point3D(corner.X + 3 * Math.Cos(angleRad), corner.Y + 3 * Math.Sin(angleRad), 0)
+        };
+        var alignment = new PipeAlignment(vertices, "상수1종", 100, "test.xlsx", "1", new Dictionary<string, string>());
+
+        var segments = AlignmentIntervalSampler.SampleSegments(alignment, 6);
+
+        Assert.Equal(2, segments.Count);
+        Assert.Equal(corner, segments[0].End);
+        Assert.Equal(corner, segments[1].Start);
+    }
+
+    [Fact]
+    public void SampleSegments_merges_direction_change_under_half_degree()
+    {
+        const double angleRad = 0.2 * Math.PI / 180d;
+        var corner = new Point3D(3, 0, 0);
+        var vertices = new[]
+        {
+            new Point3D(0, 0, 0), corner,
+            new Point3D(corner.X + 3 * Math.Cos(angleRad), corner.Y + 3 * Math.Sin(angleRad), 0)
+        };
+        var alignment = new PipeAlignment(vertices, "상수1종", 100, "test.xlsx", "1", new Dictionary<string, string>());
+
+        var segment = Assert.Single(AlignmentIntervalSampler.SampleSegments(alignment, 6));
+
+        Assert.Equal(vertices[0], segment.Start);
+        Assert.Equal(vertices[^1], segment.End);
+    }
+
+    [Fact]
+    public void Adaptive_mock_merges_collinear_source_vertices_at_six_meter_interval()
+    {
+        var vertices = new[]
+        {
+            new Point3D(0, 0, 0), new Point3D(3, 0, 0), new Point3D(6, 0, 0),
+            new Point3D(9, 0, 0), new Point3D(13, 0, 0)
+        };
+        var alignment = new PipeAlignment(vertices, "상수1종", 100, "test.xlsx", "1", new Dictionary<string, string>());
+        var mockType = typeof(DxfAlignmentReader).Assembly.GetType(
+            "DHBIMWATER.Infrastructure.Repositories.Mock.MockAlignmentStraightPlacementRepo", throwOnError: true)!;
+        var repo = Assert.IsAssignableFrom<IAlignmentStraightPlacementRepo>(Activator.CreateInstance(mockType, nonPublic: true));
+        var specs = StraightPipeSpecTable.Default;
+        var origin = new AlignmentPlacementOrigin(0, 0, ZDatum.Centerline, specs);
+
+        var result = repo.PlaceAlong(new[] { alignment }, "unused", 6, origin, specs);
+
+        Assert.Equal(3, result.Count);
+    }
+
+    [Fact]
+    public void SampleSegments_preserves_diameter_change_on_collinear_run()
+    {
+        var vertices = new[] { new Point3D(0, 0, 0), new Point3D(3, 0, 0), new Point3D(9, 0, 0) };
+        var alignment = new PipeAlignment(vertices, "상수1종", 100, "test.xlsx", "1", new Dictionary<string, string>(),
+            VertexDiameterMm: new double?[] { 100, 200, 200 });
+
+        var segments = AlignmentIntervalSampler.SampleSegments(alignment, 6);
+
+        Assert.Equal(new[] { 0d, 3d }, segments.Select(x => x.DistanceFromStart));
+        Assert.Equal(new[] { 3d, 6d }, segments.Select(x => x.Start.DistanceTo(x.End)));
+    }
+
+    [Fact]
+    public void SampleSegments_preserves_direction_change_in_direct_shape_mode()
+    {
+        var vertices = new[] { new Point3D(0, 0, 0), new Point3D(3, 0, 0), new Point3D(3, 5, 0) };
+        var alignment = new PipeAlignment(vertices, "상수1종", 100, "test.xlsx", "1", new Dictionary<string, string>());
+
+        var segments = AlignmentIntervalSampler.SampleSegments(alignment, 6);
+
+        Assert.Equal(2, segments.Count);
+        Assert.Equal(new Point3D(3, 0, 0), segments[0].End);
+        Assert.Equal(segments[0].End, segments[1].Start);
+    }
+
+    [Fact]
     public void DxfReader_reads_lwpolyline_and_normalizes_xdata_diameter()
     {
         var path = Path.Combine(Path.GetTempPath(), $"alignment-{Guid.NewGuid():N}.dxf");
@@ -142,6 +263,7 @@ EOF
             Assert.Equal(2, alignment.Vertices.Count);
             Assert.Equal("상수", alignment.Attributes["KIND"]);
             Assert.Equal("100", alignment.Attributes["DIAMETER"]);
+            Assert.Equal(Path.GetFullPath(path), alignment.SourceFile);
         }
         finally
         {

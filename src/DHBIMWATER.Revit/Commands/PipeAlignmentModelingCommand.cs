@@ -32,8 +32,18 @@ public class PipeAlignmentModelingCommand : ModelessCommandBase
             viewModel.ApplyFailure($"Revit 요청을 등록하지 못했습니다: {status}");
         };
 
+        viewModel.FinalizeModelAction = () =>
+        {
+            handler.Request.Make(PipeAlignmentModelingRequestId.FinalizeModel);
+            var status = externalEvent.Raise();
+            if (status == ExternalEventRequest.Accepted) return;
+            viewModel.ApplyFailure($"Revit 요청을 등록하지 못했습니다: {status}");
+        };
+
         handler.ProgressReported = progress => view?.Dispatcher.InvokeAsync(() => viewModel.ApplyProgress(progress));
         handler.Completed = result => view?.Dispatcher.InvokeAsync(() => viewModel.ApplyResult(result));
+        handler.PreviewRetained = result => view?.Dispatcher.InvokeAsync(() => viewModel.ApplyPreviewRetained(result));
+        handler.PreviewReady = result => view?.Dispatcher.InvokeAsync(() => viewModel.ApplyPreviewReady(result));
         handler.Failed = error => view?.Dispatcher.InvokeAsync(() => viewModel.ApplyFailure(error));
 
         var uiThread = new Thread(() =>

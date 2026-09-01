@@ -53,8 +53,15 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
         var lastRow = used?.LastRowUsed().RowNumber() ?? 0;
 
         var vertices = new List<Point3D>();
+        var bendKinds = new List<string?>();
+        var vertexDiameters = new List<double?>();
+        var vertexDiameterRawValues = new List<string?>();
+        var stationTexts = new List<string?>();
+        var stationValues = new List<double?>();
         var warnings = new List<string>();
         double? previousStation = null;
+        string? carriedRawDiameter = null;
+        double? carriedDiameterMm = null;
         var stationOutOfOrder = 0;
 
         for (var r = mapping.DataStartRow; r <= lastRow; r++)
@@ -67,15 +74,34 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
                 continue;
             }
             vertices.Add(new Point3D(x, y, z));
+            bendKinds.Add(ReadOptionalText(sheet, r, mapping.BendKindColumnIndex));
+            var rawDiameter = ReadOptionalText(sheet, r, mapping.VertexDiameterColumnIndex);
+            if (rawDiameter is not null)
+            {
+                // 빈 DN 셀은 직전 구간과 같다. 파싱 실패 표기도 매핑용으로 이어간다.
+                carriedRawDiameter = rawDiameter;
+                var parsed = AlignmentAttributeParser.ParseDiameter(rawDiameter);
+                carriedDiameterMm = parsed.Success ? parsed.DiameterMm : null;
+            }
+            vertexDiameterRawValues.Add(carriedRawDiameter);
+            vertexDiameters.Add(carriedDiameterMm);
 
             if (mapping.StationColumnIndex is { } stationColumn)
             {
-                var station = ParseStation(sheet.Cell(r, stationColumn + 1).GetString());
+                var stationText = sheet.Cell(r, stationColumn + 1).GetFormattedString();
+                stationTexts.Add(string.IsNullOrWhiteSpace(stationText) ? null : stationText);
+                var station = StationTextParser.Parse(stationText, mapping.StationMode, mapping.NumberChainIntervalM);
+                stationValues.Add(station);
                 if (station is not null)
                 {
                     if (previousStation is not null && station < previousStation) stationOutOfOrder++;
                     previousStation = station;
                 }
+            }
+            else
+            {
+                stationTexts.Add(null);
+                stationValues.Add(null);
             }
         }
 
@@ -87,7 +113,12 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
         var (fields, attributes) = ReadHeaderFields(sheet, mapping, used?.LastColumnUsed().ColumnNumber() ?? 0, lastRow, warnings);
 
         var features = vertices.Count >= 2
-            ? new List<PipeAlignment> { new(vertices, string.Empty, 0, Path.GetFileName(filePath), "1", attributes) }
+            ? new List<PipeAlignment> { new(vertices, string.Empty, 0, Path.GetFullPath(filePath), "1", attributes,
+                mapping.BendKindColumnIndex is null ? null : bendKinds,
+                mapping.VertexDiameterColumnIndex is null ? null : vertexDiameters,
+                mapping.VertexDiameterColumnIndex is null ? null : vertexDiameterRawValues,
+                mapping.StationColumnIndex is null ? null : stationTexts,
+                mapping.StationColumnIndex is null ? null : stationValues) }
             : new List<PipeAlignment>();
 
         var extent = vertices.Count == 0 ? ShapefileExtent.Empty
@@ -214,17 +245,11 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
         return double.TryParse(cell.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
     }
 
-    // 체이니지 "0+000.00"(km+m) 또는 순수 숫자를 모두 허용한다. 실패하면 정렬 검증만 건너뛴다.
-    private static double? ParseStation(string? raw)
+    private static string? ReadOptionalText(IXLWorksheet sheet, int row, int? columnIndex)
     {
-        if (string.IsNullOrWhiteSpace(raw)) return null;
-        var text = raw.Trim();
-        var plus = text.IndexOf('+');
-        if (plus <= 0) return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : null;
-        var kmPart = text[..plus];
-        var mPart = text[(plus + 1)..];
-        return double.TryParse(kmPart, NumberStyles.Float, CultureInfo.InvariantCulture, out var km) && double.TryParse(mPart, NumberStyles.Float, CultureInfo.InvariantCulture, out var m)
-            ? km * 1000 + m
-            : null;
+        if (columnIndex is not { } index) return null;
+        var value = sheet.Cell(row, index + 1).GetFormattedString().Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
     }
+
 }

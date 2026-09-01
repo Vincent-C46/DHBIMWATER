@@ -15,6 +15,8 @@ namespace DHBIMWATER.UI.Sandbox
         public ICommand OpenGuideLineViewCommand { get; }
         public ICommand OpenWaterTankViewCommand { get; }
         public ICommand OpenPumpingStationViewCommand { get; }
+        public ICommand OpenPipeAlignmentModelingViewCommand { get; }
+        public ICommand OpenPipeLayoutViewCommand { get; }
 
         public MainViewModel(IServiceProvider serviceProvider)
         {
@@ -23,6 +25,8 @@ namespace DHBIMWATER.UI.Sandbox
             OpenGuideLineViewCommand = new RelayCommand(OpenGuideLineView);
             OpenWaterTankViewCommand = new RelayCommand(OpenWaterTankView);
             OpenPumpingStationViewCommand = new RelayCommand(OpenPumpingStationView);
+            OpenPipeAlignmentModelingViewCommand = new RelayCommand(OpenPipeAlignmentModelingView);
+            OpenPipeLayoutViewCommand = new RelayCommand(OpenPipeLayoutView);
         }
 
         private void OpenModeling1View(object? obj)
@@ -46,6 +50,18 @@ namespace DHBIMWATER.UI.Sandbox
                 private void OpenPumpingStationView(object? obj)
         {
             var view = _serviceProvider.GetRequiredService<PumpingStationView>();
+            view.ShowDialog();
+        }
+
+        private void OpenPipeAlignmentModelingView(object? obj)
+        {
+            var view = _serviceProvider.GetRequiredService<PipeAlignmentModelingView>();
+            view.ShowDialog();
+        }
+
+        private void OpenPipeLayoutView(object? obj)
+        {
+            var view = _serviceProvider.GetRequiredService<PipeLayoutView>();
             view.ShowDialog();
         }
     }

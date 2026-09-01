@@ -1,6 +1,7 @@
 using DHBIMWATER.Application.DTOs.Revit.ValveRoom;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Services;
+using DHBIMWATER.Core.Geometry;
 
 namespace DHBIMWATER.Application.UseCases.AutoGenerator;
 
@@ -14,6 +15,7 @@ public sealed class CreateValveRoomUseCase
     private readonly IProjectLocationCommandRepo _projectLocationCommand;
     private readonly IFoundationCommandRepo _foundationCommand;
     private readonly IAirValveVoidCommandRepo _airValveVoidCommand;
+    private readonly IDrainPitVoidCommandRepo _drainPitVoidCommand;
     private readonly IWallCommandRepo _wallCommand;
     private readonly IBeamCommandRepo _beamCommand;
     private readonly IColumnCommandRepo _columnCommand;
@@ -22,10 +24,10 @@ public sealed class CreateValveRoomUseCase
 
     public CreateValveRoomUseCase(ITransactionContext transaction, ILevelQueryRepo levelQuery, ILevelCommandRepo levelCommand,
         IProjectLocationCommandRepo projectLocationCommand,
-        ISlabCommandRepo slabCommand, IFoundationCommandRepo foundationCommand, IAirValveVoidCommandRepo airValveVoidCommand, IWallCommandRepo wallCommand, IBeamCommandRepo beamCommand,
+        ISlabCommandRepo slabCommand, IFoundationCommandRepo foundationCommand, IAirValveVoidCommandRepo airValveVoidCommand, IDrainPitVoidCommandRepo drainPitVoidCommand, IWallCommandRepo wallCommand, IBeamCommandRepo beamCommand,
         IColumnCommandRepo columnCommand, IElementTypeCommandRepo elementTypeCommand, IDialogService dialog)
     {
-        _transaction = transaction; _levelQuery = levelQuery; _levelCommand = levelCommand; _projectLocationCommand = projectLocationCommand; _slabCommand = slabCommand; _foundationCommand = foundationCommand; _airValveVoidCommand = airValveVoidCommand;
+        _transaction = transaction; _levelQuery = levelQuery; _levelCommand = levelCommand; _projectLocationCommand = projectLocationCommand; _slabCommand = slabCommand; _foundationCommand = foundationCommand; _airValveVoidCommand = airValveVoidCommand; _drainPitVoidCommand = drainPitVoidCommand;
         _wallCommand = wallCommand; _beamCommand = beamCommand; _columnCommand = columnCommand; _elementTypeCommand = elementTypeCommand; _dialog = dialog;
     }
 
@@ -50,7 +52,24 @@ public sealed class CreateValveRoomUseCase
                 var slabConcrete = new DHBIMWATER.Core.Structures.ConcreteSpec(25, 30, 150);
                 var slabMaterial = _elementTypeCommand.FindOrCreateConcreteMaterial(slabConcrete);
                 var slabTypes = slabs.Select(s => s.Thickness).Distinct().ToDictionary(t => t, t => _elementTypeCommand.FindOrCreateSlabType(new DHBIMWATER.Core.Structures.FloorTypeSpec(t, $"일반 - {t}mm", slabConcrete), slabMaterial));
-                foreach (var slab in slabs) _slabCommand.CreateSlab(slab, slabLevels[slab.LevelName], slabTypes[slab.Thickness]);
+                var slabIds = new Dictionary<string, int>();
+                foreach (var slab in slabs)
+                    slabIds[slab.Part] = _slabCommand.CreateSlab(slab, slabLevels[slab.LevelName], slabTypes[slab.Thickness]);
+                var pitWarnings = new List<string>();
+                if (request.DrainPits.Count > 0 && slabIds.TryGetValue("기초", out var foundationSlabId))
+                {
+                    foreach (var pit in request.DrainPits)
+                    {
+                        var warning = _drainPitVoidCommand.CreateDrainPitVoid(foundationSlabId, pit);
+                        if (warning != null) pitWarnings.Add(warning);
+                        if (DrainPitGeometry.IsPenetrating(pit, dto.ProfileSpecDto.FoundationThickness) && slabIds.TryGetValue("버림콘크리트", out var leanId))
+                        {
+                            var leanPit = pit with { TopCenter = pit.TopCenter with { Z = ValveRoomGeometryCalculator.BaseElevation(dto) - dto.ProfileSpecDto.FoundationThickness }, Depth = dto.ProfileSpecDto.PlainConcreteThickness };
+                            warning = _drainPitVoidCommand.CreateDrainPitVoid(leanId, leanPit);
+                            if (warning != null) pitWarnings.Add(warning);
+                        }
+                    }
+                }
                 foreach (var foundation in ValveRoomGeometryCalculator.CalculateFoundations(dto))
                 {
                     var foundationId = _foundationCommand.CreateFoundationFromFirstInstance(foundation);
@@ -73,7 +92,8 @@ public sealed class CreateValveRoomUseCase
                 var columnTypes = columns.Select(c => c.TypeName).Distinct().ToDictionary(name => name, _elementTypeCommand.FindColumnSymbol);
                 foreach (var column in columns) _columnCommand.CreateColumn(column, columnLevels[column.BaseLevelName], columnLevels[column.TopLevelName], columnTypes[column.TypeName]);
                 _transaction.Commit();
-                _dialog.Info("모델 생성", $"{request.RoomType} 모델 생성을 완료했습니다.");
+                var pitMessage = pitWarnings.Count == 0 ? string.Empty : $"\n\n드레인 피트 경고:\n{string.Join("\n", pitWarnings)}";
+                _dialog.Info("모델 생성", $"{request.RoomType} 모델 생성을 완료했습니다.{pitMessage}");
             }
             catch { _transaction.Rollback(); throw; }
         }
@@ -93,5 +113,6 @@ public sealed class CreateValveRoomUseCase
         new ValveRoomPlanSpecDto(r.InnerWidth, r.InnerLength),
         new ValveRoomProfileSpecDto(r.InnerHeight, r.PlainConcreteThickness, r.FoundationThickness, r.FoundationToe, r.OuterWallThickness, r.UpperSlabThickness),
         r.MudSpec,
-        r.SluiceSpec);
+        r.SluiceSpec)
+    { DrainPits = r.DrainPits };
 }

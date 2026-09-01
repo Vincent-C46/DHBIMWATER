@@ -16,13 +16,13 @@
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="DN(mm)" Binding="{Binding DiameterMm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                 <DataGridTextColumn Header="OD(mm)" Binding="{Binding OuterDiameterMm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                <DataGridTextColumn Header="상수 1종" Binding="{Binding Water1, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                <DataGridTextColumn Header="상수 2종" Binding="{Binding Water2, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                <DataGridTextColumn Header="상수 3종" Binding="{Binding Water3, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                <DataGridTextColumn Header="상수 4종" Binding="{Binding Water4, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                <DataGridTextColumn Header="하수 1종" Binding="{Binding Sewer1, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                <DataGridTextColumn Header="하수 2종" Binding="{Binding Sewer2, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                <DataGridTextColumn Header="하수 3종" Binding="{Binding Sewer3, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                <DataGridTextColumn Header="상수 1종 관 두께(mm)" Binding="{Binding Water1, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                <DataGridTextColumn Header="상수 2종 관 두께(mm)" Binding="{Binding Water2, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                <DataGridTextColumn Header="상수 3종 관 두께(mm)" Binding="{Binding Water3, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                <DataGridTextColumn Header="상수 4종 관 두께(mm)" Binding="{Binding Water4, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                <DataGridTextColumn Header="하수 1종 관 두께(mm)" Binding="{Binding Sewer1, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                <DataGridTextColumn Header="하수 2종 관 두께(mm)" Binding="{Binding Sewer2, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                <DataGridTextColumn Header="하수 3종 관 두께(mm)" Binding="{Binding Sewer3, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                             </DataGrid.Columns>
                         </DataGrid>
                     </DockPanel>

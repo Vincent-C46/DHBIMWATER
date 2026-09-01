@@ -4,6 +4,7 @@ using System.Windows.Input;
 using DHBIMWATER.Application.DTOs.Gis;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Interfaces.Gis;
+using DHBIMWATER.Core.Gis;
 using DHBIMWATER.UI.Base;
 using DHBIMWATER.UI.Commands;
 
@@ -30,7 +31,9 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
     private readonly IDialogService _dialog;
     private int _headerRow = 1, _dataStartRow = 2;
     private ExcelSheetPickItem? _previewSheet;
-    private ExcelColumnOption? _xColumn, _yColumn, _zColumn, _stationColumn;
+    private ExcelColumnOption? _xColumn, _yColumn, _zColumn, _stationColumn, _bendKindColumn, _vertexDiameterColumn;
+    private StationParseMode _stationMode = StationParseMode.Station;
+    private double _numberChainIntervalM = 20d;
     private DataTable _previewTable = new();
 
     public ExcelAlignmentMappingViewModel(IExcelAlignmentSourceReader reader, IDialogService dialog, string filePath)
@@ -42,8 +45,30 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
         RefreshPreview();
     }
 
+    public ExcelAlignmentMappingViewModel(IExcelAlignmentSourceReader reader, IDialogService dialog, string filePath, ExcelAlignmentMapping existingMapping)
+        : this(reader, dialog, filePath)
+    {
+        IsSheetSelectionLocked = true;
+        HeaderRow = existingMapping.HeaderRow;
+        DataStartRow = existingMapping.DataStartRow;
+        StationMode = existingMapping.StationMode;
+        NumberChainIntervalM = existingMapping.NumberChainIntervalM;
+        var sheet = Sheets.SingleOrDefault(x => string.Equals(x.Name, existingMapping.SheetName, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException($"시트 '{existingMapping.SheetName}'를 찾을 수 없습니다.");
+        sheet.IsChecked = true;
+        PreviewSheet = sheet;
+        XColumn = FindColumn(existingMapping.XColumnIndex);
+        YColumn = FindColumn(existingMapping.YColumnIndex);
+        ZColumn = FindColumn(existingMapping.ZColumnIndex);
+        StationColumn = FindOptionalColumn(existingMapping.StationColumnIndex);
+        BendKindColumn = FindOptionalColumn(existingMapping.BendKindColumnIndex);
+        VertexDiameterColumn = FindOptionalColumn(existingMapping.VertexDiameterColumnIndex);
+    }
+
     public string FilePath { get; }
     public string FileName => System.IO.Path.GetFileName(FilePath);
+    public bool IsSheetSelectionLocked { get; }
+    public bool IsSheetSelectionEnabled => !IsSheetSelectionLocked;
     public ObservableCollection<ExcelSheetPickItem> Sheets { get; } = new();
     public IEnumerable<ExcelSheetPickItem> CheckedSheets => Sheets.Where(x => x.IsChecked);
     public ObservableCollection<ExcelColumnOption> ColumnOptions { get; } = new();
@@ -51,7 +76,19 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
     public ObservableCollection<ExcelColumnOption> OptionalColumnOptions { get; } = new();
     public DataView PreviewView => _previewTable.DefaultView;
 
-    public int HeaderRow { get => _headerRow; set { if (SetProperty(ref _headerRow, value)) RefreshPreview(); } }
+    public int HeaderRow
+    {
+        get => _headerRow;
+        set
+        {
+            if (!SetProperty(ref _headerRow, value)) return;
+            // 헤더 변경 시 시작 행을 다음 행으로 맞춤. 직접 수정값은 다음 헤더 변경까지 유지.
+            // 백킹 필드 직접 변경: RefreshPreview() 중복 호출 방지.
+            _dataStartRow = value + 1;
+            OnPropertyChanged(nameof(DataStartRow));
+            RefreshPreview();
+        }
+    }
     public int DataStartRow { get => _dataStartRow; set { if (SetProperty(ref _dataStartRow, value)) RefreshPreview(); } }
     public ExcelSheetPickItem? PreviewSheet { get => _previewSheet; set { if (SetProperty(ref _previewSheet, value)) RefreshPreview(); } }
 
@@ -60,6 +97,12 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
     public ExcelColumnOption? ZColumn { get => _zColumn; set { if (SetProperty(ref _zColumn, value)) OnPropertyChanged(nameof(CanConfirm)); } }
     /// <summary>선택 사항. null이면 "(사용 안 함)".</summary>
     public ExcelColumnOption? StationColumn { get => _stationColumn; set => SetProperty(ref _stationColumn, value); }
+    public ExcelColumnOption? BendKindColumn { get => _bendKindColumn; set => SetProperty(ref _bendKindColumn, value); }
+    public ExcelColumnOption? VertexDiameterColumn { get => _vertexDiameterColumn; set => SetProperty(ref _vertexDiameterColumn, value); }
+    public StationParseMode StationMode { get => _stationMode; set { if (SetProperty(ref _stationMode, value)) { OnPropertyChanged(nameof(IsStationMode)); OnPropertyChanged(nameof(IsNumberChainMode)); } } }
+    public bool IsStationMode { get => StationMode == StationParseMode.Station; set { if (value) StationMode = StationParseMode.Station; } }
+    public bool IsNumberChainMode { get => StationMode == StationParseMode.NumberChain; set { if (value) StationMode = StationParseMode.NumberChain; } }
+    public double NumberChainIntervalM { get => _numberChainIntervalM; set => SetProperty(ref _numberChainIntervalM, value); }
 
     public int CheckedCount => Sheets.Count(x => x.IsChecked);
     public bool CanConfirm => CheckedCount > 0 && XColumn is not null && YColumn is not null && ZColumn is not null;
@@ -80,9 +123,9 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
     private void RefreshPreview()
     {
         var previousX = XColumn?.Index; var previousY = YColumn?.Index; var previousZ = ZColumn?.Index;
-        var previousStation = StationColumn?.Index;
+        var previousStation = StationColumn?.Index; var previousBendKind = BendKindColumn?.Index; var previousVertexDiameter = VertexDiameterColumn?.Index;
         ColumnOptions.Clear(); OptionalColumnOptions.Clear();
-        if (PreviewSheet is null || HeaderRow < 1) { _previewTable = new DataTable(); OnPropertyChanged(nameof(PreviewView)); XColumn = YColumn = ZColumn = StationColumn = null; return; }
+        if (PreviewSheet is null || HeaderRow < 1) { _previewTable = new DataTable(); OnPropertyChanged(nameof(PreviewView)); XColumn = YColumn = ZColumn = StationColumn = BendKindColumn = VertexDiameterColumn = null; return; }
 
         IReadOnlyList<IReadOnlyList<string?>> rows;
         try { rows = _reader.PreviewRows(FilePath, PreviewSheet.Name, Math.Max(HeaderRow, DataStartRow) + 3); }
@@ -121,8 +164,14 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
         YColumn = previousY is null ? GuessColumn(headers, YKeywords) : ColumnOptions.FirstOrDefault(x => x.Index == previousY);
         ZColumn = previousZ is null ? GuessColumn(headers, ZKeywords) : ColumnOptions.FirstOrDefault(x => x.Index == previousZ);
         StationColumn = previousStation is null
-            ? GuessColumn(headers, StationKeywords) ?? OptionalColumnOptions.First()
+            ? OptionalMatch(GuessColumn(headers, StationKeywords))
             : OptionalColumnOptions.FirstOrDefault(x => x.Index == previousStation) ?? OptionalColumnOptions.First();
+        BendKindColumn = previousBendKind is null
+            ? OptionalMatch(GuessColumn(headers, BendKindKeywords))
+            : OptionalColumnOptions.FirstOrDefault(x => x.Index == previousBendKind) ?? OptionalColumnOptions.First();
+        VertexDiameterColumn = previousVertexDiameter is null
+            ? OptionalMatch(GuessColumn(headers, VertexDiameterKeywords))
+            : OptionalColumnOptions.FirstOrDefault(x => x.Index == previousVertexDiameter) ?? OptionalColumnOptions.First();
         OnPropertyChanged(nameof(CanConfirm)); OnPropertyChanged(nameof(StatusText));
     }
 
@@ -133,8 +182,11 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
         if (DataStartRow <= HeaderRow) { _dialog.Warn("입력 확인", "데이터 시작 행은 헤더 행보다 커야 합니다."); return; }
         if (XColumn is null || YColumn is null || ZColumn is null) { _dialog.Warn("입력 확인", "X, Y, Z 열은 필수입니다."); return; }
         var station = StationColumn is { Index: >= 0 } ? StationColumn.Index : (int?)null;
+        if (StationMode == StationParseMode.NumberChain && NumberChainIntervalM <= 0) { _dialog.Warn("입력 확인", "NumberChain 간격은 0보다 커야 합니다."); return; }
+        var bendKind = BendKindColumn is { Index: >= 0 } ? BendKindColumn.Index : (int?)null;
+        var vertexDiameter = VertexDiameterColumn is { Index: >= 0 } ? VertexDiameterColumn.Index : (int?)null;
         Result = Sheets.Where(x => x.IsChecked)
-            .Select(x => new ExcelAlignmentMapping(x.Name, HeaderRow, DataStartRow, XColumn.Index, YColumn.Index, ZColumn.Index, station))
+            .Select(x => new ExcelAlignmentMapping(x.Name, HeaderRow, DataStartRow, XColumn.Index, YColumn.Index, ZColumn.Index, station, StationMode, NumberChainIntervalM, bendKind, vertexDiameter))
             .ToList();
         CloseAction?.Invoke();
     }
@@ -146,20 +198,29 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
         return letter;
     }
 
-    private static readonly string[] XKeywords = ["X", "EAST", "E/W", "동서", "이스트"];
-    private static readonly string[] YKeywords = ["Y", "NORTH", "N/S", "남북", "노스"];
+    private static readonly string[] XKeywords = ["X", "EAST", "EASTING", "E/W", "동서", "동/서",];
+    private static readonly string[] YKeywords = ["Y", "NORTH", "NORTHING", "N/S", "남북", "남/북",];
     private static readonly string[] ZKeywords = ["Z", "표고", "고도", "EL", "ELEV", "LEVEL", "높이"];
-    private static readonly string[] StationKeywords = ["STA", "STATION", "측점", "누가거리", "CHAINAGE", "NO"];
+    private static readonly string[] StationKeywords = ["STA", "STATION", "측점", "측점번호", "측점명", "누가거리", "CHAINAGE", "NO"];
+    private static readonly string[] BendKindKeywords = ["곡관유형"];
+    private static readonly string[] VertexDiameterKeywords = ["호칭지름(DN)", "호칭지름\n(DN)", "호칭지름", "DN", "직경", "관경", "구경", "호구경"];
+
+    private ExcelColumnOption OptionalMatch(ExcelColumnOption? option)
+        => option is null
+            ? OptionalColumnOptions.First()
+            : OptionalColumnOptions.FirstOrDefault(x => x.Index == option.Index) ?? OptionalColumnOptions.First();
+
+    private ExcelColumnOption? FindColumn(int index) => ColumnOptions.FirstOrDefault(x => x.Index == index);
+    private ExcelColumnOption FindOptionalColumn(int? index) => index is { } value
+        ? OptionalColumnOptions.FirstOrDefault(x => x.Index == value) ?? OptionalColumnOptions.First()
+        : OptionalColumnOptions.First();
 
     private ExcelColumnOption? GuessColumn(IReadOnlyList<string?> headers, IEnumerable<string> keywords)
     {
-        var normalizedKeywords = new HashSet<string>(keywords.Select(NormalizeHeader), StringComparer.OrdinalIgnoreCase);
+        var normalizedKeywords = new HashSet<string>(keywords.Select(AlignmentAttributeParser.NormalizeHeader), StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < headers.Count; i++)
-            if (normalizedKeywords.Contains(NormalizeHeader(headers[i])))
+            if (normalizedKeywords.Contains(AlignmentAttributeParser.NormalizeHeader(headers[i])))
                 return ColumnOptions.FirstOrDefault(x => x.Index == i);
         return null;
     }
-
-    private static string NormalizeHeader(string? value)
-        => string.Concat((value ?? string.Empty).Where(x => !char.IsWhiteSpace(x))).ToUpperInvariant();
 }

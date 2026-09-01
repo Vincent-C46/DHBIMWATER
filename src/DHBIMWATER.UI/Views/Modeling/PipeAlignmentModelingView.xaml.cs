@@ -6,7 +6,19 @@ using DHBIMWATER.UI.ViewModels.Modeling;
 namespace DHBIMWATER.UI.Views.Modeling;
 public partial class PipeAlignmentModelingView : Window
 {
-    public PipeAlignmentModelingView(PipeAlignmentModelingViewModel viewModel) { InitializeComponent(); DataContext = viewModel; viewModel.CloseAction = Close; viewModel.OwnerWindow = this; }
+    public PipeAlignmentModelingView(PipeAlignmentModelingViewModel viewModel) { InitializeComponent(); Loaded += (_, _) => MaxHeight = SystemParameters.WorkArea.Height; DataContext = viewModel; viewModel.CloseAction = Close; viewModel.OwnerWindow = this; viewModel.NavigatePreflightIssueAction = NavigatePreflightIssue; }
+
+    private void NavigatePreflightIssue(PreflightIssue issue)
+    {
+        var tab = PipeAlignmentTabs.Items.OfType<TabItem>().FirstOrDefault(x => string.Equals(x.Tag?.ToString(), issue.TargetTab.ToString(), StringComparison.Ordinal));
+        if (tab is not null) PipeAlignmentTabs.SelectedItem = tab;
+        if (issue.TargetTab != PipeAlignmentTab.SpecMapping || issue.HighlightKey is null) return;
+        Dispatcher.BeginInvoke(() =>
+        {
+            var row = MappingGrid.Items.OfType<DiameterMappingRow>().FirstOrDefault(x => x.MappingKey == issue.HighlightKey);
+            if (row is not null) MappingGrid.ScrollIntoView(row);
+        });
+    }
 
     /// <summary>[파일 추가 ▾] 드롭다운. WPF는 좌클릭으로 ContextMenu를 여는 기능이 없어 코드로 연다.</summary>
     private void AddKindDropdownButton_Click(object sender, RoutedEventArgs e)

@@ -23,6 +23,9 @@ public sealed class JointDeflectionRule : IBendingRule
         => Math.Abs(actualAngleDeg - fittingAngleDeg) <= effectiveAllowableDeg + Epsilon;
 
     public BendResolution Resolve(NodeClassification node, BendSettings settings)
+        => Resolve(node, settings, null);
+
+    public BendResolution Resolve(NodeClassification node, BendSettings settings, double? forcedAngleDeg)
     {
         if (node.Kind != NodeKind.Bend)
             throw new ArgumentException("곡관 판정은 Bend 절점에서만 정의된다.", nameof(node));
@@ -34,22 +37,26 @@ public sealed class JointDeflectionRule : IBendingRule
         var hasDeflectionSetting = effectiveValue.HasValue;
         var effective = effectiveValue ?? 0d;
 
-        if (hasDeflectionSetting && actual <= effective + Epsilon)
+        if (forcedAngleDeg is null && hasDeflectionSetting && actual <= effective + Epsilon)
             return Empty(node, BendResolutionKind.None, actual, 0d, singleAllowable, actual, jointType, settings.ApplicationMode, effective, true);
 
         var availableAngles = BendFittingCatalog.AnglesFor(settings.ActiveBendConnection);
-        var acceptable = availableAngles
+        var acceptable = forcedAngleDeg is null ? availableAngles
             .Select(angle => new { Angle = angle, Residual = Math.Abs(actual - angle) })
             .Where(x => hasDeflectionSetting && EvaluateFitting(actual, x.Angle, effective))
             .OrderBy(x => x.Residual)
             .ThenBy(x => x.Angle)
-            .FirstOrDefault();
+            .FirstOrDefault() : null;
 
-        var selectedAngle = acceptable?.Angle ?? availableAngles
+        var selectedAngle = forcedAngleDeg ?? acceptable?.Angle ?? availableAngles
             .OrderBy(angle => Math.Abs(actual - angle))
             .ThenBy(angle => angle)
             .First();
-        var isAcceptable = acceptable is not null;
+        // 엑셀 지정각도 자동판정과 같은 기준으로 합부를 본다. 지정각이라는 이유만으로 허용 초과(적색) 처리하면
+        // 잔여각이 허용굴곡 안인 곡관까지 전부 빨갛게 뜬다.
+        var isAcceptable = forcedAngleDeg is { } forced
+            ? hasDeflectionSetting && EvaluateFitting(actual, forced, effective)
+            : acceptable is not null;
         var kind = isAcceptable ? BendResolutionKind.Standard : BendResolutionKind.Unresolved;
         var residual = actual - selectedAngle;
         var fitting = settings.Fittings.Find(node.MaxDiameterMm, selectedAngle, Material, settings.ActiveBendConnection);

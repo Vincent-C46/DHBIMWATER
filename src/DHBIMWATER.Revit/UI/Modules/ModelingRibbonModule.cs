@@ -19,7 +19,10 @@ namespace DHBIMWATER.Revit.UI.Modules
             PushButtonData pipeLayoutBtn = new PushButtonData("PipeLayoutCommand", "밸브실\n배관", Assembly.GetExecutingAssembly().Location, RevitCommandType<PipeLayoutCommand>.FullName);
 
             PushButtonData coordinateLinkBtn = new PushButtonData("CoordinateLinkCommand", "기준점\n통합 링크", Assembly.GetExecutingAssembly().Location, RevitCommandType<CoordinateLinkCommand>.FullName);
-
+            PushButtonData placementStationBtn = new PushButtonData("PlacementStationCommand", "측점 편집", Assembly.GetExecutingAssembly().Location, RevitCommandType<PlacementStationCommand>.FullName)
+            {
+                ToolTip = "배치된 관로·가변패밀리의 시점·종점 측점을 표에서 고치고, 바뀐 것만 다시 계산합니다."
+            };
 
             reservoirBtn.LargeImage = RibbonButtonImages.GetIcon("water-tap.png");
             pumpingStationBtn.LargeImage = RibbonButtonImages.GetIcon("pump.png");
@@ -28,6 +31,7 @@ namespace DHBIMWATER.Revit.UI.Modules
             valveRoomBtn.LargeImage = RibbonButtonImages.GetIcon("valve.png");
             pipeLayoutBtn.LargeImage = RibbonButtonImages.GetIcon("pipe.png");
             coordinateLinkBtn.LargeImage = RibbonButtonImages.GetIcon("link.png");
+            placementStationBtn.LargeImage = RibbonButtonImages.GetIcon("link.png");
 
             return
             [
@@ -37,8 +41,8 @@ namespace DHBIMWATER.Revit.UI.Modules
                 panel.AddItem(valveRoomBtn),
                 panel.AddItem(pipeLayoutBtn),
                 panel.AddItem(coordinateLinkBtn),
+                panel.AddItem(placementStationBtn),
             ];
         }
     }
 }
-    

@@ -98,6 +98,21 @@ public sealed class PipeTopologyBuilderTests
 public sealed class PipeTopologyBuilderSnapPriorityTests
 {
     [Fact]
+    public void FindSnapPoint_PrefersEndpointOverCloserIntersection()
+    {
+        var network = new PipeNetwork();
+        network.AddSegment(new Point2D(-1000, 0), new Point2D(1000, 0));
+        network.AddSegment(new Point2D(0, 0), new Point2D(0, 1000));
+        network.AddSegment(new Point2D(90, 10), new Point2D(90, 1000));
+
+        var result = network.FindSnapPoint(new Point2D(10, 0), PipeSnapMode.Endpoint | PipeSnapMode.Intersection);
+
+        Assert.NotNull(result);
+        Assert.Equal(PipeSnapKind.Endpoint, result.Value.Kind);
+        Assert.Equal(new Point2D(90, 10), result.Value.Point);
+    }
+
+    [Fact]
     public void FindSnapPoint_PrefersEndpointOverCloserNearestPoint()
     {
         var network = SingleHorizontalEdge();

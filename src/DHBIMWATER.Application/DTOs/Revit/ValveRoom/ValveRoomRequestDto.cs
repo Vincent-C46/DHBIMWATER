@@ -1,3 +1,5 @@
+using DHBIMWATER.Core.Geometry;
+
 namespace DHBIMWATER.Application.DTOs.Revit.ValveRoom;
 
 /// <summary>독립 밸브실 구조물 생성에 필요한 치수는 mm, 공유좌표는 m, 도북각은 degree 단위이다.
@@ -23,6 +25,8 @@ public record ValveRoomRequestDto
     public double InnerWidth { get; init; }
     public double InnerLength { get; init; }
     public double InnerHeight { get; init; }
+    /// <summary>드레인 피트 목록. 비어 있으면 피트를 만들지 않는다.</summary>
+    public IReadOnlyList<DrainPitDefinition> DrainPits { get; init; } = Array.Empty<DrainPitDefinition>();
     /// <summary>RoomType이 "공기밸브실"일 때만 값이 채워진다.</summary>
     public AirValveRoomSpecDto? AirSpec { get; init; }
     /// <summary>RoomType이 "이토밸브실"일 때만 값이 채워진다.</summary>

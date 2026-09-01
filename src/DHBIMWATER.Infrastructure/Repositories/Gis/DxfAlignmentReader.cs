@@ -14,7 +14,7 @@ public sealed class DxfAlignmentReader : IAlignmentSourceReader
     {
         if (!File.Exists(filePath)) throw new FileNotFoundException("DXF 파일을 찾을 수 없습니다.", filePath);
         var entities = DxfGeometryReader.Read(filePath);
-        var features = entities.Select((x, i) => new PipeAlignment(x.Vertices, string.Empty, 0, Path.GetFileName(filePath), (i + 1).ToString(), x.Attributes)).ToList();
+        var features = entities.Select((x, i) => new PipeAlignment(x.Vertices, string.Empty, 0, Path.GetFullPath(filePath), (i + 1).ToString(), x.Attributes)).ToList();
         var warnings = features.Count == 0 ? new List<string> { "POLYLINE 또는 LWPOLYLINE 엔티티를 찾지 못했습니다. DWG 파일이 아닌 ASCII DXF인지 확인하세요." } : new List<string>();
         var extent = features.SelectMany(x => x.Vertices).ToList();
         var fields = features.SelectMany(x => x.Attributes.Keys).Distinct(StringComparer.OrdinalIgnoreCase)

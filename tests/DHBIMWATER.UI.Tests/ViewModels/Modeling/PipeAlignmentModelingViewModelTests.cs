@@ -1,8 +1,11 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Collections.ObjectModel;
 using DHBIMWATER.Application.DTOs.Gis;
 using DHBIMWATER.Application.UseCases.Gis;
+using DHBIMWATER.Core.Geometry;
+using DHBIMWATER.Core.Gis;
 using DHBIMWATER.UI.ViewModels.Modeling;
 using Xunit;
 
@@ -67,6 +70,93 @@ public sealed class PipeAlignmentModelingViewModelTests
         Assert.Contains("겹침 1건", summary);
     }
 
+    [Fact]
+    public void OutputMode_DirectShapeAndAdaptiveUseStraightAndBendSettings()
+    {
+        var vm = CreateWithoutServices();
+
+        vm.OutputMode = PipeAlignmentOutputMode.DirectShape;
+        Assert.True(vm.UsesStraightAndBendSettings);
+
+        vm.OutputMode = PipeAlignmentOutputMode.Adaptive;
+        Assert.True(vm.UsesStraightAndBendSettings);
+
+        vm.OutputMode = PipeAlignmentOutputMode.PipingSystem;
+        Assert.False(vm.UsesStraightAndBendSettings);
+    }
+
+    [Fact]
+    public void ApplyPreviewRetained_ShowsCancelledFinalModelAndKeepsWarnings()
+    {
+        var vm = CreateWithoutServices();
+        typeof(PipeAlignmentModelingViewModel).GetField("<ResultWarnings>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(vm, new System.Collections.ObjectModel.ObservableCollection<string>());
+
+        vm.ApplyPreviewRetained(new PipeAlignmentModelingResult(PipeAlignmentOutputMode.DirectShape, 3, 1, new[] { "미리보기 경고" }));
+
+        Assert.Equal("미리보기 완료 · 최종 생성 취소", vm.PhaseText);
+        Assert.Contains("선형 미리보기 3개 유지", vm.ResultSummary);
+        Assert.Equal(new[] { "미리보기 경고" }, vm.ResultWarnings);
+        Assert.True(vm.HasResult);
+    }
+
+    [Fact]
+    public void ApplyPreviewReady_ShowsInlineConfirmationAndFinalResultClearsIt()
+    {
+        var vm = CreateWithoutServices();
+        typeof(PipeAlignmentModelingViewModel).GetField("<ResultWarnings>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(vm, new System.Collections.ObjectModel.ObservableCollection<string>());
+
+        vm.ApplyPreviewReady(new PipeAlignmentModelingResult(PipeAlignmentOutputMode.DirectShape, 4, 1, new[] { "미리보기 경고" }));
+
+        Assert.True(vm.IsAwaitingPreviewConfirm);
+        Assert.Equal("선형 미리보기 확인 대기", vm.PhaseText);
+        Assert.Contains("선형 미리보기 4개", vm.PreviewConfirmMessage);
+        Assert.Equal(new[] { "미리보기 경고" }, vm.ResultWarnings);
+
+        vm.ApplyResult(new PipeAlignmentModelingResult(PipeAlignmentOutputMode.DirectShape, 8, 2, Array.Empty<string>()));
+
+        Assert.False(vm.IsAwaitingPreviewConfirm);
+    }
+
+    [Fact]
+    public void DiameterMappingRow_DefaultPipeKindIsNotUserModified()
+    {
+        var row = new DiameterMappingRow { RawValue = "DN300", KindRawValue = "(값 없음)", FileName = "sample.shp", FileKey = "sample", Count = 1 };
+
+        row.InitializeValues(Array.Empty<DiameterMappingOption>(), 300, PipeKindCatalog.Water1, isUserModified: false, isDefaultPipeKind: true);
+
+        Assert.False(row.IsUserModified);
+        Assert.True(row.IsDefaultPipeKind);
+        Assert.Equal(PipeKindCatalog.Water1, row.PipeKind);
+    }
+
+    [Fact]
+    public void RebuildDiameterMappings_ExcelVertexDiameterOnly_DoesNotAddMissingValueRow()
+    {
+        var feature = new PipeAlignment(
+            [new Point3D(0, 0, 0), new Point3D(1, 0, 0)], string.Empty, 0, "sample.xlsx", "1",
+            new Dictionary<string, string>(), VertexDiameterRawValues: ["DN300", "DN300"]);
+        var read = new ShapefileReadResult([feature], [], ShapefileExtent.Empty, null, null, string.Empty, 1, 2, 1, [], null);
+        var mapping = new ExcelAlignmentMapping("Sheet1", 1, 2, 0, 1, 2, null, VertexDiameterColumnIndex: 3);
+        var item = new PipeAlignmentSourceFileItem
+        {
+            Path = "sample.xlsx", SheetName = "Sheet1", ExcelMapping = mapping, ReadResult = read,
+            DiameterField = PipeAlignmentSourceFileItem.ManualFieldOption, KindField = PipeAlignmentSourceFileItem.ManualFieldOption
+        };
+        var vm = CreateForMappingTest(item);
+
+        typeof(PipeAlignmentModelingViewModel).GetMethod("RebuildDiameterMappings", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, null);
+
+        var row = Assert.Single(vm.DiameterMappings);
+        Assert.Equal("DN300", row.RawValue);
+        Assert.Equal(2, row.Count);
+    }
+
+    [Fact]
+    public void GuessDiameterField_NormalizesExcelHeaderWhitespace()
+        => Assert.Equal("호칭지름\n(DN)", AlignmentAttributeParser.GuessDiameterField(["호칭지름\n(DN)"]));
+
     private static PipeAlignmentModelingViewModel CreateWithoutServices()
     {
         var vm = (PipeAlignmentModelingViewModel)RuntimeHelpers.GetUninitializedObject(typeof(PipeAlignmentModelingViewModel));
@@ -74,4 +164,18 @@ public sealed class PipeAlignmentModelingViewModelTests
             .SetValue(vm, new Stopwatch());
         return vm;
     }
+
+    private static PipeAlignmentModelingViewModel CreateForMappingTest(PipeAlignmentSourceFileItem item)
+    {
+        var vm = CreateWithoutServices();
+        SetAutoProperty(vm, "Files", new ObservableCollection<PipeAlignmentSourceFileItem> { item });
+        SetAutoProperty(vm, "DiameterMappings", new ObservableCollection<DiameterMappingRow>());
+        SetAutoProperty(vm, "PreflightIssues", new ObservableCollection<PreflightIssue>());
+        SetAutoProperty(vm, "DiameterOptions", new[] { new DiameterMappingOption("(지정 안 함)", null), new DiameterMappingOption("DN300", 300) });
+        typeof(PipeAlignmentModelingViewModel).GetField("_settings", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(vm, BendSettings.Default);
+        return vm;
+    }
+
+    private static void SetAutoProperty<T>(PipeAlignmentModelingViewModel vm, string propertyName, T value)
+        => typeof(PipeAlignmentModelingViewModel).GetField($"<{propertyName}>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(vm, value);
 }

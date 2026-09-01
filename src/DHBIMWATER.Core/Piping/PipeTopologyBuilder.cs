@@ -3,10 +3,10 @@ using DHBIMWATER.Core.Geometry;
 namespace DHBIMWATER.Core.Piping;
 
 [Flags]
-public enum PipeSnapMode { None = 0, Endpoint = 1, Midpoint = 2, Quadrant = 4, Nearest = 8, Intersection = 16 }
+public enum PipeSnapMode { None = 0, Endpoint = 1, Midpoint = 2, Quadrant = 4, Nearest = 8, Intersection = 16, Perpendicular = 32 }
 
 /// <summary>스냅된 점 하나의 종류. 우선순위 비교와 표식·툴팁 표시에 함께 쓴다.</summary>
-public enum PipeSnapKind { Intersection, Endpoint, Midpoint, Quadrant, Nearest }
+public enum PipeSnapKind { Intersection, Endpoint, Midpoint, Quadrant, Perpendicular, Nearest }
 
 public readonly record struct PipeSnapResult(Point2D Point, PipeSnapKind Kind, double Distance);
 
@@ -19,7 +19,7 @@ public sealed class PipeTopologyBuilder
 
     public PipeTopologyBuilder(PipeNetwork network) => _network = network;
 
-    public PipeSnapResult? FindSnapPoint(Point2D point, PipeSnapMode modes)
+    public PipeSnapResult? FindSnapPoint(Point2D point, PipeSnapMode modes, Point2D? from = null)
     {
         var candidates = new List<PipeSnapResult>();
         if (modes.HasFlag(PipeSnapMode.Endpoint))
@@ -37,6 +37,12 @@ public sealed class PipeTopologyBuilder
                 var t = Math.Clamp(Segment2D.ParameterOnSegment(point, start, end), 0, 1);
                 AddCandidate(candidates, point, start, end, t, PipeSnapKind.Nearest);
             }
+            // 직교점: 커서가 아니라 그리기 기준점(from)에서 엣지에 내린 수선의 발. 세그먼트 범위 밖이면 후보 제외.
+            if (modes.HasFlag(PipeSnapMode.Perpendicular) && from is not null)
+            {
+                var t = Segment2D.ParameterOnSegment(from, start, end);
+                if (t is >= 0 and <= 1) AddCandidate(candidates, point, start, end, t, PipeSnapKind.Perpendicular);
+            }
         }
         return candidates
             .Where(x => x.Distance <= SnapTolerance)
@@ -48,11 +54,12 @@ public sealed class PipeTopologyBuilder
 
     public static int Rank(PipeSnapKind kind) => kind switch
     {
-        PipeSnapKind.Intersection => 0,
-        PipeSnapKind.Endpoint => 1,
+        PipeSnapKind.Endpoint => 0,
+        PipeSnapKind.Intersection => 1,
         PipeSnapKind.Midpoint => 2,
         PipeSnapKind.Quadrant => 3,
-        _ => 4,
+        PipeSnapKind.Perpendicular => 4,
+        _ => 5,
     };
 
     private static PipeSnapKind NodeKindOf(PipeNode node)

@@ -104,8 +104,39 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
                     CategorySet categorySet = RevitParameterMapper.ToCategorySet(def.Categories, doc);
                     Binding binding = RevitParameterMapper.ToBinding(def.BindingType, categorySet, app);
 
-                    if (!IsAlreadyBound(doc, def))
+                    // 동명 매개변수가 이미 다른 카테고리로 묶여 있어도 이번 카테고리를 반드시 더한다.
+                    // 이름만 보고 건너뛰면 DHBoost 등 외부가 먼저 만든 동명 매개변수 탓에
+                    // 일반 모델 바인딩이 빠지고 값 기록이 통째로 실패한다.
+                    (Definition? boundDef, ElementBinding? boundBinding) = FindExistingBinding(doc, def.Name);
+
+                    if (boundDef == null)
+                    {
                         bindingMap.Insert(sharedDef, binding, groupType);
+                    }
+                    else
+                    {
+                        CategorySet merged = app.Create.NewCategorySet();
+                        if (boundBinding != null)
+                        {
+                            foreach (Category existingCategory in boundBinding.Categories)
+                                merged.Insert(existingCategory);
+                        }
+
+                        bool added = false;
+                        foreach (Category wanted in categorySet)
+                        {
+                            if (merged.Contains(wanted)) continue;
+                            merged.Insert(wanted);
+                            added = true;
+                        }
+
+                        // 빠진 카테고리 없으면 그대로 둔다. 괜한 ReInsert 안 한다.
+                        if (added)
+                        {
+                            Binding mergedBinding = RevitParameterMapper.ToBinding(def.BindingType, merged, app);
+                            bindingMap.ReInsert(boundDef, mergedBinding, groupType);
+                        }
+                    }
                     #endregion
                 }
             }
@@ -116,15 +147,18 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             }
         }
 
-        private static bool IsAlreadyBound(Document doc, SharedParameterDefinition def)
+        // 이름 같은 정의가 이미 바인딩됐으면 그 정의와 바인딩을 준다. 없으면 (null, null).
+        // ReInsert는 바인딩맵에 들어 있는 그 Definition 객체를 요구한다. 새로 만든 sharedDef 아님.
+        private static (Definition? Definition, ElementBinding? Binding) FindExistingBinding(Document doc, string name)
         {
             DefinitionBindingMapIterator iterator = doc.ParameterBindings.ForwardIterator();
+            iterator.Reset();
             while (iterator.MoveNext())
             {
-                if (iterator.Key is Definition existing && existing.Name == def.Name)
-                    return true;
+                if (iterator.Key is Definition existing && existing.Name == name)
+                    return (existing, iterator.Current as ElementBinding);
             }
-            return false;
+            return (null, null);
         }
 
     }

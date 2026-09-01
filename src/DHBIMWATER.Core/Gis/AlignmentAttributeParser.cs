@@ -19,13 +19,14 @@ public static class AlignmentAttributeParser
     // "밸브실_2" 같은 일련번호를 관경으로 오인하지 않기 위한 최소 방어선이다.
     private static readonly Regex SeparatedDiameter = new("^(?<kind>.*?)[\\s_-]+(?<dia>\\d{2,}(?:\\.\\d+)?)\\s*(?:mm|밀리)?$", RegexOptions.Compiled);
     private static readonly Regex NumericDiameter = new("^[Dd]?(?<dia>\\d+(?:\\.\\d+)?)\\s*(?:mm|밀리)?$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex NominalDiameter = new("^DN\\s*(?<dia>\\d+(?:\\.\\d+)?)\\s*(?:mm|밀리)?$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     // 관종이 뒤에 붙는 형식(예: "D300주철", "300 PVC"). mm·밀리 단위 표기는 관종이 아니므로 제외한다.
     private static readonly Regex SuffixedKind = new("^[Dd]?(?<dia>\\d+(?:\\.\\d+)?)[\\s_-]*(?<kind>(?!mm$|밀리$)[가-힣A-Za-z][가-힣A-Za-z0-9]*)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     // PT_PL_PDM / PIPE_KN_NM은 국가상수도정보시스템 납품 SHP의 실제 필드명이다(DBF 확인).
     // 해당 데이터의 관경 값은 "100"과 "300.00"이 한 필드에 섞여 들어온다 — 아래 패턴이 둘 다 받는다.
     private static readonly HashSet<string> DiameterFields = new(StringComparer.OrdinalIgnoreCase)
         // "직경"은 엑셀 좌표표 헤더에서 가장 흔한 표기다(docs/44). SHP·DWG에도 같은 이름이 있으면 동일하게 자동 선택된다.
-        { "Diameter", "DIAMETER", "DIA", "PIP_DIA", "PIPE_DIA", "PT_PL_PDM", "직경", "구경", "관경", "호구경", "HOGU" };
+        { "Diameter", "DIAMETER", "DIA", "PIP_DIA", "PIPE_DIA", "PT_PL_PDM", "직경", "구경", "관경", "호구경", "호칭지름", "호칭지름(DN)", "호칭경", "DN", "HOGU" };
     private static readonly HashSet<string> KindFields = new(StringComparer.OrdinalIgnoreCase)
         { "KIND", "MTRL", "MATERIAL", "PIPE_KIND", "PIPE_KN_NM", "관종", "재질", "재료" };
 
@@ -33,6 +34,9 @@ public static class AlignmentAttributeParser
     {
         if (string.IsNullOrWhiteSpace(raw)) return new DiameterParseResult(false, 0, null);
         var value = raw.Trim();
+        // DN300은 설계 산출물의 일반 표기. D300 전용 기존 패턴과 분리한다.
+        var nominal = NominalDiameter.Match(value);
+        if (nominal.Success) return new DiameterParseResult(true, Parse(nominal), null);
         // 순수 숫자("300", "D300", "300mm")를 먼저 걸러야 뒤의 관종 분리 패턴이 오작동하지 않는다.
         var numeric = NumericDiameter.Match(value);
         if (numeric.Success) return new DiameterParseResult(true, Parse(numeric), null);
@@ -67,8 +71,15 @@ public static class AlignmentAttributeParser
         return new KindResolution(candidates.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)), false);
     }
 
-    public static string? GuessDiameterField(IEnumerable<string> fieldNames) => fieldNames.FirstOrDefault(DiameterFields.Contains);
-    public static string? GuessKindField(IEnumerable<string> fieldNames) => fieldNames.FirstOrDefault(KindFields.Contains);
+    public static string? GuessDiameterField(IEnumerable<string> fieldNames) => GuessField(fieldNames, DiameterFields);
+    public static string? GuessKindField(IEnumerable<string> fieldNames) => GuessField(fieldNames, KindFields);
+    public static string NormalizeHeader(string? value) => string.Concat((value ?? string.Empty).Where(x => !char.IsWhiteSpace(x))).ToUpperInvariant();
+
+    private static string? GuessField(IEnumerable<string> fieldNames, HashSet<string> candidates)
+    {
+        var normalizedCandidates = new HashSet<string>(candidates.Select(NormalizeHeader), StringComparer.OrdinalIgnoreCase);
+        return fieldNames.FirstOrDefault(name => normalizedCandidates.Contains(NormalizeHeader(name)));
+    }
 
     private static double Parse(Match match) => double.Parse(match.Groups["dia"].Value, CultureInfo.InvariantCulture);
     private static string? NormalizeKind(string kind)

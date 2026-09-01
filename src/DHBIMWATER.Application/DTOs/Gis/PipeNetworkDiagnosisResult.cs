@@ -25,10 +25,13 @@ public sealed record PipeNetworkNodeReport(
 /// <param name="KindCounts">NodeKind 이름 → 개수.</param>
 /// <param name="Attention">Unresolved + TooManyBranches + EndPoint + 치수 부정합 절점.</param>
 /// <param name="SizeConflictCount">t &lt; T 인 곡관 수. 0보다 크면 호출부가 경고 다이얼로그를 띄운다.</param>
+/// <param name="BendAngleCounts">표준각도(°) → 배치 예정 곡관 수. Standard 판정 절점만 센다.</param>
 public sealed record PipeNetworkDiagnosisResult(
     int NodeCount, int EdgeCount,
     IReadOnlyDictionary<string, int> KindCounts,
     int BendStandardCount, int BendNoneCount, int BendUnresolvedCount,
+    int BendSuppressedCount,
     int SizeConflictCount,
+    IReadOnlyDictionary<double, int> BendAngleCounts,
     IReadOnlyList<PipeNetworkNodeReport> Attention,
     IReadOnlyList<string> Warnings);

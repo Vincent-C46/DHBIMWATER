@@ -56,14 +56,27 @@ public static class PipeSegmentPlan
 
         foreach (var span in ordered)
             if (span.StartMm < -Tolerance || span.EndMm > edgeLengthMm + Tolerance)
-                errors.Add(FormattableString.Invariant(
-                    $"부속 점유 구간({span.StartMm:N0}~{span.EndMm:N0}mm)이 배관 길이(0~{edgeLengthMm:N0}mm)를 벗어납니다. 부속을 선 가운데 쪽으로 옮기세요."));
+            {
+                var spanWidthMm = span.EndMm - span.StartMm;
+                if (spanWidthMm > edgeLengthMm + Tolerance)
+                    errors.Add(FormattableString.Invariant(
+                        $"부속 폭 {spanWidthMm:N0}mm가 배관 {edgeLengthMm:N0}mm보다 깁니다. 배관을 길게 그리거나 부속을 지우세요."));
+                else
+                {
+                    var overflowMm = Math.Max(-span.StartMm, span.EndMm - edgeLengthMm);
+                    errors.Add(FormattableString.Invariant(
+                        $"부속이 배관 밖으로 {overflowMm:N0}mm 나갑니다(배관 {edgeLengthMm:N0}mm). 부속을 안쪽으로 옮기세요."));
+                }
+            }
 
         // 겹침은 클램프하기 전 원본 좌표로 잡아야 어디가 문제인지 알려줄 수 있다.
         for (var i = 1; i < ordered.Count; i++)
             if (ordered[i].StartMm < ordered[i - 1].EndMm - Tolerance)
+            {
+                var overlapMm = ordered[i - 1].EndMm - ordered[i].StartMm;
                 errors.Add(FormattableString.Invariant(
-                    $"부속이 차지하는 구간이 겹칩니다({ordered[i - 1].StartMm:N0}~{ordered[i - 1].EndMm:N0}mm ↔ {ordered[i].StartMm:N0}~{ordered[i].EndMm:N0}mm). 부속을 서로 떨어뜨리거나 배관을 더 길게 그리세요."));
+                    $"부속 2개가 {overlapMm:N0}mm 겹칩니다. 부속을 떨어뜨리거나 배관을 길게 그리세요."));
+            }
 
         var cursor = 0.0;
         foreach (var span in ordered)
@@ -96,7 +109,7 @@ public static class PipeSegmentPlan
             if (remainder < minSegmentMm)
             {
                 errors.Add(FormattableString.Invariant(
-                    $"남은 {remainder:N1}mm 구간은 최소 단관 길이({minSegmentMm:N0}mm)보다 짧습니다. 연결이 끊기지 않도록 선 길이나 부속 위치를 조정하세요."));
+                    $"관 조각이 {remainder:N0}mm밖에 안 됩니다(최소 {minSegmentMm:N0}mm). 배관 길이나 부속 위치를 조정하세요."));
                 return;
             }
             segments.Add(new PipeSegmentPlacement(PipeSegmentKind.Short, head + remainder / 2, remainder));

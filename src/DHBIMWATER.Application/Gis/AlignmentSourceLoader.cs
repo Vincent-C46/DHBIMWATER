@@ -29,14 +29,16 @@ public sealed class AlignmentSourceLoader
             // 방향 반전 대상. 레코드번호는 파일(엑셀은 시트) 단위로만 유일하므로 파일 루프 안에서 만든다.
             var reversed = file.ReversedRecordNumbers is { Count: > 0 } ? new HashSet<string>(file.ReversedRecordNumbers, StringComparer.Ordinal) : null;
             var failed = 0;
+            var kindFallbackCount = 0;
             string? example = null;
             var unknownKinds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var feature in read.Features)
             {
                 if (layers is not null && (!feature.Attributes.TryGetValue("LAYER", out var layer) || !layers.Contains(layer))) continue;
                 var rawDiameter = ReadValue(feature, file.DiameterField);
+                var rawKind = ReadValue(feature, file.KindField);
                 var parsed = AlignmentAttributeParser.ParseDiameter(rawDiameter);
-                var mappingKey = DiameterMappingKey.Of(rawDiameter);
+                var mappingKey = DiameterMappingKey.Of(rawDiameter, rawKind);
                 ResolvedPipeSpecKey? mapped = null;
                 var hasMapping = file.DiameterMappings?.TryGetValue(mappingKey, out mapped) == true;
                 // DN과 등급은 독립적으로 확정된다. DN을 "지정 안 함"으로 둔 행에서도 등급 지정은 살아 있어야 한다.
@@ -45,9 +47,14 @@ public sealed class AlignmentSourceLoader
                 var normalizedMappedKind = hasMappedKind ? PipeKindCatalog.Normalize(mapped!.PipeKind) : null;
                 var resolvedKind = hasMappedKind
                     ? new KindResolution(normalizedMappedKind ?? mapped!.PipeKind!, normalizedMappedKind is not null)
-                    : AlignmentAttributeParser.ResolveKind(ReadValue(feature, file.KindField), file.PipeKind, parsed.Kind);
+                    : AlignmentAttributeParser.ResolveKind(rawKind, file.PipeKind, parsed.Kind);
                 var kind = resolvedKind.Kind;
-                if (!resolvedKind.IsNormalized && kind is not null) unknownKinds.Add(kind);
+                if (!resolvedKind.IsNormalized)
+                {
+                    if (kind is not null) unknownKinds.Add(kind);
+                    kind = PipeKindCatalog.Water1;
+                    kindFallbackCount++;
+                }
                 double diameterMm; bool diameterResolved;
                 if (hasMappedDiameter) { diameterMm = mapped!.DiameterMm!.Value; diameterResolved = true; }
                 else if (parsed.Success) { diameterMm = parsed.DiameterMm; diameterResolved = true; }
@@ -59,8 +66,24 @@ public sealed class AlignmentSourceLoader
                     example ??= rawDiameter;
                 }
                 // 정점 순서 반전 = 시작점·끝점 교환. 좌표값은 그대로 두므로 진단·모델링이 같은 방향을 공유한다.
-                var vertices = reversed?.Contains(feature.RecordNumber) == true ? feature.Vertices.Reverse().ToList() : feature.Vertices;
-                alignments.Add(feature with { PipeKind = kind, DiameterMm = diameterMm, Vertices = vertices });
+                var vertexDiameters = ResolveVertexDiameters(feature, file.DiameterMappings, rawKind);
+                var isReversed = reversed?.Contains(feature.RecordNumber) == true;
+                var vertices = isReversed ? feature.Vertices.Reverse().ToList() : feature.Vertices;
+                alignments.Add(feature with
+                {
+                    PipeKind = kind,
+                    DiameterMm = diameterMm,
+                    Vertices = vertices,
+                    VertexBendKinds = isReversed ? feature.VertexBendKinds?.Reverse().ToList() : feature.VertexBendKinds,
+                    // DN은 정점 자체가 아니라 "이 정점부터 시작하는 구간" 값이다. 단순 Reverse는 경계를 한 구간 민다.
+                    VertexDiameterMm = isReversed ? ReverseSegmentStartValues(vertexDiameters) : vertexDiameters,
+                    VertexDiameterRawValues = isReversed ? ReverseSegmentStartValues(feature.VertexDiameterRawValues) : feature.VertexDiameterRawValues,
+                    VertexStationTexts = isReversed ? feature.VertexStationTexts?.Reverse().ToList() : feature.VertexStationTexts,
+                    VertexStationM = isReversed ? feature.VertexStationM?.Reverse().ToList() : feature.VertexStationM
+                });
+                var distinctVertexDn = vertexDiameters?.Where(x => x is > 0).Select(x => x!.Value).Distinct().ToList() ?? [];
+                if (distinctVertexDn.Count > 1)
+                    warnings.Add($"{Path.GetFileName(feature.SourceFile)} 레코드 {feature.RecordNumber}: DN이 구간마다 다릅니다({string.Join(", ", distinctVertexDn.Select(x => $"DN{x:0.##}"))}). 구간별 DN으로 배치하며, 변경 지점의 이경관(리듀서)은 배치하지 않습니다.");
             }
             if (failed > 0)
             {
@@ -70,10 +93,35 @@ public sealed class AlignmentSourceLoader
             }
             if (warnOnUnknownPipeKinds && unknownKinds.Count > 0)
                 warnings.Add($"{Path.GetFileName(file.FilePath)}: 고정 관종 목록에 없는 값({string.Join(", ", unknownKinds)}). 입력 파일 탭에서 관종을 선택하세요.");
+            if (warnOnUnknownPipeKinds && kindFallbackCount > 0)
+                warnings.Add($"{Path.GetFileName(file.FilePath)}: 등급을 해석하지 못한 레코드 {kindFallbackCount}건은 상수 1종관으로 배치했습니다. 두께·관저고가 실제와 다를 수 있습니다.");
         }
         return new AlignmentLoadResult(alignments, unresolved, warnings);
     }
 
     private static string? ReadValue(PipeAlignment feature, string? field)
         => field is not null && feature.Attributes.TryGetValue(field, out var value) && !string.IsNullOrWhiteSpace(value) ? value : null;
+
+    private static IReadOnlyList<double?>? ResolveVertexDiameters(PipeAlignment feature, IReadOnlyDictionary<string, ResolvedPipeSpecKey>? mappings, string? kindRaw)
+    {
+        if (feature.VertexDiameterMm is null) return null;
+        return feature.VertexDiameterMm.Select((value, index) =>
+        {
+            var raw = feature.VertexDiameterRawValues is { Count: > 0 } && index < feature.VertexDiameterRawValues.Count
+                ? feature.VertexDiameterRawValues[index]
+                : null;
+            return raw is not null && mappings?.TryGetValue(DiameterMappingKey.Of(raw, kindRaw), out var mapped) == true && mapped.DiameterMm is > 0
+                ? mapped.DiameterMm
+                : value;
+        }).ToList();
+    }
+
+    private static IReadOnlyList<T>? ReverseSegmentStartValues<T>(IReadOnlyList<T>? source)
+    {
+        if (source is null || source.Count == 0) return source;
+        var reversed = new List<T>(source.Count);
+        for (var index = source.Count - 2; index >= 0; index--) reversed.Add(source[index]);
+        reversed.Add(source[0]);
+        return reversed;
+    }
 }

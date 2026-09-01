@@ -49,7 +49,7 @@ public sealed class DwgAlignmentReader : IAlignmentSourceReader
         {
             ["LAYER"] = entity.Layer.Name
         };
-        yield return new PipeAlignment(vertices, string.Empty, 0, Path.GetFileName(filePath), index.ToString(), attributes);
+        yield return new PipeAlignment(vertices, string.Empty, 0, Path.GetFullPath(filePath), index.ToString(), attributes);
     }
 
     private static ShapefileExtent Extent(IReadOnlyList<Point3D> vertices) => vertices.Count == 0 ? ShapefileExtent.Empty

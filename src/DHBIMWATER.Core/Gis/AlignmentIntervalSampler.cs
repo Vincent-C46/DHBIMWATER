@@ -21,6 +21,8 @@ public readonly record struct VertexTrim(double Before, double After)
 public static class AlignmentIntervalSampler
 {
     private const double Tolerance = 1e-9;
+    // 직선 병합 허용각 0.5°. 엑셀 mm 반올림 노이즈는 흡수하고 실제 곡관 각도는 보존한다.
+    private const double StraightSinTolerance = 8.7265354983739E-03;
 
     public static IReadOnlyList<AlignmentSamplePoint> SamplePoints(IReadOnlyList<Point3D> vertices, double interval)
     {
@@ -48,6 +50,17 @@ public static class AlignmentIntervalSampler
     public static IReadOnlyList<AlignmentSampleSegment> SampleSegments(IReadOnlyList<Point3D> vertices, double interval)
         => SampleSegments(vertices, interval, null);
 
+    /// <summary>직선상 중간 측점은 넘기고 DN 변경점·굴곡점에서만 6m 기준을 다시 시작한다.</summary>
+    public static IReadOnlyList<AlignmentSampleSegment> SampleSegments(PipeAlignment alignment, double interval, IReadOnlyList<VertexTrim>? trims = null)
+    {
+        ArgumentNullException.ThrowIfNull(alignment);
+        var requiredBreaks = new HashSet<int>();
+        for (var i = 1; i < alignment.Vertices.Count; i++)
+            if (Math.Abs(AlignmentDiameterProfile.DiameterAtVertex(alignment, i - 1) - AlignmentDiameterProfile.DiameterAtVertex(alignment, i)) > Tolerance)
+                requiredBreaks.Add(i);
+        return SampleSegmentsCore(alignment.Vertices, interval, trims, requiredBreaks, preserveAllVertices: false);
+    }
+
     /// <summary>
     /// 정점별 차감(<paramref name="trims"/>)을 반영해 분절한다. 차감 구간은 곡관·이형관 몸통 자리이므로
     /// 직관을 만들지 않고, 남은 직관은 절점이 아니라 <b>몸통 끝에서부터</b> 다시 interval로 끊는다.
@@ -56,6 +69,10 @@ public static class AlignmentIntervalSampler
     /// 인덱스 = <paramref name="vertices"/> 인덱스. null이거나 길이가 다르면 차감 없이 동작한다.
     /// </param>
     public static IReadOnlyList<AlignmentSampleSegment> SampleSegments(IReadOnlyList<Point3D> vertices, double interval, IReadOnlyList<VertexTrim>? trims)
+        => SampleSegmentsCore(vertices, interval, trims, null, preserveAllVertices: true);
+
+    private static IReadOnlyList<AlignmentSampleSegment> SampleSegmentsCore(IReadOnlyList<Point3D> vertices, double interval, IReadOnlyList<VertexTrim>? trims,
+        IReadOnlySet<int>? requiredBreaks, bool preserveAllVertices)
     {
         ValidateInterval(interval);
         var parts = BuildParts(vertices);
@@ -64,12 +81,18 @@ public static class AlignmentIntervalSampler
         var total = parts[^1].EndDistance;
         var excluded = BuildExclusions(vertices, trims, total);
 
-        // 분절 경계 = 절점 ∪ 차감 구간의 양 끝 ∪ 각 경계부터 다시 잰 interval 배수 ∪ 시작/끝점.
-        // 간격은 폴리라인 전체 누적거리가 아니라 경계마다 리셋한다. 전체 누적거리로 재면 앞 구간의
-        // 잔여 길이가 다음 구간으로 전파돼, 절점도 없는 위치에서 임의 길이로 끊긴다.
-        // 절점을 경계에 포함하지 않으면 코너를 가로지르는 직선 현이 생겨 도면 형상과 달라진다.
+        // 경계: 굴곡점·필수점·차감 끝. 같은 직선 측점은 6m 흐름 유지.
         var anchors = new List<double> { 0d, total };
-        foreach (var part in parts) anchors.Add(part.EndDistance);
+        if (preserveAllVertices)
+        {
+            foreach (var part in parts) anchors.Add(part.EndDistance);
+        }
+        else
+        {
+            for (var i = 0; i < parts.Count - 1; i++)
+                if (ChangesDirection(parts[i], parts[i + 1])) anchors.Add(parts[i].EndDistance);
+            AddRequiredBreaks(vertices, requiredBreaks, anchors);
+        }
         foreach (var range in excluded) { anchors.Add(range.Start); anchors.Add(range.End); }
 
         anchors.Sort();
@@ -144,6 +167,32 @@ public static class AlignmentIntervalSampler
         var part = parts.First(x => distance <= x.EndDistance + 1e-9);
         var local = Math.Clamp((distance - part.StartDistance) / part.Length, 0d, 1d);
         return new Point3D(part.Start.X + (part.End.X - part.Start.X) * local, part.Start.Y + (part.End.Y - part.Start.Y) * local, part.Start.Z + (part.End.Z - part.Start.Z) * local);
+    }
+
+    private static bool ChangesDirection(Part first, Part second)
+    {
+        var ax = (first.End.X - first.Start.X) / first.Length;
+        var ay = (first.End.Y - first.Start.Y) / first.Length;
+        var az = (first.End.Z - first.Start.Z) / first.Length;
+        var bx = (second.End.X - second.Start.X) / second.Length;
+        var by = (second.End.Y - second.Start.Y) / second.Length;
+        var bz = (second.End.Z - second.Start.Z) / second.Length;
+        var dot = ax * bx + ay * by + az * bz;
+        var cx = ay * bz - az * by;
+        var cy = az * bx - ax * bz;
+        var cz = ax * by - ay * bx;
+        return dot <= 0d || Math.Sqrt(cx * cx + cy * cy + cz * cz) > StraightSinTolerance;
+    }
+
+    private static void AddRequiredBreaks(IReadOnlyList<Point3D> vertices, IReadOnlySet<int>? requiredBreaks, ICollection<double> anchors)
+    {
+        if (requiredBreaks is null || requiredBreaks.Count == 0) return;
+        var distance = 0d;
+        for (var i = 1; i < vertices.Count; i++)
+        {
+            distance += vertices[i - 1].DistanceTo(vertices[i]);
+            if (requiredBreaks.Contains(i)) anchors.Add(distance);
+        }
     }
 
     private static List<Part> BuildParts(IReadOnlyList<Point3D> vertices)

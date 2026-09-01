@@ -53,7 +53,18 @@ internal sealed class PipeLayoutRequestHandler : IExternalEventHandler
         {
             if (requestId == PipeLayoutRequestId.PickOutline) OutlinePicked?.Invoke(null);
             if (requestId == PipeLayoutRequestId.CreateModel) ModelCreationCompleted?.Invoke(false, ex.Message);
-            TaskDialog.Show(requestId == PipeLayoutRequestId.PickOutline ? "외곽 벽체 선택 오류" : "배관 생성 오류", ex.Message);
+            if (requestId == PipeLayoutRequestId.CreateModel)
+            {
+                var lines = ex.Message.Split([Environment.NewLine], StringSplitOptions.None);
+                var dialog = new TaskDialog("배관 생성 오류")
+                {
+                    MainInstruction = lines[0],
+                    MainContent = string.Join(Environment.NewLine, lines.Skip(1))
+                };
+                dialog.Show();
+            }
+            else
+                TaskDialog.Show("외곽 벽체 선택 오류", ex.Message);
         }
     }
 

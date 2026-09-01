@@ -100,7 +100,7 @@ public class PipeSegmentPlanTests
 
         var segment = Assert.Single(result.Segments);
         Assert.Equal(PipeSegmentKind.Straight, segment.Kind);
-        Assert.Contains(result.Errors, x => x.Contains("최소 단관 길이"));
+        Assert.Contains(result.Errors, x => x.Contains("관 조각이"));
     }
 
     [Fact]
@@ -127,10 +127,19 @@ public class PipeSegmentPlanTests
         var result = PipeSegmentPlan.Build(5000, [new OccupiedSpan(-1000, 1000), new OccupiedSpan(4000, 9000)]);
 
         Assert.Equal(2, result.Errors.Count);
-        Assert.All(result.Errors, x => Assert.Contains("벗어납니다", x));
+        Assert.All(result.Errors, x => Assert.Contains("배관 밖으로", x));
         var segment = Assert.Single(result.Segments);
         Assert.Equal(3000, segment.LengthMm);
         Assert.Equal(2500, segment.CenterMm);
+    }
+
+    [Fact]
+    public void Fittings_wider_than_edge_are_reported_separately_from_overlap()
+    {
+        var result = PipeSegmentPlan.Build(600, [new OccupiedSpan(-370, 600), new OccupiedSpan(0, 970)]);
+
+        Assert.Equal(2, result.Errors.Count(x => x.Contains("보다 깁니다")));
+        Assert.Single(result.Errors, x => x.Contains("겹칩니다"));
     }
 
     [Theory]

@@ -51,11 +51,13 @@ public static class BendResolver
     public static bool EvaluateFitting(double actualAngleDeg, double fittingAngleDeg, double effectiveAllowableDeg)
         => JointDeflectionRule.EvaluateFitting(actualAngleDeg, fittingAngleDeg, effectiveAllowableDeg);
 
-    public static BendResolution Resolve(NodeClassification node, BendSettings settings)
-        => BendingRuleCatalog.For(MaterialOf(node)).Resolve(node, settings);
+    public static BendResolution Resolve(NodeClassification node, BendSettings settings, double? forcedAngleDeg = null)
+        => BendingRuleCatalog.For(MaterialOf(node)) is JointDeflectionRule rule
+            ? rule.Resolve(node, settings, forcedAngleDeg)
+            : BendingRuleCatalog.For(MaterialOf(node)).Resolve(node, settings);
 
-    public static IReadOnlyList<BendResolution> ResolveAll(IReadOnlyList<NodeClassification> nodes, BendSettings settings)
-        => nodes.Where(x => x.Kind == NodeKind.Bend).Select(x => Resolve(x, settings)).ToList();
+    public static IReadOnlyList<BendResolution> ResolveAll(IReadOnlyList<NodeClassification> nodes, BendSettings settings, IReadOnlyDictionary<int, double>? forcedAngles = null)
+        => nodes.Where(x => x.Kind == NodeKind.Bend).Select(x => Resolve(x, settings, forcedAngles?.GetValueOrDefault(x.NodeId))).ToList();
 
     public static double TangentLength(double radiusMm, double angleDeg)
         => radiusMm * Math.Tan(angleDeg * Math.PI / 360d);

@@ -1,4 +1,5 @@
 using DHBIMWATER.UI.Base;
+using DHBIMWATER.Core.Gis;
 
 namespace DHBIMWATER.UI.ViewModels.Modeling;
 
@@ -12,9 +13,11 @@ public sealed class DiameterMappingRow : ViewModelBase
     private DiameterMappingOption? _selectedDiameterOption;
     private double? _outerDiameterMm, _thicknessMm;
     private string _status = string.Empty;
-    private bool _isSelected;
+    private bool _isSelected, _isHighlighted;
 
     public required string RawValue { get; init; }
+    public required string KindRawValue { get; init; }
+    public string MappingKey => DiameterMappingKey.Of(RawValue, KindRawValue);
     public required string FileName { get; init; }
     public required string FileKey { get; init; }
     public required int Count { get; init; }
@@ -47,24 +50,28 @@ public sealed class DiameterMappingRow : ViewModelBase
         {
             if (!SetProperty(ref _pipeKind, value)) return;
             IsUserModified = true;
+            IsDefaultPipeKind = false;
             Changed?.Invoke();
         }
     }
     public bool IsUserModified { get; private set; }
+    public bool IsDefaultPipeKind { get; private set; }
     public double? OuterDiameterMm { get => _outerDiameterMm; private set => SetProperty(ref _outerDiameterMm, value); }
     public double? ThicknessMm { get => _thicknessMm; private set => SetProperty(ref _thicknessMm, value); }
     public string SpecificationDisplay => OuterDiameterMm is > 0 && ThicknessMm is > 0 ? $"{OuterDiameterMm:0.##}/{ThicknessMm:0.##}" : "-";
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
     public bool IsSelected { get => _isSelected; set => SetProperty(ref _isSelected, value); }
+    public bool IsHighlighted { get => _isHighlighted; set => SetProperty(ref _isHighlighted, value); }
     public Action? Changed { get; init; }
 
-    public void InitializeValues(IReadOnlyList<DiameterMappingOption> diameterOptions, double? diameterMm, string pipeKind, bool isUserModified)
+    public void InitializeValues(IReadOnlyList<DiameterMappingOption> diameterOptions, double? diameterMm, string pipeKind, bool isUserModified, bool isDefaultPipeKind = false)
     {
         _diameterOptions = diameterOptions;
         _diameterMm = diameterMm;
         _pipeKind = pipeKind;
         _selectedDiameterOption = FindDiameterOption(diameterMm);
         IsUserModified = isUserModified;
+        IsDefaultPipeKind = isDefaultPipeKind;
     }
 
     public void SetPreview(double? outerDiameterMm, double? thicknessMm, string status)

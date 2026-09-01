@@ -48,6 +48,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<ISlabCommandRepo, RevitSlabCommandRepo>();
         services.AddTransient<IFoundationCommandRepo, RevitFoundationCommandRepo>();
         services.AddTransient<IAirValveVoidCommandRepo, RevitAirValveVoidCommandRepo>();
+        services.AddTransient<IDrainPitVoidCommandRepo, RevitDrainPitVoidCommandRepo>();
+        services.AddTransient<IDrainPitLocationPickRepo, RevitDrainPitLocationPickRepo>();
         services.AddTransient<IOpeningCommandRepo, RevitOpeningCommandRepo>();
         services.AddTransient<IStairCommandRepo, RevitStairCommandRepo>();
         services.AddTransient<IDirectShapeCommandRepo, RevitDirectShapeCommandRepo>();
@@ -63,6 +65,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IAlignmentSourceReader, ExcelAlignmentReader>();
         services.AddTransient<IExcelAlignmentSourceReader, ExcelAlignmentReader>();
         services.AddTransient<IAlignmentStraightPlacementRepo, RevitAlignmentStraightPlacementRepo>();
+        services.AddTransient<IAlignmentStraightDirectShapeRepo, RevitAlignmentStraightDirectShapeRepo>();
         services.AddTransient<IAlignmentPipePlacementRepo, RevitAlignmentPipePlacementRepo>();
         services.AddTransient<IBendSettingsRepo, RevitBendSettingsRepo>();
         services.AddSingleton<IBendSettingsFileStore, JsonFileBendSettingsFileStore>();
@@ -104,6 +107,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<ISlabCommandRepo, MockSlabCommandRepo>();
         services.AddTransient<IFoundationCommandRepo, MockFoundationCommandRepo>();
         services.AddTransient<IAirValveVoidCommandRepo, MockAirValveVoidCommandRepo>();
+        services.AddTransient<IDrainPitVoidCommandRepo, MockDrainPitVoidCommandRepo>();
+        services.AddTransient<IDrainPitLocationPickRepo, MockDrainPitLocationPickRepo>();
         services.AddTransient<IOpeningCommandRepo, MockOpeningCommandRepo>();
         services.AddTransient<IDirectShapeCommandRepo, MockDirectShapeCommandRepo>();
         services.AddTransient<IViewCommandRepo, MockViewCommandRepo>();
@@ -117,9 +122,11 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IAlignmentSourceReader, ExcelAlignmentReader>();
         services.AddTransient<IExcelAlignmentSourceReader, ExcelAlignmentReader>();
         services.AddTransient<IAlignmentStraightPlacementRepo, MockAlignmentStraightPlacementRepo>();
+        services.AddTransient<IAlignmentStraightDirectShapeRepo, MockAlignmentStraightDirectShapeRepo>();
         services.AddTransient<IAlignmentPipePlacementRepo, MockAlignmentPipePlacementRepo>();
         services.AddTransient<IAlignmentSourceReader, DxfAlignmentReader>();
         services.AddTransient<IAlignmentStraightPlacementRepo, RevitAlignmentStraightPlacementRepo>();
+        services.AddTransient<IAlignmentStraightDirectShapeRepo, RevitAlignmentStraightDirectShapeRepo>();
         services.AddTransient<IAlignmentPipePlacementRepo, RevitAlignmentPipePlacementRepo>();
         // TODO: Mock 블록에 Revit Repo가 덮어쓰기 등록됨 — 별도 확인 필요
         services.AddTransient<IBendSettingsRepo, MockBendSettingsRepo>();

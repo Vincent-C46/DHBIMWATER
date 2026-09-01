@@ -34,10 +34,11 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
         var minLengthFt = doc.Application.ShortCurveTolerance;
         var basePoint = AlignmentPlacementMapper.GetProjectBasePoint(doc);
         // 파라미터는 형상이 확정된 뒤(최종 Regenerate 이후) 한꺼번에 설정한다.
-        var placed = new List<(FamilyInstance Instance, PipeAlignment Alignment, StraightPipeSpec? Spec, AlignmentSampleSegment Segment)>();
+        var placed = new List<(FamilyInstance Instance, PipeAlignment Alignment, double DiameterMm, StraightPipeSpec? Spec, AlignmentSampleSegment Segment, double ZOffsetM)>();
+        var specCache = new Dictionary<(string PipeKind, double DiameterMm), StraightPipeSpec?>();
         var pending = 0;
         var total = alignments.Select((alignment, index) => AlignmentIntervalSampler.SampleSegments(
-            alignment.Vertices, intervalM, trims is not null && index < trims.Count ? trims[index] : null).Count).Sum();
+            alignment, intervalM, trims is not null && index < trims.Count ? trims[index] : null).Count).Sum();
         progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingStraights, 0, total));
 
         // SampleSegments로 intervalM(6m)마다 끊어 시작/끝점을 잇는다.
@@ -45,11 +46,15 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
         for (var index = 0; index < alignments.Count; index++)
         {
             var alignment = alignments[index];
-            var spec = specs.Find(alignment.PipeKind, alignment.DiameterMm);
-            var zOffsetM = origin.GetZOffsetM(alignment);
+            var diameterProfile = new AlignmentDiameterProfile(alignment);
             var vertexTrims = trims is not null && index < trims.Count ? trims[index] : null;
-            foreach (var segment in AlignmentIntervalSampler.SampleSegments(alignment.Vertices, intervalM, vertexTrims))
+            foreach (var segment in AlignmentIntervalSampler.SampleSegments(alignment, intervalM, vertexTrims))
             {
+                var diameterMm = diameterProfile.Find(segment.DistanceFromStart);
+                var specKey = (alignment.PipeKind, diameterMm);
+                if (!specCache.TryGetValue(specKey, out var spec))
+                    specCache[specKey] = spec = specs.Find(alignment.PipeKind, diameterMm);
+                var zOffsetM = origin.GetZOffsetM(alignment.PipeKind, diameterMm);
                 var start = ToXyz(segment.Start, zOffsetM, origin, basePoint);
                 var end = ToXyz(segment.End, zOffsetM, origin, basePoint);
                 if (start.DistanceTo(end) < minLengthFt) continue;
@@ -72,7 +77,7 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
                     ((ReferencePoint)doc.GetElement(pointIds[0])).Position = start;
                     ((ReferencePoint)doc.GetElement(pointIds[1])).Position = end;
                 }
-                placed.Add((instance, alignment, spec, segment));
+                placed.Add((instance, alignment, diameterMm, spec, segment, zOffsetM));
                 // 진행률은 Regenerate 주기와 무관하게 세그먼트 1개마다 보고한다.
                 // (UI는 전용 STA 스레드라 Revit 스레드를 막지 않고, 생성 1건이 100ms 이상이라 보고 빈도도 낮다)
                 progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingStraights, placed.Count, total));
@@ -92,22 +97,36 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
         var writer = new PipeParameterWriter();
         var parameterScope = PlacementProfiler.Step("06c 직관 파라미터 기록");
         PipeAlignment? previousAlignment = null;
+        AlignmentStationProfile? stationProfile = null;
         Point3D? previousEnd = null;
         Vector3D? previousOwnDirection = null;
-        foreach (var (instance, alignment, spec, segment) in placed)
+        for (var i = 0; i < placed.Count; i++)
         {
+            var (instance, alignment, diameterMm, spec, segment, zOffsetM) = placed[i];
             if (!ReferenceEquals(alignment, previousAlignment))
             {
                 previousEnd = null;
                 previousOwnDirection = null;
+                stationProfile = new AlignmentStationProfile(alignment);
             }
-            var (startDirection, ownDirection) = StraightSegmentOrientation.Resolve(
-                segment.Start, segment.End, previousEnd, previousOwnDirection);
+            Point3D? nextStart = null;
+            Vector3D? nextOwnDirection = null;
+            if (i + 1 < placed.Count && ReferenceEquals(placed[i + 1].Alignment, alignment))
+            {
+                var nextSegment = placed[i + 1].Segment;
+                nextStart = nextSegment.Start;
+                nextOwnDirection = new Vector3D(
+                    nextSegment.End.X - nextSegment.Start.X,
+                    nextSegment.End.Y - nextSegment.Start.Y,
+                    nextSegment.End.Z - nextSegment.Start.Z);
+            }
+            var (startDirection, endDirection, ownDirection) = StraightSegmentOrientation.Resolve(
+                segment.Start, segment.End, previousEnd, previousOwnDirection, nextStart, nextOwnDirection);
 
-            if (diameterParameterName is not null) SetParameter(instance, diameterParameterName, alignment.DiameterMm, missingParameters);
+            if (diameterParameterName is not null) SetParameter(instance, diameterParameterName, diameterMm, missingParameters);
             if (spec is not null && outerDiameterParameterName is not null) SetParameter(instance, outerDiameterParameterName, spec.OuterDiameterMm, missingParameters);
             if (spec is not null && thicknessParameterName is not null) SetParameter(instance, thicknessParameterName, spec.ThicknessMm, missingParameters);
-            if (!TrySetRotations(instance, startDirection, ownDirection)) missingParameters.Add("rot_XY_n/rot_XZ_n");
+            if (!TrySetRotations(instance, startDirection, endDirection)) missingParameters.Add("rot_XY_n/rot_XZ_n");
             previousAlignment = alignment;
             previousEnd = segment.End;
             previousOwnDirection = ownDirection;
@@ -117,10 +136,12 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
             var lengthM = segment.Start.DistanceTo(segment.End);
             var runM = Math.Sqrt(Math.Pow(segment.End.X - segment.Start.X, 2) + Math.Pow(segment.End.Y - segment.Start.Y, 2));
             var riseM = segment.End.Z - segment.Start.Z;
+            var startStationM = stationProfile!.StationAt(segment.DistanceFromStart);
+            var endStationM = stationProfile.StationAt(segment.DistanceFromStart + lengthM);
             writer.Text(instance, PipeAlignmentParameters.Addin, PipeAlignmentParameters.AddinValue);
             writer.Text(instance, PipeAlignmentParameters.Part, PipeAlignmentParameters.StraightPartValue);
             writer.Text(instance, PipeAlignmentParameters.AlignmentId, AlignmentIdOf(alignment));
-            writer.Text(instance, PipeAlignmentParameters.NominalDiameter, PipeAlignmentParameters.DiameterText(alignment.DiameterMm));
+            writer.Text(instance, PipeAlignmentParameters.NominalDiameter, PipeAlignmentParameters.DiameterText(diameterMm));
             writer.Text(instance, PipeAlignmentParameters.Material, MaterialLabelOf(alignment.PipeKind));
             writer.Text(instance, PipeAlignmentParameters.Grade, alignment.PipeKind);
             writer.LengthMm(instance, PipeAlignmentParameters.OuterDiameter, spec?.OuterDiameterMm);
@@ -133,6 +154,14 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
             writer.Number(instance, PipeAlignmentParameters.StartElevation, segment.Start.Z);
             writer.Number(instance, PipeAlignmentParameters.EndElevation, segment.End.Z);
             writer.Number(instance, PipeAlignmentParameters.Slope, runM > 1e-9 ? riseM / runM * 100d : 0d);
+            writer.Text(instance, PlacementStationParameters.SourceFile, alignment.SourceFile);
+            writer.Text(instance, PlacementStationParameters.Alignment, alignment.RecordNumber);
+            writer.Text(instance, PlacementStationParameters.Profile, string.Empty);
+            writer.Number(instance, PlacementStationParameters.StaStart, startStationM);
+            writer.Number(instance, PlacementStationParameters.StaEnd, endStationM);
+            writer.Number(instance, PlacementStationParameters.ZOffset, zOffsetM);
+            writer.YesNo(instance, PlacementStationParameters.Flip, false);
+            writer.Text(instance, PlacementStationParameters.VerticalBasis, "GlobalZ");
         }
 
         parameterScope.Dispose();
@@ -143,12 +172,15 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
             warnings.Add($"직관 패밀리 '{straightFamilyTypeName}'에 {string.Join(", ", missingParameters.OrderBy(x => x))} 파라미터가 없거나 읽기전용이라 값을 설정하지 못했습니다.");
         if (missingRotation)
             warnings.Add($"직관 패밀리 '{straightFamilyTypeName}'에 rot_XY_n/rot_XZ_n 각도 파라미터가 없어 진행방향 회전을 적용하지 못했습니다.");
-        if (writer.Missing.Count > 0)
-            warnings.Add($"프로젝트 매개변수 {string.Join(", ", writer.Missing.OrderBy(x => x))}를 직관 인스턴스에 기록하지 못했습니다(바인딩 실패 또는 읽기전용).");
+        if (writer.InvalidTypes.Count > 0)
+            warnings.Add($"프로젝트 매개변수 {string.Join(", ", writer.InvalidTypes.OrderBy(x => x))}의 타입이 배치 태그 계약과 달라 값을 건너뛰었습니다.");
+        var missingProjectParameters = writer.Missing.Except(writer.InvalidTypes).OrderBy(x => x).ToList();
+        if (missingProjectParameters.Count > 0)
+            warnings.Add($"프로젝트 매개변수 {string.Join(", ", missingProjectParameters)}를 직관 인스턴스에 기록하지 못했습니다(바인딩 실패 또는 읽기전용).");
         if (placed.Count > 0) { using (PlacementProfiler.Step("06d 직관 최종 Regenerate")) doc.Regenerate(); }
         var outerDiameters = placed
             .Where(x => x.Spec is not null)
-            .GroupBy(x => (x.Alignment.PipeKind, x.Alignment.DiameterMm))
+            .GroupBy(x => (x.Alignment.PipeKind, x.DiameterMm))
             .ToDictionary(x => x.Key, x => x.First().Spec!.OuterDiameterMm);
         return new AlignmentStraightPlacementResult(placed.Count, warnings, outerDiameters);
     }
@@ -185,7 +217,7 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
         var (endXy, endXz) = BendOrientation.Compute(endDirection);
         var numbered = TrySetAngle(instance, "rot_XY_1", startXy) && TrySetAngle(instance, "rot_XY_2", endXy)
             && TrySetAngle(instance, "rot_XZ_1", startXz) && TrySetAngle(instance, "rot_XZ_2", endXz);
-        // rot_XY_1/2 구분이 없는 옛 패밀리는 점별 분리를 표현할 수 없어 자기 고유 방향(끝쪽)만 쓴다.
+        // 번호 없는 옛 패밀리는 점별 분리 불가. 끝쪽 방향만 쓴다.
         return numbered || (TrySetAngle(instance, "rot_XY", endXy) && TrySetAngle(instance, "rot_XZ", endXz));
     }
 

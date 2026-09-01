@@ -26,9 +26,9 @@ public sealed class ShapefileReader : IShapefileReader, IAlignmentSourceReader
         var features = new List<PipeAlignment>();
         foreach (var pair in shp.Records.Take(Math.Min(shp.Records.Count, dbf.Rows.Count)).Select((record, index) => (record, index)))
             for (var partIndex = 0; partIndex < pair.record.Parts.Count; partIndex++)
-                features.Add(new PipeAlignment(pair.record.Parts[partIndex], string.Empty, 0, Path.GetFileName(shpPath), $"{pair.record.RecordNumber}+{partIndex + 1}", dbf.Rows[pair.index]));
+                features.Add(new PipeAlignment(pair.record.Parts[partIndex], string.Empty, 0, Path.GetFullPath(shpPath), $"{pair.record.RecordNumber}+{partIndex + 1}", dbf.Rows[pair.index]));
         var vertexCount = features.Sum(x => x.Vertices.Count);
         return new ShapefileReadResult(features, dbf.Fields, shp.Extent, prj.Wkt, prj.RecommendedEpsg, dbf.EncodingName,
-            shp.Records.Count, vertexCount, features.Sum(x => Math.Max(0, x.Vertices.Count - 1)), warnings, dbf.Rows.FirstOrDefault());
+            shp.Records.Count, vertexCount, features.Sum(x => Math.Max(0, x.Vertices.Count - 1)), warnings, dbf.Rows.FirstOrDefault(), prj.Summary);
     }
 }
