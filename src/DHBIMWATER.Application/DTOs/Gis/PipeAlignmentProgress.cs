@@ -6,6 +6,7 @@ public enum PipeAlignmentPhase
     PlanningBends,
     PlacingStraights,
     PlacingBends,
+    PlacingReducers,
     Committing
 }
 

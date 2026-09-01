@@ -56,7 +56,7 @@ public static class AlignmentIntervalSampler
         ArgumentNullException.ThrowIfNull(alignment);
         var requiredBreaks = new HashSet<int>();
         for (var i = 1; i < alignment.Vertices.Count; i++)
-            if (Math.Abs(AlignmentDiameterProfile.DiameterAtVertex(alignment, i - 1) - AlignmentDiameterProfile.DiameterAtVertex(alignment, i)) > Tolerance)
+            if (AlignmentDiameterProfile.ChangesAtVertex(alignment, i))
                 requiredBreaks.Add(i);
         return SampleSegmentsCore(alignment.Vertices, interval, trims, requiredBreaks, preserveAllVertices: false);
     }

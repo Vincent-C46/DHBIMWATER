@@ -41,8 +41,8 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
         var shapeParameterSuccesses = 0;
         // OD를 못 구한 (관종, DN) 조합. 절점마다 반복 경고하지 않도록 조합 단위로 묶는다.
         var missingOuterDiameter = new HashSet<(string PipeKind, double DiameterMm)>();
-        var overrideView = ResolveOverrideView(doc);
-        var solidFillPatternId = FindSolidFillPatternId(doc);
+        var overrideView = BendOverrideGraphics.ResolveOverrideView(doc);
+        var solidFillPatternId = BendOverrideGraphics.FindSolidFillPatternId(doc);
         var count = 0;
         var pendingRegeneration = 0;
 
@@ -100,6 +100,15 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
                 writer.Text(instance, PipeAlignmentParameters.BendFormName, PipeAlignmentParameters.Label(plan.Form));
                 writer.LengthMm(instance, PipeAlignmentParameters.LayingLength, plan.LayingLengthMm);
                 writer.Number(instance, PipeAlignmentParameters.Weight, plan.WeightKg);
+                writer.Text(instance, PipeAlignmentParameters.NodeStation, plan.NodeStationText);
+                writer.Text(instance, PlacementStationParameters.SourceFile, plan.SourceFile);
+                writer.Text(instance, PlacementStationParameters.Alignment, plan.RecordNumber);
+                writer.Text(instance, PlacementStationParameters.Profile, string.Empty);
+                writer.Number(instance, PlacementStationParameters.StaStart, plan.StaStartM);
+                writer.Number(instance, PlacementStationParameters.StaEnd, plan.StaEndM);
+                writer.Number(instance, PlacementStationParameters.ZOffset, plan.ZOffsetM);
+                writer.YesNo(instance, PlacementStationParameters.Flip, false);
+                writer.Text(instance, PlacementStationParameters.VerticalBasis, "GlobalZ");
             }
 
             using (PlacementProfiler.Step("07f 곡관 형상/회전 파라미터 기록"))
@@ -139,7 +148,7 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
         // 신규 인스턴스 형상이 재생성된 뒤 기존과 같은 허용 초과 적색 재지정을 적용한다.
         using (PlacementProfiler.Step("07h 허용초과 적색 표시"))
             foreach (var (elementId, nodeId) in exceededOverrides)
-                ApplyExceededOverride(overrideView, elementId, solidFillPatternId, nodeId, overrideWarnings);
+                BendOverrideGraphics.ApplyExceededOverride(overrideView, elementId, solidFillPatternId, nodeId, overrideWarnings);
 
         var warnings = missingParameters
             .GroupBy(x => (x.Family, x.Type))
@@ -230,37 +239,6 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
     {
         if (!param.Set(UC.DegToRad(degrees)))
             throw new InvalidOperationException($"곡관 패밀리 '{plan.FamilyName}:{plan.TypeName}'의 '{name}'에 회전값 {degrees:0.###}°를 기록하지 못했습니다.");
-    }
-
-    private static View3D? ResolveOverrideView(Document doc)
-    {
-        if (doc.ActiveView is View3D active && !active.IsTemplate) return active;
-        return new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>()
-            .FirstOrDefault(x => !x.IsTemplate && string.Equals(x.Name, "{3D}", StringComparison.Ordinal));
-    }
-
-    private static ElementId FindSolidFillPatternId(Document doc) => new FilteredElementCollector(doc)
-        .OfClass(typeof(FillPatternElement)).Cast<FillPatternElement>()
-        .FirstOrDefault(x => x.GetFillPattern().IsSolidFill)?.Id ?? ElementId.InvalidElementId;
-
-    private static void ApplyExceededOverride(View3D? view, ElementId elementId, ElementId solidFillPatternId, int nodeId, List<string> warnings)
-    {
-        if (view is null)
-        {
-            if (!warnings.Any()) warnings.Add("허용 초과 곡관을 표시할 3D 뷰를 찾지 못해 적색 재지정을 건너뛰었습니다.");
-            return;
-        }
-        try
-        {
-            var red = new Autodesk.Revit.DB.Color(229, 57, 53);
-            var settings = new OverrideGraphicSettings().SetProjectionLineColor(red).SetSurfaceForegroundPatternColor(red);
-            if (solidFillPatternId != ElementId.InvalidElementId) settings.SetSurfaceForegroundPatternId(solidFillPatternId);
-            view.SetElementOverrides(elementId, settings);
-        }
-        catch (Exception ex)
-        {
-            warnings.Add($"절점 {nodeId}: 3D 뷰 적색 표시를 적용하지 못했습니다({ex.Message}).");
-        }
     }
 
     private static string MaterialLabelOf(string pipeKind) => PipeKindCatalog.MaterialOf(pipeKind) is { } material ? PipeAlignmentParameters.Label(material) : string.Empty;

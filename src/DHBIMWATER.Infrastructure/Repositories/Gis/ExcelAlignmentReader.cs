@@ -63,6 +63,7 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
         string? carriedRawDiameter = null;
         double? carriedDiameterMm = null;
         var stationOutOfOrder = 0;
+        var missingCoordinateCount = 0;
 
         for (var r = mapping.DataStartRow; r <= lastRow; r++)
         {
@@ -70,7 +71,7 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
                 !TryReadDouble(sheet.Cell(r, mapping.YColumnIndex + 1), out var y) ||
                 !TryReadDouble(sheet.Cell(r, mapping.ZColumnIndex + 1), out var z))
             {
-                warnings.Add($"{mapping.SheetName} {r}행: X·Y·Z 값을 읽지 못해 건너뛰었습니다.");
+                missingCoordinateCount++;
                 continue;
             }
             vertices.Add(new Point3D(x, y, z));
@@ -105,8 +106,9 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
             }
         }
 
-        if (stationOutOfOrder > 0) warnings.Add($"{mapping.SheetName}: 측점(Station)이 행 순서와 다르게 역행하는 구간이 {stationOutOfOrder}건 있습니다.");
-        if (vertices.Count < 2) warnings.Add($"{mapping.SheetName}: 유효한 정점이 {vertices.Count}개뿐이라 관로를 구성할 수 없습니다.");
+        if (missingCoordinateCount > 0) warnings.Add($"{mapping.SheetName}: 좌표 누락 {missingCoordinateCount}행 건너뜀");
+        if (stationOutOfOrder > 0) warnings.Add($"{mapping.SheetName}: 측점 역행 {stationOutOfOrder}건");
+        if (vertices.Count < 2) warnings.Add($"{mapping.SheetName}: 정점 {vertices.Count}개 — 관로 구성 불가");
 
         // 헤더행의 열 이름을 필드 목록으로 만들어, 메인 그리드의 직경·관종 필드 콤보박스가 SHP와 같은 방식으로 동작하게 한다.
         // 시트 전체 = 관로 1개(레코드 1개)라 열마다 값은 1개만 실린다 — 데이터 영역에서 처음 만난 공백 아닌 값을 대표값으로 쓴다.
@@ -169,7 +171,7 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
             // 측점은 원래 행마다 달라 경고 대상이 아니다. 그 외 열에 값이 섞이면 대표값 1개만 쓰인다는 사실을 알린다.
             var isStationColumn = mapping.StationColumnIndex is { } station && station + 1 == c;
             if (!isStationColumn && distinct.Count > 1)
-                warnings.Add($"{mapping.SheetName}: '{name}' 열에 서로 다른 값이 {distinct.Count}종 있습니다. 시트당 값 1개만 적용되어 '{representative}'을 사용합니다.");
+                warnings.Add($"{mapping.SheetName}: '{name}' 값 {distinct.Count}종 혼재 — '{representative}' 적용");
         }
 
         return (fields, attributes);

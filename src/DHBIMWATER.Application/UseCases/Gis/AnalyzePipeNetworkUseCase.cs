@@ -29,9 +29,9 @@ public sealed class AnalyzePipeNetworkUseCase
             : new BendSettingsResolution(request.CurrentBendSettings, BendSettingsSource.Project);
         var (settings, source) = settingsResolution;
         if (source == BendSettingsSource.BuiltInDefault)
-            warnings.Add("관로 규격 설정이 저장되지 않아 내장 기본값으로 판정했습니다.");
+            warnings.Add("규격 설정 없음 — 내장 기본값으로 판정");
         if (settings.Fittings.NeedsRestore)
-            warnings.Add("저장된 곡관 치수가 현행 규격표와 구조가 다릅니다(중복 행 또는 플랜지곡관 누락). [관·곡관 규격표] 창에서 [기본값 복원] 후 저장하세요.");
+            warnings.Add("곡관 치수 규격표 불일치 — [관·곡관 규격표]에서 기본값 복원 필요");
 
         var graph = PipeNetworkBuilder.Build(loaded.Alignments, request.SnapToleranceMm / 1000d);
         var nodes = PipeNetworkClassifier.Classify(graph);
@@ -50,10 +50,9 @@ public sealed class AnalyzePipeNetworkUseCase
         var conflicts = resolutions.Values.Where(x => !x.IsSizeConsistent).ToList();
 
         if (resolutions.Values.Any(x => x.Kind != BendResolutionKind.None) && resolutions.Values.All(x => !x.HasFittingSize))
-            warnings.Add("곡관 치수가 입력되지 않아 직관 구간 차감이 적용되지 않습니다.");
+            warnings.Add("곡관 치수 미입력 — 직관 차감 없음");
 
-        foreach (var conflict in conflicts)
-            warnings.Add($"절점 {conflict.NodeId}: 곡관 치수가 성립하지 않습니다(t={conflict.LayingLengthMm:0.#}mm < 접선길이 T={conflict.TangentLengthMm:0.#}mm). 호가 곡관 몸통 밖으로 나갑니다.");
+        if (conflicts.Count > 0) warnings.Add($"곡관 치수 불성립 {conflicts.Count}건");
 
         warnings.AddRange(FindAdjacentInterference(graph, resolutions));
 
@@ -74,6 +73,7 @@ public sealed class AnalyzePipeNetworkUseCase
     /// </summary>
     private static IEnumerable<string> FindAdjacentInterference(PipeNetworkGraph graph, IReadOnlyDictionary<int, BendResolution> resolutions)
     {
+        var count = 0;
         foreach (var edge in graph.Edges)
         {
             var head = LayingLength(resolutions, edge.StartNodeId);
@@ -81,9 +81,9 @@ public sealed class AnalyzePipeNetworkUseCase
             if (head + tail <= 0) continue;
 
             var lengthMm = edge.Length * 1000d;
-            if (head + tail > lengthMm)
-                yield return $"절점 {edge.StartNodeId}–{edge.EndNodeId}: 구간 길이 {lengthMm:0.#}mm 가 양끝 곡관 연장 합계 {head + tail:0.#}mm 보다 짧아 직관이 들어갈 자리가 없습니다.";
+            if (head + tail > lengthMm) count++;
         }
+        if (count > 0) yield return $"직관 자리 없는 구간 {count}건";
     }
 
     private static double LayingLength(IReadOnlyDictionary<int, BendResolution> resolutions, int nodeId)

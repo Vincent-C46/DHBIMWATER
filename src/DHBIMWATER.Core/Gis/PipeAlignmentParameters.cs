@@ -25,6 +25,7 @@ public static class PipeAlignmentParameters
     public const string EndElevation = "DH_종점표고";
     public const string Slope = "DH_경사";
     public const string NodeId = "DH_절점번호";
+    public const string NodeStation = "DH_절점측점";
     public const string ActualDeflection = "DH_실제굴곡각";
     public const string StandardAngle = "DH_곡관규격각";
     public const string AllowableDeflection = "DH_허용굴곡각";
@@ -39,6 +40,7 @@ public static class PipeAlignmentParameters
     public const string AddinValue = "DHBIMWATER";
     public const string StraightPartValue = "직관";
     public const string BendPartValue = "곡관";
+    public const string ReducerPartValue = "이경관";
 
     /// <summary>이름 → GUID. 하드코딩이며 변경 금지 (docs/32 §2).</summary>
     public static IReadOnlyDictionary<string, Guid> Guids { get; } = new Dictionary<string, Guid>(StringComparer.Ordinal)
@@ -60,6 +62,7 @@ public static class PipeAlignmentParameters
         [EndElevation] = new("df8db332-3ce7-44fa-9f71-6e19a352de1a"),
         [Slope] = new("504500cb-d45e-4461-ad18-47a34168facc"),
         [NodeId] = new("bc52b57a-bb41-4f92-a9df-122842826d58"),
+        [NodeStation] = new("4c6b17ef-8a31-433d-b5be-84f5800b84e9"),
         [ActualDeflection] = new("93048122-1ee0-47df-add3-2851984ca7f3"),
         [StandardAngle] = new("3c2b2a81-35ed-48f9-bcaf-0307e36a163a"),
         [AllowableDeflection] = new("081b5774-0112-4aae-ba65-2d5bd26a9ccc"),
@@ -79,7 +82,7 @@ public static class PipeAlignmentParameters
         LengthDef(Length), NumberDef(StartElevation), NumberDef(EndElevation), NumberDef(Slope), Def(NodeId, ParameterSpecType.Integer),
         Def(ActualDeflection, ParameterSpecType.Angle), Def(StandardAngle, ParameterSpecType.Angle), Def(AllowableDeflection, ParameterSpecType.Angle), Def(ResidualDeflection, ParameterSpecType.Angle),
         Def(IsAcceptable, ParameterSpecType.YesNo), Text(JointApplication), LengthDef(CenterlineRadius), Text(BendFormName), LengthDef(LayingLength),
-        NumberDef(Weight),
+        NumberDef(Weight), Text(NodeStation),
     };
 
     public static string DiameterText(double diameterMm) => $"DN{diameterMm:0.##}";

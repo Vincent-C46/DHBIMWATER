@@ -3,6 +3,7 @@ namespace DHBIMWATER.Core.Gis;
 /// <summary>정점 DN을 폴리선 누가거리로 조회한다.</summary>
 public sealed class AlignmentDiameterProfile
 {
+    public const double ChangeTolerance = 1e-6;
     private readonly IReadOnlyList<double> _distances;
     private readonly IReadOnlyList<double> _diameters;
 
@@ -43,4 +44,8 @@ public sealed class AlignmentDiameterProfile
            && values[vertexIndex] is > 0d
             ? values[vertexIndex]!.Value
             : alignment.DiameterMm;
+
+    public static bool ChangesAtVertex(PipeAlignment alignment, int vertexIndex)
+        => vertexIndex > 0 && vertexIndex < alignment.Vertices.Count
+           && Math.Abs(DiameterAtVertex(alignment, vertexIndex - 1) - DiameterAtVertex(alignment, vertexIndex)) > ChangeTolerance;
 }

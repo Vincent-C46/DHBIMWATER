@@ -12,7 +12,6 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Gis;
 /// <summary>직관을 OD·두께 기반 원통 DirectShape로 배치.</summary>
 internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraightDirectShapeRepo
 {
-    private const string DcipMaterialName = "DCIP";
     private const double JoinToleranceM = 1e-6;
     private const double OversizedOuterDiameterMm = 3000d;
     private const int MaxWarningExamples = 5;
@@ -38,7 +37,7 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
         var sampled = alignments.Select((alignment, index) => AlignmentIntervalSampler.SampleSegments(
             alignment, intervalM, trims is not null && index < trims.Count ? trims[index] : null)).ToList();
         var total = sampled.Sum(x => x.Count);
-        var materialId = total > 0 ? FindOrCreateDcipMaterial(doc) : ElementId.InvalidElementId;
+        var materialId = total > 0 ? PipeSolidFactory.FindOrCreateDcipMaterial(doc) : ElementId.InvalidElementId;
         progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingStraights, 0, total));
 
         for (var index = 0; index < alignments.Count; index++)
@@ -203,10 +202,10 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
         var seed = Math.Abs(axis.Z) > 0.9 ? XYZ.BasisX : XYZ.BasisZ;
         var xAxis = axis.CrossProduct(seed).Normalize();
         var yAxis = axis.CrossProduct(xAxis).Normalize();
-        var loops = new List<CurveLoop> { CircleLoop(extrusionStart, cut.RadiusFt, xAxis, yAxis) };
+        var loops = new List<CurveLoop> { PipeSolidFactory.CircleLoop(extrusionStart, cut.RadiusFt, xAxis, yAxis) };
         var innerRadiusMm = outerDiameterMm / 2d - thicknessMm;
         if (thicknessMm > 0d && innerRadiusMm > 0.01)
-            loops.Add(CircleLoop(extrusionStart, UC.MmToFt(innerRadiusMm), xAxis, yAxis));
+            loops.Add(PipeSolidFactory.CircleLoop(extrusionStart, UC.MmToFt(innerRadiusMm), xAxis, yAxis));
         var options = new SolidOptions(materialId, ElementId.InvalidElementId);
         var solid = GeometryCreationUtilities.CreateExtrusionGeometry(loops, axis,
             start.DistanceTo(end) + cut.StartExtensionFt + cut.EndExtensionFt, options);
@@ -251,22 +250,6 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
         capped = rawSlope > MaxCutSlope;
         var slope = Math.Min(rawSlope, MaxCutSlope);
         return radiusFt * slope + UC.MmToFt(1d);
-    }
-
-    private static ElementId FindOrCreateDcipMaterial(Document doc)
-    {
-        var existing = new FilteredElementCollector(doc).OfClass(typeof(Material)).Cast<Material>()
-            .FirstOrDefault(x => string.Equals(x.Name, DcipMaterialName, StringComparison.OrdinalIgnoreCase));
-        return existing?.Id ?? Material.Create(doc, DcipMaterialName);
-    }
-
-    /// <summary>완전한 원 대신 반원 Arc 2개로 폐합.</summary>
-    private static CurveLoop CircleLoop(XYZ center, double radiusFt, XYZ xAxis, XYZ yAxis)
-    {
-        var loop = new CurveLoop();
-        loop.Append(Arc.Create(center, radiusFt, 0, Math.PI, xAxis, yAxis));
-        loop.Append(Arc.Create(center, radiusFt, Math.PI, 2 * Math.PI, xAxis, yAxis));
-        return loop;
     }
 
     private static XYZ ToXyz(DHBIMWATER.Core.Geometry.Point3D point, double zOffsetM, AlignmentPlacementOrigin origin, XYZ basePoint)

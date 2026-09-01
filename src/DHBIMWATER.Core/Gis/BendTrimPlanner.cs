@@ -57,7 +57,6 @@ public sealed record BendTrimPlan(IReadOnlyList<AlignmentBendPlan> Plans, IReadO
 public static class BendTrimPlanner
 {
     private const double MmToCoordinate = 0.001;
-    private const double DegenerateEpsilon = 1e-9;
 
     /// <param name="snapTolerance">정점↔절점 역조회 허용오차. 좌표와 같은 단위(m)이며 그래프를 만들 때와 같은 값을 넘긴다.</param>
     public static BendTrimPlan Plan(
@@ -116,8 +115,8 @@ public static class BendTrimPlanner
                     continue;
                 }
 
-                var upstream = DirectionSkippingNear(vertices, v, -1, snapTolerance);
-                var downstream = DirectionSkippingNear(vertices, v, +1, snapTolerance);
+                var upstream = AlignmentVertexDirection.SkippingNear(vertices, v, -1, snapTolerance);
+                var downstream = AlignmentVertexDirection.SkippingNear(vertices, v, +1, snapTolerance);
                 if (upstream is null || downstream is null)
                 {
                     warnings.Add($"{Path.GetFileName(alignments[a].SourceFile)} 레코드 {alignments[a].RecordNumber} {AlignmentVertexLabel.Format(alignments[a], v)}: 스냅 허용오차 밖의 이웃 정점을 찾지 못해 곡관 자리를 비웠습니다.");
@@ -190,28 +189,6 @@ public static class BendTrimPlanner
             var suffix = group.Count() > 5 ? $", 외 {group.Count() - 5}건" : string.Empty;
             yield return $"{Path.GetFileName(alignment.SourceFile)} 레코드 {alignment.RecordNumber}: 좌표가 스냅 허용오차 안으로 겹친 정점 {group.Count()}곳은 곡관을 1개만 배치했습니다 — {examples}{suffix}.";
         }
-    }
-
-    private static Vector3D? Direction(Point3D from, Point3D to)
-    {
-        var vector = new Vector3D(to.X - from.X, to.Y - from.Y, to.Z - from.Z);
-        return vector.Length <= DegenerateEpsilon ? null : vector.Normalize();
-    }
-
-    /// <summary>
-    /// 곡관 방향을 뽑을 이웃 정점을 고른다. 기준 정점에서 스냅 허용오차 이내에 있는 정점은
-    /// PipeNetworkBuilder가 선분째 버린 좌표 노이즈이므로 건너뛰고 바깥으로 계속 걸어간다.
-    /// (2026-09-01 회귀: 2.49mm 떨어진 정점으로 방향을 잡아 하류 방향이 52˚ 어긋났다.)
-    /// </summary>
-    private static Vector3D? DirectionSkippingNear(
-        IReadOnlyList<Point3D> vertices, int index, int step, double tolerance)
-    {
-        for (var i = index + step; i >= 0 && i < vertices.Count; i += step)
-        {
-            if (vertices[index].DistanceTo(vertices[i]) <= tolerance) continue;
-            return Direction(vertices[index], vertices[i]);
-        }
-        return null;
     }
 
     private static double AngleDegrees(Vector3D first, Vector3D second)

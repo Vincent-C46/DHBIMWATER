@@ -80,7 +80,7 @@ public sealed class ExcelAlignmentReaderFieldTests : IDisposable
     {
         var warnings = Read().Warnings;
 
-        Assert.Contains(warnings, x => x.Contains("'직경' 열에 서로 다른 값이 2종"));
+        Assert.Contains(warnings, x => x.Contains("'직경' 값 2종 혼재"));
         Assert.DoesNotContain(warnings, x => x.Contains("'측점' 열에"));
         Assert.DoesNotContain(warnings, x => x.Contains("'관종' 열에"));
     }

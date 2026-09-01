@@ -140,7 +140,9 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
     private BendConnectionOption? _bendConnectionOption;
     private IReadOnlyList<string> _straightParameterNames = Array.Empty<string>(), _bendParameterNames = Array.Empty<string>();
     private BendSettings _settings = BendSettings.Default;
-    private bool _isBusy, _hasResult, _showResolvedDiameterMappings, _isAwaitingPreviewConfirm;
+    private bool _isBusy, _hasResult, _isAwaitingPreviewConfirm;
+    // 기본값 True — 매핑 결과 전체를 먼저 보여주고, 필요할 때 사용자가 미해결만 걸러 본다.
+    private bool _showResolvedDiameterMappings = true;
     private bool _isIntervalHighlighted, _isStraightFamilyHighlighted, _isBendFamilyHighlighted;
     private ICollectionView? _diameterMappingsView;
     private PipeAlignmentModelingResult? _pendingPreview;
@@ -148,6 +150,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
     private string _phaseText = string.Empty, _progressDetail = string.Empty, _resultSummary = string.Empty, _previewConfirmMessage = string.Empty;
     private readonly Stopwatch _phaseStopwatch = new();
     private PipeAlignmentPhase? _phaseTrackedPhase;
+    private double _reducerBodyLengthMm = 250d;
     private int _phaseStartCompleted;
     private const int MinEtaSampleCount = 5;
 
@@ -243,6 +246,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
     public ZDatum ZDatum { get => _zDatum; set { if (SetProperty(ref _zDatum, value)) OnPropertyChanged(nameof(HasSpecUnmatched)); } }
     public Array ZDatums => Enum.GetValues(typeof(ZDatum));
     public double IntervalM { get => _intervalM; set { if (SetProperty(ref _intervalM, value)) RefreshPreflightIssues(); } }
+    public double ReducerBodyLengthMm { get => _reducerBodyLengthMm; set => SetProperty(ref _reducerBodyLengthMm, value); }
     public string? StraightFamilyTypeName { get => _straightFamilyTypeName; set { if (SetProperty(ref _straightFamilyTypeName, value)) { UpdateStraightParameterOptions(); RefreshPreflightIssues(); } } }
     public string? BendFamilyTypeName { get => _bendFamilyTypeName; set { if (SetProperty(ref _bendFamilyTypeName, value)) { UpdateBendParameterOptions(); RefreshPreflightIssues(); } } }
     public string? PipingSystemTypeName { get => _pipingSystemTypeName; set => SetProperty(ref _pipingSystemTypeName, value); }
@@ -542,9 +546,9 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         if (Files.Count == 0) issues.Add(new(PreflightSeverity.Blocking, "입력 파일이 없습니다.", PipeAlignmentTab.Input, null));
         if (IntervalM <= 0) issues.Add(new(PreflightSeverity.Blocking, "배치 간격은 0보다 커야 합니다.", PipeAlignmentTab.OutputMode, null));
         if (IsAdaptive && string.IsNullOrWhiteSpace(StraightFamilyTypeName)) issues.Add(new(PreflightSeverity.Blocking, "직관 패밀리를 선택하세요.", PipeAlignmentTab.OutputMode, null));
-        if (string.IsNullOrWhiteSpace(BendFamilyTypeName)) issues.Add(new(PreflightSeverity.Blocking, "곡관 패밀리를 선택하세요.", PipeAlignmentTab.OutputMode, null));
+        if (IsAdaptive && string.IsNullOrWhiteSpace(BendFamilyTypeName)) issues.Add(new(PreflightSeverity.Blocking, "곡관 패밀리를 선택하세요.", PipeAlignmentTab.OutputMode, null));
         if (!string.IsNullOrWhiteSpace(StraightPointCountNotice)) issues.Add(new(PreflightSeverity.Warning, StraightPointCountNotice, PipeAlignmentTab.OutputMode, null));
-        if (!string.IsNullOrWhiteSpace(BendPointCountNotice)) issues.Add(new(PreflightSeverity.Warning, BendPointCountNotice, PipeAlignmentTab.OutputMode, null));
+        if (IsAdaptive && !string.IsNullOrWhiteSpace(BendPointCountNotice)) issues.Add(new(PreflightSeverity.Warning, BendPointCountNotice, PipeAlignmentTab.OutputMode, null));
         AddMappingIssue(issues, DiameterMappings.Where(x => x.DiameterMm is null or <= 0), "확정 DN 미지정");
         AddMappingIssue(issues, DiameterMappings.Where(x => string.IsNullOrWhiteSpace(x.PipeKind)), "등급 미지정");
         AddMappingIssue(issues, DiameterMappings.Where(x => x.DiameterMm is > 0 && x.PipeKind != UseKindFieldOption && _settings.StraightPipes.Find(x.PipeKind, x.DiameterMm.Value) is null), "규격 미매칭");
@@ -658,13 +662,20 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
             DiagnosisWarnings.Clear();
             foreach (var warning in result.Warnings) DiagnosisWarnings.Add(warning);
             OnPropertyChanged(nameof(HasDiagnosisWarnings));
-            var angles = result.BendAngleCounts.Count == 0
-                ? "없음"
-                : string.Join(" · ", result.BendAngleCounts.Select(x => $"{x.Key:0.##}° {x.Value}"));
+            var angles = result.BendAngleCounts.OrderByDescending(x => x.Value).ThenBy(x => x.Key).Take(3)
+                .Select(x => $"{x.Key:0.##}° {x.Value}");
+            var bendDetails = result.BendAngleCounts.Count == 0
+                ? string.Empty
+                : $" ({string.Join(" · ", angles)}{(result.BendAngleCounts.Count > 3 ? $" · 외 {result.BendAngleCounts.Count - 3}종" : string.Empty)})";
+            var issues = new[]
+            {
+                result.Warnings.Count > 0 ? $"경고 {result.Warnings.Count}" : null,
+                result.BendUnresolvedCount > 0 ? $"미해결 {result.BendUnresolvedCount}" : null,
+                SpecUnmatchedCount > 0 ? $"규격 미매칭 {SpecUnmatchedCount}" : null
+            }.Where(x => x is not null);
             Summary =
-                $"절점 {result.NodeCount} · 간선 {result.EdgeCount} · 경고 {result.Warnings.Count}\n" +
-                $"곡관 {angles}\n" +
-                $"미해결 {result.BendUnresolvedCount} · 생략 {result.BendNoneCount} · 미배치 {result.BendSuppressedCount} · 규격 미매칭 {SpecUnmatchedCount}";
+                $"절점 {result.NodeCount} · 간선 {result.EdgeCount} · 곡관 {result.BendStandardCount}본{bendDetails}\n" +
+                (issues.Any() ? string.Join(" · ", issues) : "이상 없음");
             return result;
         }
         catch (Exception ex) { _dialog.Warn("관로 네트워크 진단", $"진단에 실패했습니다.\n{ex.Message}"); return null; }
@@ -679,7 +690,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         var warnings = PreflightIssues.Where(x => x.Severity == PreflightSeverity.Warning).Select(x => x.Message).ToList();
         if (warnings.Count > 0 && !_dialog.Confirm("사전 진단 경고", $"{string.Join(", ", warnings)}을 확인했습니다. 계속 모델링할까요?")) return;
         var reference = ResolveReference();
-        RequestedModeling = new PipeAlignmentModelingRequest { Files = SourceFiles(), ReferenceX = reference.X, ReferenceY = reference.Y, ApplySharedCoordinates = ApplySharedCoordinates, ZDatum = ZDatum, OutputMode = OutputMode, IntervalMm = IntervalM * 1000, StraightFamilyTypeName = StraightFamilyTypeName, StraightDiameterParameterName = ResolvedParameter(StraightDiameterParameterName), StraightOuterDiameterParameterName = ResolvedParameter(StraightOuterDiameterParameterName), StraightThicknessParameterName = ResolvedParameter(StraightThicknessParameterName), BendFamilyTypeName = BendFamilyTypeName, BendDiameterParameterName = ResolvedParameter(BendDiameterParameterName), BendWallThicknessParameterName = ResolvedParameter(BendWallThicknessParameterName), BendOuterDiameterParameterName = ResolvedParameter(BendOuterDiameterParameterName), PipingSystemTypeName = PipingSystemTypeName, PipeTypeName = PipeTypeName, LevelName = LevelName, SnapToleranceMm = SnapToleranceMm, CurrentBendSettings = _settings };
+        RequestedModeling = new PipeAlignmentModelingRequest { Files = SourceFiles(), ReferenceX = reference.X, ReferenceY = reference.Y, ApplySharedCoordinates = ApplySharedCoordinates, ZDatum = ZDatum, OutputMode = OutputMode, IntervalMm = IntervalM * 1000, ReducerBodyLengthMm = ReducerBodyLengthMm, StraightFamilyTypeName = StraightFamilyTypeName, StraightDiameterParameterName = ResolvedParameter(StraightDiameterParameterName), StraightOuterDiameterParameterName = ResolvedParameter(StraightOuterDiameterParameterName), StraightThicknessParameterName = ResolvedParameter(StraightThicknessParameterName), BendFamilyTypeName = BendFamilyTypeName, BendDiameterParameterName = ResolvedParameter(BendDiameterParameterName), BendWallThicknessParameterName = ResolvedParameter(BendWallThicknessParameterName), BendOuterDiameterParameterName = ResolvedParameter(BendOuterDiameterParameterName), PipingSystemTypeName = PipingSystemTypeName, PipeTypeName = PipeTypeName, LevelName = LevelName, SnapToleranceMm = SnapToleranceMm, CurrentBendSettings = _settings };
         ResultWarnings.Clear(); HasResult = false; ResultSummary = string.Empty;
         ProgressPercent = 0; PhaseText = "모델링 준비 중"; ProgressDetail = string.Empty; IsBusy = true;
         try
@@ -758,6 +769,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
             PipeAlignmentPhase.PlanningBends => "곡관 계획 중",
             PipeAlignmentPhase.PlacingStraights => "직관 배치 중",
             PipeAlignmentPhase.PlacingBends => "곡관 배치 중",
+            PipeAlignmentPhase.PlacingReducers => "이경관 배치 중",
             PipeAlignmentPhase.Committing => "모델 저장 중",
             _ => "모델링 중"
         };

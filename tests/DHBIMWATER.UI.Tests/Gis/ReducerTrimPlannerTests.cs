@@ -1,0 +1,77 @@
+using DHBIMWATER.Core.Geometry;
+using DHBIMWATER.Core.Gis;
+using Xunit;
+
+namespace DHBIMWATER.UI.Tests.Gis;
+
+public class ReducerTrimPlannerTests
+{
+    [Fact]
+    public void Diameter_change_creates_symmetric_trim_and_placement()
+    {
+        var plan = Plan(250d);
+
+        var placement = Assert.Single(plan.Placements);
+        Assert.Equal(new VertexTrim(0.125d, 0.125d), plan.Trims[0][1]);
+        Assert.Equal(VertexTrim.None, plan.Trims[0][0]);
+        Assert.Equal(VertexTrim.None, plan.Trims[0][2]);
+        Assert.Equal(300d, placement.UpstreamDiameterMm);
+        Assert.Equal(500d, placement.DownstreamDiameterMm);
+    }
+
+    [Fact]
+    public void Zero_length_skips_placement_with_one_warning()
+    {
+        var plan = Plan(0d);
+
+        Assert.Empty(plan.Placements);
+        Assert.All(plan.Trims.Single(), x => Assert.Equal(VertexTrim.None, x));
+        Assert.Single(plan.Warnings);
+        Assert.Contains("이경관 길이가 0", plan.Warnings.Single());
+    }
+
+    [Fact]
+    public void Bend_trim_at_same_vertex_skips_reducer_without_warning()
+    {
+        var bends = new BendTrimPlan(
+            new[] { new AlignmentBendPlan(0, new[] { VertexTrim.None, new VertexTrim(0.1d, 0.1d), VertexTrim.None }) },
+            Array.Empty<BendPlacement>(), Array.Empty<string>());
+
+        var plan = Plan(250d, bends);
+
+        Assert.Empty(plan.Placements);
+        Assert.Empty(plan.Warnings);
+        Assert.All(plan.Trims.Single(), x => Assert.Equal(VertexTrim.None, x));
+    }
+
+    [Fact]
+    public void Expansion_keeps_progress_direction_diameters_and_lookup_order()
+    {
+        var plan = Plan(250d, vertexDiameters: new double?[] { 500d, 300d, 300d });
+
+        var placement = Assert.Single(plan.Placements);
+        Assert.Equal(500d, placement.UpstreamDiameterMm);
+        Assert.Equal(300d, placement.DownstreamDiameterMm);
+    }
+
+    [Fact]
+    public void Placement_station_uses_vertex_station_plus_minus_half_body_length()
+    {
+        var plan = Plan(250d);
+
+        var placement = Assert.Single(plan.Placements);
+        Assert.Equal(134.435d, placement.StaStartM, 6);
+        Assert.Equal(134.685d, placement.StaEndM, 6);
+    }
+
+    private static ReducerTrimPlan Plan(double bodyLengthMm, BendTrimPlan? bends = null, IReadOnlyList<double?>? vertexDiameters = null)
+    {
+        var alignment = new PipeAlignment(
+            new[] { new Point3D(0, 0, 0), new Point3D(10, 0, 0), new Point3D(20, 0, 0) },
+            PipeKindCatalog.Water1, 300d, "test.xlsx", "도수1-3", new Dictionary<string, string>(),
+            VertexDiameterMm: vertexDiameters ?? new double?[] { 300d, 500d, 500d },
+            VertexStationM: new double?[] { 124.56d, 134.56d, 144.56d });
+        return ReducerTrimPlanner.Plan(new[] { alignment },
+            new FixedReducerSpecSource(bodyLengthMm, ReducerAlignment.Eccentric), bends, 0.001d);
+    }
+}

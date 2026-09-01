@@ -94,9 +94,9 @@ public sealed class AlignmentSourceLoaderMappingTests
 
         var result = new AlignmentSourceLoader(new[] { reader }).Load(new[] { file });
 
-        Assert.Contains(result.Warnings, warning => warning.Contains("고정 관종 목록에 없는 값(상수)"));
+        Assert.Contains(result.Warnings, warning => warning.Contains("미등록 관종 상수"));
         Assert.Equal(PipeKindCatalog.Water1, result.Alignments[0].PipeKind);
-        Assert.Contains(result.Warnings, warning => warning.Contains("등급을 해석하지 못한 레코드 1건은 상수 1종관으로 배치했습니다"));
+        Assert.Contains(result.Warnings, warning => warning.Contains("등급 해석 실패 1건 → 상수 1종관 적용"));
     }
 
     [Fact]

@@ -11,7 +11,7 @@ public sealed record BendAuthorityResult(
 /// <summary>엑셀 곡관유형 열의 권위 범위를 자동 곡관 판정에 적용한다.</summary>
 public static class BendAuthorityPolicy
 {
-    private sealed record VertexSource(int AlignmentIndex, int VertexIndex, bool IsAuthoritative, string? Raw);
+    private sealed record VertexSource(bool IsAuthoritative, string? Raw);
 
     public static BendAuthorityResult Evaluate(
         IReadOnlyList<PipeAlignment> alignments,
@@ -25,8 +25,8 @@ public static class BendAuthorityPolicy
         var forced = new Dictionary<int, double>();
         var automaticFallback = new HashSet<int>();
         var warnings = new List<string>();
-        // 각도로 못 읽은 표기. 선형별 1건으로 묶어 경고하려고 모아둔다.
-        var unreadable = new List<VertexSource>();
+        var unreadableCount = 0;
+        var nonStandardCount = 0;
 
         foreach (var (nodeId, nodeSources) in sources)
         {
@@ -37,7 +37,7 @@ public static class BendAuthorityPolicy
                 if (!BendKindParser.TryParseAngle(source.Raw, out var angle))
                 {
                     automaticFallback.Add(nodeId);
-                    unreadable.Add(source);
+                    unreadableCount++;
                     continue;
                 }
                 if (JointDeflectionRule.StandardAngles.Any(x => Math.Abs(x - angle) <= 1e-6))
@@ -48,8 +48,7 @@ public static class BendAuthorityPolicy
 
                 // 비표준 지정값은 지시서 검증 #10에 따라 자동판정을 유지한다.
                 automaticFallback.Add(nodeId);
-                var alignment = alignments[source.AlignmentIndex];
-                warnings.Add($"{Path.GetFileName(alignment.SourceFile)} 레코드 {alignment.RecordNumber} {AlignmentVertexLabel.Format(alignment, source.VertexIndex)}: 지정한 곡관각도 {source.Raw}는 표준각(11.25·22.5·45·90)이 아니어서 자동판정으로 처리했습니다.");
+                nonStandardCount++;
             }
         }
 
@@ -68,8 +67,9 @@ public static class BendAuthorityPolicy
                                      && !automaticFallback.Contains(x.NodeId)
                                      && x.Kind != BendResolutionKind.None).ToList();
 
-        warnings.AddRange(BuildUnreadableWarnings(alignments, unreadable));
-        warnings.AddRange(BuildForcedMismatchWarnings(alignments, sources, all, forced));
+        if (nonStandardCount > 0) warnings.Add($"비표준 지정각 자동판정 {nonStandardCount}건");
+        warnings.AddRange(BuildUnreadableWarnings(unreadableCount));
+        warnings.AddRange(BuildForcedMismatchWarnings(all, forced));
         return new BendAuthorityResult(all, kept, dropped.Count, warnings);
     }
 
@@ -89,39 +89,28 @@ public static class BendAuthorityPolicy
                           && alignment.VertexBendKinds is { } kinds && v < kinds.Count
                     ? kinds[v]
                     : null;
-                list.Add(new VertexSource(a, v, alignment.VertexBendKinds is not null, raw));
+                list.Add(new VertexSource(alignment.VertexBendKinds is not null, raw));
             }
         }
         return result;
     }
 
-    /// <summary>각도로 못 읽은 곡관유형 표기를 선형별 1건으로 묶어 알린다. 판정은 자동으로 넘어간 상태다.</summary>
-    private static IEnumerable<string> BuildUnreadableWarnings(
-        IReadOnlyList<PipeAlignment> alignments,
-        IReadOnlyList<VertexSource> unreadable)
+    private static IEnumerable<string> BuildUnreadableWarnings(int unreadableCount)
     {
-        foreach (var group in unreadable.GroupBy(x => x.AlignmentIndex))
-        {
-            var alignment = alignments[group.Key];
-            var examples = string.Join(", ", group.Take(5).Select(x => $"{AlignmentVertexLabel.Format(alignment, x.VertexIndex)} '{x.Raw}'"));
-            var suffix = group.Count() > 5 ? $", 외 {group.Count() - 5}건" : string.Empty;
-            yield return $"{Path.GetFileName(alignment.SourceFile)} 레코드 {alignment.RecordNumber}: 곡관유형 표기를 각도로 읽지 못한 정점 {group.Count()}건 — {examples}{suffix}. 해당 정점은 자동판정으로 배치했습니다.";
-        }
+        if (unreadableCount > 0) yield return $"곡관유형 각도 해석 실패 {unreadableCount}건 (자동판정)";
     }
 
     private static IEnumerable<string> BuildForcedMismatchWarnings(
-        IReadOnlyList<PipeAlignment> alignments,
-        IReadOnlyDictionary<int, List<VertexSource>> sources,
         IReadOnlyList<BendResolution> resolutions,
         IReadOnlyDictionary<int, double> forced)
     {
+        var count = 0;
         foreach (var item in forced)
         {
             var resolution = resolutions.FirstOrDefault(x => x.NodeId == item.Key);
             if (resolution is null || Math.Abs(item.Value - resolution.DeflectionDeg) <= resolution.EffectiveAllowableDeg + 1e-9) continue;
-            var source = sources[item.Key].First(x => x.IsAuthoritative && !string.IsNullOrWhiteSpace(x.Raw));
-            var alignment = alignments[source.AlignmentIndex];
-            yield return $"{Path.GetFileName(alignment.SourceFile)} 레코드 {alignment.RecordNumber} {AlignmentVertexLabel.Format(alignment, source.VertexIndex)}: 지정한 곡관각도({item.Value:0.##}°)가 실측 편각({resolution.DeflectionDeg:0.##}°)과 크게 달라 형상이 어긋날 수 있습니다.";
+            count++;
         }
+        if (count > 0) yield return $"허용 범위 초과 곡관 {count}건";
     }
 }

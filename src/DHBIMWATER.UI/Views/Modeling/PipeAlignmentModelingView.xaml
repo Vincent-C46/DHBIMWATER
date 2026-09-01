@@ -145,11 +145,12 @@
                             <Border Background="White" BorderBrush="#D7E0E7" BorderThickness="1" CornerRadius="6" Padding="10" Visibility="{Binding HasExcelFiles, Converter={StaticResource BoolToVisibility}}">
                             <StackPanel>
                             <TextBlock Text="엑셀 · CSV (측점 좌표)" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <DataGrid x:Name="ExcelGrid" ItemsSource="{Binding ExcelFiles}" SelectedItem="{Binding SelectedFile}" AutoGenerateColumns="False" CanUserAddRows="False" MinHeight="120" MaxHeight="220" VerticalScrollBarVisibility="Auto">
+                            <DataGrid x:Name="ExcelGrid" ItemsSource="{Binding ExcelFiles}" SelectedItem="{Binding SelectedFile}" AutoGenerateColumns="False" CanUserAddRows="False" CanUserResizeColumns="False" CanUserSortColumns="False" MinHeight="120" MaxHeight="220" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="파일 (Excel, 시트별)" Binding="{Binding FileName, Mode=OneWay}" IsReadOnly="True" Width="*">
+                                    <DataGridTextColumn Header="파일 (Excel, 시트별)" Binding="{Binding FileName, Mode=OneWay}" IsReadOnly="True" Width="*" MinWidth="120">
                                         <DataGridTextColumn.ElementStyle>
                                             <Style TargetType="TextBlock">
+                                                <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding HasWarnings}" Value="True">
                                                         <Setter Property="ToolTip" Value="{Binding WarningsDisplay}"/>
@@ -160,8 +161,14 @@
                                             </Style>
                                         </DataGridTextColumn.ElementStyle>
                                     </DataGridTextColumn>
-                                    <DataGridTextColumn Header="매핑 요약" Binding="{Binding ExcelMappingSummary, Mode=OneWay}" IsReadOnly="True" Width="*"/>
-                                    <DataGridTemplateColumn Width="90">
+                                    <DataGridTextColumn Header="매핑 요약" Binding="{Binding ExcelMappingSummary, Mode=OneWay}" IsReadOnly="True" Width="2*">
+                                        <DataGridTextColumn.ElementStyle>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                            </Style>
+                                        </DataGridTextColumn.ElementStyle>
+                                    </DataGridTextColumn>
+                                    <DataGridTemplateColumn Width="90" MinWidth="90">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
                                                 <Button Content="매핑 편집" Style="{StaticResource PrimaryButtonStyle}"
@@ -233,6 +240,9 @@
                             <TextBox Text="{Binding IntervalM}" Width="150" HorizontalAlignment="Left" ToolTip="직관 분절 간격. 곡관 자리는 제외">
                                 <TextBox.Style><Style TargetType="TextBox" BasedOn="{StaticResource PrimaryTextBoxStyle}"><Style.Triggers><DataTrigger Binding="{Binding IsIntervalHighlighted}" Value="True"><Setter Property="BorderBrush" Value="#E67E22"/><Setter Property="BorderThickness" Value="2"/></DataTrigger></Style.Triggers></Style></TextBox.Style>
                             </TextBox>
+                            <TextBlock Text="이경관 길이(mm)" Margin="0,8,0,3"/>
+                            <TextBox Text="{Binding ReducerBodyLengthMm}" Width="150" HorizontalAlignment="Left"
+                                     ToolTip="DN이 바뀌는 지점에 넣을 이경관 몸통 길이. 실제 제원표 확정 전 임시 입력값입니다."/>
                             </StackPanel>
                             </Border>
                             <Grid Margin="0,0,0,12">

@@ -39,6 +39,8 @@ public sealed record PipeAlignmentModelingRequest
     public ZSource ZSource { get; init; } = ZSource.GeometryZ;
     public PipeAlignmentOutputMode OutputMode { get; init; } = PipeAlignmentOutputMode.DirectShape;
     public double IntervalMm { get; init; } = 6000;
+    /// <summary>이경관 몸통 길이 S(mm). 제원표 확정 전 임시 입력이며 0 이하면 배치하지 않는다.</summary>
+    public double ReducerBodyLengthMm { get; init; } = 250d;
     /// <summary>직관 2점 가변 패밀리·타입("패밀리명 : 타입명").</summary>
     public string? StraightFamilyTypeName { get; init; }
     /// <summary>직관 인스턴스에 호칭지름(mm)을 기록할 파라미터명. null이면 기록하지 않는다.</summary>

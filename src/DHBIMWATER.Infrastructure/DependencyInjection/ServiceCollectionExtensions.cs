@@ -70,6 +70,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IBendSettingsRepo, RevitBendSettingsRepo>();
         services.AddSingleton<IBendSettingsFileStore, JsonFileBendSettingsFileStore>();
         services.AddTransient<IAdaptiveBendPlacementRepo, RevitAdaptiveBendPlacementRepo>();
+        services.AddTransient<IBendDirectShapeRepo, RevitBendDirectShapeRepo>();
+        services.AddTransient<IReducerDirectShapeRepo, RevitReducerDirectShapeRepo>();
         services.AddTransient<IGenericModelRepository, RevitGenericModelRepository>();
         services.AddTransient<IExteriorWallClassifierRepo, RevitExteriorWallClassifierRepo>();
         services.AddTransient<IValveRoomOutlinePickRepo, RevitValveRoomOutlinePickRepo>();
@@ -132,6 +134,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IBendSettingsRepo, MockBendSettingsRepo>();
         services.AddSingleton<IBendSettingsFileStore, JsonFileBendSettingsFileStore>();
         services.AddTransient<IAdaptiveBendPlacementRepo, MockAdaptiveBendPlacementRepo>();
+        services.AddTransient<IBendDirectShapeRepo, MockBendDirectShapeRepo>();
+        services.AddTransient<IReducerDirectShapeRepo, MockReducerDirectShapeRepo>();
         #endregion
 
         services.AddTransient<IExcelReader, ExcelReader>();

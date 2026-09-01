@@ -30,7 +30,7 @@ public sealed class AlignmentSourceLoader
             var reversed = file.ReversedRecordNumbers is { Count: > 0 } ? new HashSet<string>(file.ReversedRecordNumbers, StringComparer.Ordinal) : null;
             var failed = 0;
             var kindFallbackCount = 0;
-            string? example = null;
+            var mixedDnCount = 0;
             var unknownKinds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var feature in read.Features)
             {
@@ -63,7 +63,6 @@ public sealed class AlignmentSourceLoader
                 if (!diameterResolved)
                 {
                     unresolved++; failed++;
-                    example ??= rawDiameter;
                 }
                 // 정점 순서 반전 = 시작점·끝점 교환. 좌표값은 그대로 두므로 진단·모델링이 같은 방향을 공유한다.
                 var vertexDiameters = ResolveVertexDiameters(feature, file.DiameterMappings, rawKind);
@@ -83,18 +82,19 @@ public sealed class AlignmentSourceLoader
                 });
                 var distinctVertexDn = vertexDiameters?.Where(x => x is > 0).Select(x => x!.Value).Distinct().ToList() ?? [];
                 if (distinctVertexDn.Count > 1)
-                    warnings.Add($"{Path.GetFileName(feature.SourceFile)} 레코드 {feature.RecordNumber}: DN이 구간마다 다릅니다({string.Join(", ", distinctVertexDn.Select(x => $"DN{x:0.##}"))}). 구간별 DN으로 배치하며, 변경 지점의 이경관(리듀서)은 배치하지 않습니다.");
+                    mixedDnCount++;
             }
+            if (mixedDnCount > 0)
+                warnings.Add($"{Path.GetFileName(file.FilePath)}: 구간별 DN 혼재 {mixedDnCount}건 (리듀서 미배치)");
             if (failed > 0)
             {
                 var field = file.DiameterField ?? "미지정";
-                var value = string.IsNullOrWhiteSpace(example) ? "값 없음" : example;
-                warnings.Add($"{Path.GetFileName(file.FilePath)}: 직경 필드 '{field}' 값을 해석하지 못한 레코드 {failed}건 (예: '{value}'). 곡관 판정과 관저·관정 보정이 부정확합니다.");
+                warnings.Add($"{Path.GetFileName(file.FilePath)}: 직경 '{field}' 해석 실패 {failed}건");
             }
             if (warnOnUnknownPipeKinds && unknownKinds.Count > 0)
-                warnings.Add($"{Path.GetFileName(file.FilePath)}: 고정 관종 목록에 없는 값({string.Join(", ", unknownKinds)}). 입력 파일 탭에서 관종을 선택하세요.");
+                warnings.Add($"{Path.GetFileName(file.FilePath)}: 미등록 관종 {string.Join(", ", unknownKinds)}");
             if (warnOnUnknownPipeKinds && kindFallbackCount > 0)
-                warnings.Add($"{Path.GetFileName(file.FilePath)}: 등급을 해석하지 못한 레코드 {kindFallbackCount}건은 상수 1종관으로 배치했습니다. 두께·관저고가 실제와 다를 수 있습니다.");
+                warnings.Add($"{Path.GetFileName(file.FilePath)}: 등급 해석 실패 {kindFallbackCount}건 → 상수 1종관 적용");
         }
         return new AlignmentLoadResult(alignments, unresolved, warnings);
     }

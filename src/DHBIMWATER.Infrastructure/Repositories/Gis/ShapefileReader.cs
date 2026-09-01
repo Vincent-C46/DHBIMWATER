@@ -17,12 +17,12 @@ public sealed class ShapefileReader : IShapefileReader, IAlignmentSourceReader
         var warnings = new List<string>();
         var cpgPath = Path.ChangeExtension(shpPath, ".cpg");
         var prjPath = Path.ChangeExtension(shpPath, ".prj");
-        if (!File.Exists(cpgPath)) warnings.Add(".cpg 파일이 없어 CP949로 해석했습니다.");
-        if (!File.Exists(prjPath)) warnings.Add(".prj 파일이 없어 좌표계 정보를 확인할 수 없습니다.");
+        if (!File.Exists(cpgPath)) warnings.Add(".cpg 없음 — CP949로 해석");
+        if (!File.Exists(prjPath)) warnings.Add(".prj 없음 — 좌표계 미확인");
         var shp = ShpGeometryReader.Read(shpPath);
         var dbf = DbfTableReader.Read(dbfPath, cpgPath);
         var prj = PrjFileReader.Read(prjPath);
-        if (shp.Records.Count != dbf.Rows.Count) warnings.Add($"SHP 레코드 {shp.Records.Count}건과 DBF 레코드 {dbf.Rows.Count}건이 달라 최소 건수만 매칭했습니다.");
+        if (shp.Records.Count != dbf.Rows.Count) warnings.Add($"SHP {shp.Records.Count}건 / DBF {dbf.Rows.Count}건 불일치 — 최소 건수만 매칭");
         var features = new List<PipeAlignment>();
         foreach (var pair in shp.Records.Take(Math.Min(shp.Records.Count, dbf.Rows.Count)).Select((record, index) => (record, index)))
             for (var partIndex = 0; partIndex < pair.record.Parts.Count; partIndex++)
