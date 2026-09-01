@@ -78,7 +78,7 @@ public class AlignmentDatumOffsetterTests
         var point = result.Alignments.Single().Vertices[1];
         var firstDistance = DistanceToLine(point, new Point3D(1, 0, radiusM), new Vector3D(-1, 0, 0));
         var secondDirection = new Vector3D(0, Math.Sqrt(0.5), -Math.Sqrt(0.5));
-        var secondNormal = new Vector3D(0, 0.5, 0.5);
+        var secondNormal = new Vector3D(0, 0.5, 0.5).Normalize();
         var secondDistance = DistanceToLine(point, Move(new Point3D(1, 0, 0), secondNormal, radiusM), secondDirection);
 
         Assert.Contains(result.Warnings, warning => warning.Contains("근사한 정점 1곳"));
