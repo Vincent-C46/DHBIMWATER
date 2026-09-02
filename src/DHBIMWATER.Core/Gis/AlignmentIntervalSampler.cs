@@ -21,8 +21,8 @@ public readonly record struct VertexTrim(double Before, double After)
 public static class AlignmentIntervalSampler
 {
     private const double Tolerance = 1e-9;
-    // 직선 병합 허용각 0.5°. 엑셀 mm 반올림 노이즈는 흡수하고 실제 곡관 각도는 보존한다.
-    private const double StraightSinTolerance = 8.7265354983739E-03;
+    /// <summary>직선 병합 허용각 0.5°의 사인값. 엑셀 mm 반올림 노이즈는 흡수하고 실제 곡관 각도는 보존한다.</summary>
+    public const double StraightSinTolerance = 8.7265354983739E-03;
 
     public static IReadOnlyList<AlignmentSamplePoint> SamplePoints(IReadOnlyList<Point3D> vertices, double interval)
     {

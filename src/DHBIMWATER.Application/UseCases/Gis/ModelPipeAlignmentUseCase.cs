@@ -96,6 +96,7 @@ public sealed class ModelPipeAlignmentUseCase
         using (PlacementProfiler.Step("01b 기준면 보정"))
             offset = AlignmentDatumOffsetter.ToCenterline(loaded.Alignments, request.ZDatum, settings.StraightPipes, request.ReducerBodyLengthMm);
         var alignments = offset.Alignments;
+        var stepVertices = offset.DiameterStepVertexIndices;
         var origin = new AlignmentPlacementOrigin(reference?.X ?? 0, reference?.Y ?? 0, ZDatum.Centerline, settings.StraightPipes);
         var infoContext = new PipeInfoParameterContext(settings.ActiveJointType, settings.ApplicationMode, request.ZDatum);
         var elevationWarnings = GetElevationWarnings(alignments, request, settings.StraightPipes);
@@ -105,14 +106,14 @@ public sealed class ModelPipeAlignmentUseCase
         progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlanningBends, 0, 0));
         using (PlacementProfiler.Step("02 곡관 계획(PlanBends)"))
             (bendPlan, bendWarnings) = UsesBends(request.OutputMode)
-                ? PlanBends(alignments, request, settings, settingsSource == BendSettingsSource.BuiltInDefault)
+                ? PlanBends(alignments, stepVertices, request, settings, settingsSource == BendSettingsSource.BuiltInDefault)
                 : (null, Array.Empty<string>());
         ReducerTrimPlan? reducerPlan;
         using (PlacementProfiler.Step("02b 이경관 계획"))
             reducerPlan = UsesBends(request.OutputMode)
                 ? ReducerTrimPlanner.Plan(alignments,
                     new FixedReducerSpecSource(request.ReducerBodyLengthMm, AlignmentFor(request.ZDatum)), bendPlan,
-                    request.SnapToleranceMm / 1000d)
+                    request.SnapToleranceMm / 1000d, stepVertices)
                 : null;
         var mergedTrims = MergeTrims(bendPlan, reducerPlan, alignments);
 
@@ -197,7 +198,8 @@ public sealed class ModelPipeAlignmentUseCase
     /// <summary>
     /// 절점 곡관 판정을 폴리선 정점 차감량과 5점 가변 곡관 배치 계획으로 환산한다.
     /// </summary>
-    private (BendTrimPlan? Plan, IReadOnlyList<string> Warnings) PlanBends(IReadOnlyList<PipeAlignment> alignments, PipeAlignmentModelingRequest request, BendSettings settings, bool usesDefault)
+    private (BendTrimPlan? Plan, IReadOnlyList<string> Warnings) PlanBends(IReadOnlyList<PipeAlignment> alignments,
+        IReadOnlyList<IReadOnlySet<int>> stepVertices, PipeAlignmentModelingRequest request, BendSettings settings, bool usesDefault)
     {
         if (request.SnapToleranceMm <= 0) throw new ArgumentOutOfRangeException(nameof(request.SnapToleranceMm));
 
@@ -206,11 +208,12 @@ public sealed class ModelPipeAlignmentUseCase
         if (settings.Fittings.NeedsRestore) warnings.Add("저장된 곡관 치수가 현행 규격표와 구조가 다릅니다(중복 행 또는 플랜지곡관 누락). [관·곡관 규격표] 창에서 [기본값 복원] 후 저장하세요.");
 
         var snapTolerance = request.SnapToleranceMm / 1000d;
-        var graph = PipeNetworkBuilder.Build(alignments, snapTolerance);
+        var graphAlignments = CollapseDatumSteps(alignments, stepVertices);
+        var graph = PipeNetworkBuilder.Build(graphAlignments, snapTolerance);
         var nodes = PipeNetworkClassifier.Classify(graph);
-        var authority = BendAuthorityPolicy.Evaluate(alignments, graph, nodes, settings, snapTolerance);
+        var authority = BendAuthorityPolicy.Evaluate(graphAlignments, graph, nodes, settings, snapTolerance);
         var resolutions = authority.Kept;
-        var plan = BendTrimPlanner.Plan(alignments, graph, resolutions, snapTolerance);
+        var plan = BendTrimPlanner.Plan(alignments, graph, resolutions, snapTolerance, stepVertices);
         warnings.AddRange(authority.Warnings);
         warnings.AddRange(plan.Warnings);
 
@@ -223,6 +226,31 @@ public sealed class ModelPipeAlignmentUseCase
             warnings.Add($"허용 범위 초과 곡관 절점 {exceeded.Count}곳: {string.Join(", ", exceeded)}. 배치 가능한 곡관은 3D 뷰에서 적색 표시합니다.");
 
         return (plan, warnings);
+    }
+
+    private static IReadOnlyList<PipeAlignment> CollapseDatumSteps(IReadOnlyList<PipeAlignment> alignments,
+        IReadOnlyList<IReadOnlySet<int>> stepVertices)
+    {
+        var collapsed = new List<PipeAlignment>(alignments.Count);
+        for (var a = 0; a < alignments.Count; a++)
+        {
+            var steps = stepVertices.ElementAtOrDefault(a);
+            if (steps is null || steps.Count == 0) { collapsed.Add(alignments[a]); continue; }
+            var vertices = new List<DHBIMWATER.Core.Geometry.Point3D>();
+            for (var v = 0; v < alignments[a].Vertices.Count; v++)
+            {
+                if (steps.Contains(v))
+                {
+                    var up = alignments[a].Vertices[v - 1];
+                    var down = alignments[a].Vertices[v];
+                    vertices[^1] = new DHBIMWATER.Core.Geometry.Point3D((up.X + down.X) / 2d, (up.Y + down.Y) / 2d, (up.Z + down.Z) / 2d);
+                    continue;
+                }
+                vertices.Add(alignments[a].Vertices[v]);
+            }
+            collapsed.Add(alignments[a] with { Vertices = vertices });
+        }
+        return collapsed;
     }
 
     /// <summary>선택한 단일 패밀리·타입으로 모든 5점 가변 곡관을 배치한다.</summary>
@@ -325,7 +353,10 @@ public sealed class ModelPipeAlignmentUseCase
     }
 
     private static ReducerAlignment AlignmentFor(ZDatum datum)
-        => datum == ZDatum.Centerline ? ReducerAlignment.Concentric : ReducerAlignment.Eccentric;
+    {
+        // TODO: 제원표 확정 시 동심/편심 표준품 구분에 사용. 현재 형상은 폴리선 분할점에서 편심을 얻는다.
+        return datum == ZDatum.Centerline ? ReducerAlignment.Concentric : ReducerAlignment.Eccentric;
+    }
 
     private static (string FamilyName, string TypeName) ParseFamilyType(string? familyTypeName)
     {

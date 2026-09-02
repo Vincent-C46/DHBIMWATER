@@ -2,7 +2,9 @@ using DHBIMWATER.Core.Geometry;
 
 namespace DHBIMWATER.Core.Gis;
 
-public sealed record DatumOffsetResult(IReadOnlyList<PipeAlignment> Alignments, IReadOnlyList<string> Warnings);
+/// <param name="DiameterStepVertexIndices">선형별 기준면 단차로 갈라진 정점 쌍의 하류 쪽 출력 정점 인덱스 집합이다. 인덱스 v는 (v-1, v) 사이가 관축 직각 단차 조각임을 뜻한다.</param>
+public sealed record DatumOffsetResult(IReadOnlyList<PipeAlignment> Alignments, IReadOnlyList<string> Warnings,
+    IReadOnlyList<IReadOnlySet<int>> DiameterStepVertexIndices);
 
 public static class AlignmentDatumOffsetter
 {
@@ -15,19 +17,23 @@ public static class AlignmentDatumOffsetter
     {
         ArgumentNullException.ThrowIfNull(alignments);
         ArgumentNullException.ThrowIfNull(specs);
-        if (datum == ZDatum.Centerline) return new DatumOffsetResult(alignments, Array.Empty<string>());
+        if (datum == ZDatum.Centerline)
+            return new DatumOffsetResult(alignments, Array.Empty<string>(),
+                alignments.Select(_ => (IReadOnlySet<int>)new HashSet<int>()).ToList());
 
         var warnings = new OffsetWarnings();
         var result = alignments.Select(alignment => Offset(alignment, datum, specs, reducerBodyLengthMm, warnings)).ToList();
-        return new DatumOffsetResult(result, warnings.Build());
+        return new DatumOffsetResult(result.Select(x => x.Alignment).ToList(), warnings.Build(),
+            result.Select(x => x.StepVertexIndices).ToList());
     }
 
-    private static PipeAlignment Offset(PipeAlignment alignment, ZDatum datum, StraightPipeSpecTable specs,
+    private static (PipeAlignment Alignment, IReadOnlySet<int> StepVertexIndices) Offset(PipeAlignment alignment, ZDatum datum, StraightPipeSpecTable specs,
         double reducerBodyLengthMm, OffsetWarnings warnings)
     {
         var vertices = alignment.Vertices;
-        if (vertices.Count == 0) return alignment;
+        if (vertices.Count == 0) return (alignment, new HashSet<int>());
         var output = new RebuiltVertices(alignment);
+        var stepVertexIndices = new HashSet<int>();
         for (var v = 0; v < vertices.Count; v++)
         {
             var upstream = v > 0 ? AlignmentVertexDirection.SkippingNear(vertices, v, -1, Epsilon) : null;
@@ -46,9 +52,10 @@ public static class AlignmentDatumOffsetter
                     output.Add(vertices[v], v);
                     continue;
                 }
-                output.Add(up, v - 1);
+                output.Add(up, v - 1, v);
                 output.Add(down, v);
-                if (reducerBodyLengthMm > 0d && up.DistanceTo(down) > reducerBodyLengthMm / 2000d)
+                stepVertexIndices.Add(output.Count - 1);
+                if (reducerBodyLengthMm <= 0d || up.DistanceTo(down) > reducerBodyLengthMm / 1000d)
                     warnings.ShortReducerGaps++;
                 continue;
             }
@@ -58,7 +65,7 @@ public static class AlignmentDatumOffsetter
             var point = OffsetVertex(vertices[v], upstream, downstream, offsetMm, warnings);
             output.Add(point ?? vertices[v], v);
         }
-        return output.Build();
+        return (output.Build(), stepVertexIndices);
     }
 
     private static double OffsetMm(PipeAlignment alignment, ZDatum datum, StraightPipeSpecTable specs,
@@ -107,7 +114,14 @@ public static class AlignmentDatumOffsetter
     }
 
     private static bool AreCollinear(Vector3D first, Vector3D second)
-        => Math.Abs(Dot(first, second)) >= 1d - Epsilon;
+    {
+        first = new Vector3D(-first.X, -first.Y, -first.Z);
+        var cross = new Vector3D(
+            first.Y * second.Z - first.Z * second.Y,
+            first.Z * second.X - first.X * second.Z,
+            first.X * second.Y - first.Y * second.X);
+        return Dot(first, second) > 0d && cross.Length <= AlignmentIntervalSampler.StraightSinTolerance;
+    }
 
     private static (Point3D First, Point3D Second, double ResidualM) ClosestPoints(Point3D firstPoint, Vector3D firstDirection,
         Point3D secondPoint, Vector3D secondDirection)
@@ -148,14 +162,19 @@ public static class AlignmentDatumOffsetter
             _stations = source.VertexStationM is null ? null : new();
         }
 
+        public int Count => _vertices.Count;
+
         public void Add(Point3D point, int sourceIndex)
+            => Add(point, sourceIndex, sourceIndex);
+
+        public void Add(Point3D point, int diameterSourceIndex, int stationAndBendSourceIndex)
         {
             _vertices.Add(point);
-            _bendKinds?.Add(ValueAt(_source.VertexBendKinds, sourceIndex));
-            _diameters?.Add(ValueAt(_source.VertexDiameterMm, sourceIndex));
-            _diameterRawValues?.Add(ValueAt(_source.VertexDiameterRawValues, sourceIndex));
-            _stationTexts?.Add(ValueAt(_source.VertexStationTexts, sourceIndex));
-            _stations?.Add(ValueAt(_source.VertexStationM, sourceIndex));
+            _bendKinds?.Add(ValueAt(_source.VertexBendKinds, stationAndBendSourceIndex));
+            _diameters?.Add(ValueAt(_source.VertexDiameterMm, diameterSourceIndex));
+            _diameterRawValues?.Add(ValueAt(_source.VertexDiameterRawValues, diameterSourceIndex));
+            _stationTexts?.Add(ValueAt(_source.VertexStationTexts, stationAndBendSourceIndex));
+            _stations?.Add(ValueAt(_source.VertexStationM, stationAndBendSourceIndex));
         }
 
         public PipeAlignment Build() => _source with

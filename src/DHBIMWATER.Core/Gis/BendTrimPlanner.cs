@@ -63,7 +63,8 @@ public static class BendTrimPlanner
         IReadOnlyList<PipeAlignment> alignments,
         PipeNetworkGraph graph,
         IReadOnlyList<BendResolution> resolutions,
-        double snapTolerance)
+        double snapTolerance,
+        IReadOnlyList<IReadOnlySet<int>>? stepVertices = null)
     {
         if (snapTolerance <= 0) throw new ArgumentOutOfRangeException(nameof(snapTolerance), "스냅 허용오차는 0보다 커야 합니다.");
 
@@ -107,6 +108,7 @@ public static class BendTrimPlanner
             // 단부 정점(0, n-1)은 편각이 정의되지 않아 곡관 대상이 아니다.
             for (var v = 1; v < vertices.Count - 1; v++)
             {
+                if (stepVertices?.ElementAtOrDefault(a)?.Contains(v) == true || stepVertices?.ElementAtOrDefault(a)?.Contains(v + 1) == true) continue;
                 var nodeId = lookup.Find(vertices[v]);
                 if (nodeId is null || !placeable.TryGetValue(nodeId.Value, out var bend)) continue;
                 if (representatives[nodeId.Value] != (a, v))

@@ -29,7 +29,8 @@ public class AlignmentDatumOffsetterTests
         var input = Alignment(new Point3D(0, 0, 0), new Point3D(1, 0, 0));
         var radiusM = PipeElevationDatum.OffsetMm(ZDatum.Invert, Specs.Find(PipeKindCatalog.Water1, 500d), 500d) / 1000d;
 
-        var result = AlignmentDatumOffsetter.ToCenterline(new[] { input }, ZDatum.Invert, Specs).Alignments.Single();
+        var offset = AlignmentDatumOffsetter.ToCenterline(new[] { input }, ZDatum.Invert, Specs);
+        var result = offset.Alignments.Single();
 
         Assert.All(result.Vertices, point => Assert.Equal(radiusM, point.Z, 12));
     }
@@ -40,7 +41,8 @@ public class AlignmentDatumOffsetterTests
         var input = Alignment(new Point3D(0, 0, 0), new Point3D(0.8, 0, -0.6));
         var radiusM = PipeElevationDatum.OffsetMm(ZDatum.Invert, Specs.Find(PipeKindCatalog.Water1, 500d), 500d) / 1000d;
 
-        var result = AlignmentDatumOffsetter.ToCenterline(new[] { input }, ZDatum.Invert, Specs).Alignments.Single();
+        var offset = AlignmentDatumOffsetter.ToCenterline(new[] { input }, ZDatum.Invert, Specs);
+        var result = offset.Alignments.Single();
         var transformedZAtOrigin = ZAtX(result.Vertices[0], result.Vertices[1], 0d);
 
         Assert.Equal(radiusM / 0.8d, transformedZAtOrigin, 4);
@@ -119,7 +121,8 @@ public class AlignmentDatumOffsetterTests
             new string?[] { "300", "500", "500" }, new string?[] { "0+000", "0+001", "0+002" },
             new double?[] { 0d, 1d, 2d });
 
-        var result = AlignmentDatumOffsetter.ToCenterline(new[] { input }, ZDatum.Invert, Specs).Alignments.Single();
+        var offset = AlignmentDatumOffsetter.ToCenterline(new[] { input }, ZDatum.Invert, Specs);
+        var result = offset.Alignments.Single();
 
         Assert.Equal(4, result.Vertices.Count);
         Assert.Equal(4, result.VertexDiameterMm!.Count);
@@ -129,9 +132,49 @@ public class AlignmentDatumOffsetterTests
         Assert.Equal(4, result.VertexStationM!.Count);
         Assert.Equal(300d, result.VertexDiameterMm[1]);
         Assert.Equal(500d, result.VertexDiameterMm[2]);
+        Assert.Equal(1d, result.VertexStationM[1]);
+        Assert.Equal(1d, result.VertexStationM[2]);
+        Assert.Equal(new[] { 2 }, offset.DiameterStepVertexIndices.Single());
+    }
+
+    [Fact]
+    public void Nearly_collinear_excel_rounding_noise_still_splits_diameter_step()
+    {
+        var input = DiameterChangeAlignment(
+            new Point3D(0, 0, 0), new Point3D(1.4404, 0, -1.076), new Point3D(1.8782, 0, -1.403));
+
+        var result = AlignmentDatumOffsetter.ToCenterline(new[] { input }, ZDatum.Invert, Specs);
+
+        Assert.Equal(4, result.Alignments.Single().Vertices.Count);
+        Assert.Equal(new[] { 2 }, result.DiameterStepVertexIndices.Single());
+    }
+
+    [Fact]
+    public void One_degree_bend_does_not_split_diameter_step()
+    {
+        var input = DiameterChangeAlignment(
+            new Point3D(0, 0, 0), new Point3D(1, 0, 0), new Point3D(1 + Math.Cos(Math.PI / 180d), Math.Sin(Math.PI / 180d), 0));
+
+        var result = AlignmentDatumOffsetter.ToCenterline(new[] { input }, ZDatum.Invert, Specs);
+
+        Assert.Equal(3, result.Alignments.Single().Vertices.Count);
+        Assert.Empty(result.DiameterStepVertexIndices.Single());
+    }
+
+    [Fact]
+    public void U_turn_is_not_mistaken_for_collinear_diameter_step()
+    {
+        var input = DiameterChangeAlignment(new Point3D(0, 0, 0), new Point3D(1, 0, 0), new Point3D(0, 0, 0));
+
+        var result = AlignmentDatumOffsetter.ToCenterline(new[] { input }, ZDatum.Invert, Specs);
+
+        Assert.Equal(3, result.Alignments.Single().Vertices.Count);
+        Assert.Empty(result.DiameterStepVertexIndices.Single());
     }
 
     private static PipeAlignment Alignment(params Point3D[] vertices) => new(vertices, PipeKindCatalog.Water1, 500d, "test.xlsx", "1", new Dictionary<string, string>());
+    private static PipeAlignment DiameterChangeAlignment(params Point3D[] vertices) => new(vertices, PipeKindCatalog.Water1, 300d, "test.xlsx", "1", new Dictionary<string, string>(),
+        VertexDiameterMm: new double?[] { 300d, 500d, 500d }, VertexStationM: new double?[] { 0d, 1d, 2d });
     private static double ZAtX(Point3D first, Point3D second, double x) => first.Z + (second.Z - first.Z) * (x - first.X) / (second.X - first.X);
     private static double Deflection(IReadOnlyList<Point3D> vertices)
     {

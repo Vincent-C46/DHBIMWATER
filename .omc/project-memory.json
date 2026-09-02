@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1788220015389,
+  "lastScanned": 1788308090370,
   "projectRoot": "F:\\02_Work\\04_Addin\\DHBIMWATER",
   "techStack": {
     "languages": [],
@@ -39,8 +39,8 @@
     "docs": {
       "path": "docs",
       "purpose": "Documentation",
-      "fileCount": 106,
-      "lastAccessed": 1788220015013,
+      "fileCount": 116,
+      "lastAccessed": 1788308089203,
       "keyFiles": [
         "02_컨트럴등록.md",
         "03_뷰모델구현.md",
@@ -53,7 +53,7 @@
       "path": "installer",
       "purpose": null,
       "fileCount": 6,
-      "lastAccessed": 1788220015016,
+      "lastAccessed": 1788308089224,
       "keyFiles": [
         "README.md",
         "DHBIMWATER_2025.nsi",
@@ -66,21 +66,21 @@
       "path": "sandbox",
       "purpose": null,
       "fileCount": 0,
-      "lastAccessed": 1788220015017,
+      "lastAccessed": 1788308089239,
       "keyFiles": []
     },
     "src": {
       "path": "src",
       "purpose": "Source code",
       "fileCount": 0,
-      "lastAccessed": 1788220015018,
+      "lastAccessed": 1788308089254,
       "keyFiles": []
     },
     "tests": {
       "path": "tests",
       "purpose": "Test files",
       "fileCount": 0,
-      "lastAccessed": 1788220015020,
+      "lastAccessed": 1788308089269,
       "keyFiles": []
     }
   },
@@ -161,6 +161,12 @@
       "path": "docs\\99_관저고오프셋_경사보정_폴리선변환_지시서.md",
       "accessCount": 1,
       "lastAccessed": 1788251106603,
+      "type": "file"
+    },
+    {
+      "path": "docs\\100_이경관_대소반전_기준면분할_수정_지시서.md",
+      "accessCount": 1,
+      "lastAccessed": 1788332150929,
       "type": "file"
     }
   ],
