@@ -72,10 +72,6 @@
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="적용 Joint Type"/>
                             <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding JointTypes, Mode=OneWay}" SelectedItem="{Binding ActiveJointType, Mode=TwoWay}" Margin="0,3,0,10"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                                <RadioButton Content="한쪽 Joint" IsChecked="{Binding IsSingleJoint, Mode=TwoWay}" GroupName="ApplicationMode"/>
-                                <RadioButton Content="양쪽 Joint (θ₁+θ₂)" IsChecked="{Binding IsBothJoints, Mode=TwoWay}" GroupName="ApplicationMode" Margin="18,0"/>
-                            </StackPanel>
                         </StackPanel>
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>

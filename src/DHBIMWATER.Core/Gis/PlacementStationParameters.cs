@@ -14,6 +14,9 @@ public static class PlacementStationParameters
     public const string Flip = "Flip";
     public const string VerticalBasis = "VerticalBasis";
     public const string ShapeKind = "ShapeKind";
+    public const string AlignmentId = "AlignmentId";
+    public const string SourceKind = "SourceKind";
+    public const string SourceOptions = "SourceOptions";
 
     public static IReadOnlyDictionary<string, Guid> Guids { get; } = new Dictionary<string, Guid>(StringComparer.Ordinal)
     {
@@ -26,6 +29,9 @@ public static class PlacementStationParameters
         [Flip] = new("7989ea02-926a-43c0-a688-2bdf65c74c47"),
         [VerticalBasis] = new("adcc3144-7be1-4ae2-9f8b-67074c3cee22"),
         [ShapeKind] = new("e4b3d3e1-b811-4b61-bf22-7b6c92d43cb6"),
+        [AlignmentId] = new("061d3c75-1c08-4d53-bf9f-506522a1d077"),
+        [SourceKind] = new("dcbf73e3-67f7-4e89-8d2d-89e52b8eeef4"),
+        [SourceOptions] = new("a15f698d-fa7d-477f-a67b-a89dfae7d813"),
     };
 
     public static IReadOnlyList<SharedParameterDefinition> Definitions { get; } =
@@ -39,6 +45,9 @@ public static class PlacementStationParameters
         Def(Flip, ParameterSpecType.YesNo),
         Def(VerticalBasis, ParameterSpecType.Text),
         Def(ShapeKind, ParameterSpecType.Text),
+        Def(AlignmentId, ParameterSpecType.Text),
+        Def(SourceKind, ParameterSpecType.Text),
+        Def(SourceOptions, ParameterSpecType.Text),
     ];
 
     private static SharedParameterDefinition Def(string name, ParameterSpecType spec) => new()

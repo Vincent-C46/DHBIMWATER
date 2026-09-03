@@ -19,8 +19,8 @@ public sealed class BendSettingsFileStoreTests
                 new JointDeflectionTable(new[] { new JointDeflectionSpec(JointTypeCatalog.Tyton, 100, 5) }),
                 new BendFittingCatalog(new[] { new BendFittingEntry(100, 45, BendForm.BType, 120, 210, WallThicknessMm: 8) }),
                 JointTypeCatalog.Tyton,
-                JointApplicationMode.BothJoints,
-                BendConnection.Flanged);
+                BendConnection.Flanged,
+                BendForm.AType);
 
             store.Save(path, settings);
             var loaded = store.Load(path);

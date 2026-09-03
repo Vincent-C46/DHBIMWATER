@@ -9,8 +9,8 @@ public sealed class PlacementStationParametersTests
     [Fact]
     public void DHBoost_계약_이름_GUID_타입이_고정된다()
     {
-        Assert.Equal(9, PlacementStationParameters.Definitions.Count);
-        Assert.Equal(9, PlacementStationParameters.Guids.Values.Distinct().Count());
+        Assert.Equal(12, PlacementStationParameters.Definitions.Count);
+        Assert.Equal(12, PlacementStationParameters.Guids.Values.Distinct().Count());
         Assert.Equal(new Guid("53dfa8cd-0583-4a4b-90a9-31762c06eb2c"), PlacementStationParameters.Guids[PlacementStationParameters.SourceFile]);
         Assert.Equal(new Guid("cb041b23-f945-4e3d-a3fe-0f74ff49ae94"), PlacementStationParameters.Guids[PlacementStationParameters.StaStart]);
 
@@ -23,6 +23,9 @@ public sealed class PlacementStationParametersTests
         AssertDefinition(PlacementStationParameters.Flip, ParameterSpecType.YesNo);
         AssertDefinition(PlacementStationParameters.VerticalBasis, ParameterSpecType.Text);
         AssertDefinition(PlacementStationParameters.ShapeKind, ParameterSpecType.Text);
+        AssertDefinition(PlacementStationParameters.AlignmentId, ParameterSpecType.Text);
+        AssertDefinition(PlacementStationParameters.SourceKind, ParameterSpecType.Text);
+        AssertDefinition(PlacementStationParameters.SourceOptions, ParameterSpecType.Text);
     }
 
     private static void AssertDefinition(string name, ParameterSpecType spec)

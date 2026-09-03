@@ -28,6 +28,7 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
         progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingBends, 0, plans.Count));
         var doc = _doc() ?? throw new InvalidOperationException("활성 Revit 문서가 없습니다.");
         var basePoint = AlignmentPlacementMapper.GetProjectBasePoint(doc);
+        var projectNorthRotation = AlignmentPlacementMapper.GetProjectNorthRotation(doc);
         var symbols = new Dictionary<(string Family, string Type), FamilySymbol>();
         // 비활성 Symbol 활성화 시 필요한 Regenerate가 곡관 생성 배치 중간에 끼지 않도록 유형별로 먼저 확정한다.
         using (PlacementProfiler.Step("07a 곡관 Symbol 확정"))
@@ -72,7 +73,7 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
                 for (var i = 0; i < 5; i++)
                 {
                     var refPoint = (ReferencePoint)doc.GetElement(pointIds[i]);
-                    refPoint.Position = AlignmentPlacementMapper.ToXyz(points[i], plan.ZOffsetM, origin.X, origin.Y, basePoint);
+                    refPoint.Position = AlignmentPlacementMapper.ToXyz(points[i], plan.ZOffsetM, origin.X, origin.Y, basePoint, projectNorthRotation);
                 }
             if (info is { Enabled: true })
             {

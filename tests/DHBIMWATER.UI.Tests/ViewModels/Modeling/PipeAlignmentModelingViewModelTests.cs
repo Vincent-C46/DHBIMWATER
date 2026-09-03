@@ -6,6 +6,7 @@ using DHBIMWATER.Application.DTOs.Gis;
 using DHBIMWATER.Application.UseCases.Gis;
 using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Gis;
+using DHBIMWATER.UI.Commands;
 using DHBIMWATER.UI.ViewModels.Modeling;
 using Xunit;
 
@@ -120,6 +121,57 @@ public sealed class PipeAlignmentModelingViewModelTests
     }
 
     [Fact]
+    public void CancelPreview_ReenablesCreateModelAndNotifiesBindings()
+    {
+        var vm = CreatePreviewTestViewModel();
+        var changes = new List<string>();
+        vm.PropertyChanged += (_, e) => changes.Add(e.PropertyName!);
+
+        vm.ApplyPreviewReady(new PipeAlignmentModelingResult(PipeAlignmentOutputMode.DirectShape, 3, 0, []));
+        Assert.False(vm.CanCreateModel);
+        changes.Clear();
+
+        typeof(PipeAlignmentModelingViewModel).GetMethod("CancelPreview", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, null);
+
+        Assert.True(vm.CanCreateModel);
+        Assert.True(vm.CreateCommand.CanExecute(null));
+        Assert.Equal("미리보기 완료 · 최종 생성 취소", vm.PhaseText);
+        Assert.Contains(nameof(PipeAlignmentModelingViewModel.CanCreateModel), changes);
+        Assert.Contains(nameof(PipeAlignmentModelingViewModel.IsInputEnabled), changes);
+    }
+
+    [Fact]
+    public void AwaitingPreviewConfirm_LocksInputAndNotifiesBindings()
+    {
+        var vm = CreatePreviewTestViewModel();
+        var changes = new List<string>();
+        vm.PropertyChanged += (_, e) => changes.Add(e.PropertyName!);
+
+        vm.ApplyPreviewReady(new PipeAlignmentModelingResult(PipeAlignmentOutputMode.DirectShape, 3, 0, []));
+
+        Assert.False(vm.IsInputEnabled);
+        Assert.Contains(nameof(PipeAlignmentModelingViewModel.CanCreateModel), changes);
+        Assert.Contains(nameof(PipeAlignmentModelingViewModel.IsInputEnabled), changes);
+
+        typeof(PipeAlignmentModelingViewModel).GetMethod("CancelPreview", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, null);
+
+        Assert.True(vm.IsInputEnabled);
+    }
+
+    [Fact]
+    public void ApplyResult_WhenAlreadyNotBusy_NotifiesCreateModel()
+    {
+        var vm = CreatePreviewTestViewModel();
+        var changes = new List<string>();
+        vm.PropertyChanged += (_, e) => changes.Add(e.PropertyName!);
+
+        vm.ApplyResult(new PipeAlignmentModelingResult(PipeAlignmentOutputMode.DirectShape, 3, 0, []));
+
+        Assert.True(vm.CanCreateModel);
+        Assert.Contains(nameof(PipeAlignmentModelingViewModel.CanCreateModel), changes);
+    }
+
+    [Fact]
     public void DiameterMappingRow_DefaultPipeKindIsNotUserModified()
     {
         var row = new DiameterMappingRow { RawValue = "DN300", KindRawValue = "(값 없음)", FileName = "sample.shp", FileKey = "sample", Count = 1 };
@@ -162,6 +214,15 @@ public sealed class PipeAlignmentModelingViewModelTests
         var vm = (PipeAlignmentModelingViewModel)RuntimeHelpers.GetUninitializedObject(typeof(PipeAlignmentModelingViewModel));
         typeof(PipeAlignmentModelingViewModel).GetField("_phaseStopwatch", BindingFlags.NonPublic | BindingFlags.Instance)!
             .SetValue(vm, new Stopwatch());
+        return vm;
+    }
+
+    private static PipeAlignmentModelingViewModel CreatePreviewTestViewModel()
+    {
+        var vm = CreateWithoutServices();
+        SetAutoProperty(vm, "PreflightIssues", new ObservableCollection<PreflightIssue>());
+        SetAutoProperty(vm, "ResultWarnings", new ObservableCollection<string>());
+        SetAutoProperty(vm, "CreateCommand", new RelayCommand(_ => { }, _ => vm.CanCreateModel));
         return vm;
     }
 

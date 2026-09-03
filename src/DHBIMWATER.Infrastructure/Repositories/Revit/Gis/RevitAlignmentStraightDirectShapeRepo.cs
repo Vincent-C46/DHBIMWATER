@@ -18,7 +18,12 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
     // 150도 마이터의 반각 75도. 더 큰 기울기는 압출 길이 폭주 위험.
     private static readonly double MaxCutSlope = Math.Tan(StraightJointCutPlane.MaxMiterDeflectionDeg / 2d * Math.PI / 180d);
     private readonly Func<Document?> _doc;
-    public RevitAlignmentStraightDirectShapeRepo(Func<Document?> doc) => _doc = doc;
+    private readonly IAlignmentSnapshotStore? _snapshotStore;
+    public RevitAlignmentStraightDirectShapeRepo(Func<Document?> doc, IAlignmentSnapshotStore? snapshotStore = null)
+    {
+        _doc = doc;
+        _snapshotStore = snapshotStore;
+    }
 
     public AlignmentStraightPlacementResult PlaceAlong(IReadOnlyList<PipeAlignment> alignments, string straightFamilyTypeName, double intervalM, AlignmentPlacementOrigin origin,
         StraightPipeSpecTable specs, IReadOnlyList<IReadOnlyList<VertexTrim>>? trims = null, string? diameterParameterName = null,
@@ -28,6 +33,7 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
         var doc = _doc() ?? throw new InvalidOperationException("활성 Revit 문서가 없습니다.");
         var minLengthFt = doc.Application.ShortCurveTolerance;
         var basePoint = AlignmentPlacementMapper.GetProjectBasePoint(doc);
+        var projectNorthRotation = AlignmentPlacementMapper.GetProjectNorthRotation(doc);
         var placed = new List<(DirectShape Shape, PipeAlignment Alignment, double DiameterMm, StraightPipeSpec? Spec, AlignmentSampleSegment Segment, double ZOffsetM)>();
         var specCache = new Dictionary<(string PipeKind, double DiameterMm), StraightPipeSpec?>();
         var missingSpecs = new HashSet<(string PipeKind, double DiameterMm)>();
@@ -56,8 +62,8 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
                 var outerDiameterMm = spec?.OuterDiameterMm ?? diameterMm;
 
                 var zOffsetM = origin.GetZOffsetM(alignment.PipeKind, diameterMm);
-                var start = ToXyz(segment.Start, zOffsetM, origin, basePoint);
-                var end = ToXyz(segment.End, zOffsetM, origin, basePoint);
+                var start = ToXyz(segment.Start, zOffsetM, origin, basePoint, projectNorthRotation);
+                var end = ToXyz(segment.End, zOffsetM, origin, basePoint, projectNorthRotation);
                 if (start.DistanceTo(end) < minLengthFt) continue;
                 if (outerDiameterMm > OversizedOuterDiameterMm)
                     oversizedOuterDiameters.Add((alignment.PipeKind, diameterMm, outerDiameterMm));
@@ -85,10 +91,17 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
                 }
                 catch (Exception ex)
                 {
+                    if (ex is ArgumentException outOfRange &&
+                        (outOfRange.ParamName == "origin" ||
+                         outOfRange.Message.Contains("design limits", StringComparison.OrdinalIgnoreCase)))
+                        throw new InvalidOperationException(
+                            "DirectShape 생성 실패: 내부원점으로부터 너무 멀리 떨어진 곳에 모델링을 시도했습니다.", ex);
+
                     throw new InvalidOperationException(
                         $"직관 DirectShape 생성 실패: {AlignmentIdOf(alignment)}, segmentIndex={segmentIndex}, " +
                         $"원본 좌표(m) {FormatPoint(segment.Start)} ~ {FormatPoint(segment.End)}, 적용 외경={outerDiameterMm:0.###}mm, " +
-                        $"startExtension={FormatExtension(startExtensionFt)}ft, endExtension={FormatExtension(endExtensionFt)}ft", ex);
+                        $"startExtension={FormatExtension(startExtensionFt)}ft, endExtension={FormatExtension(endExtensionFt)}ft, " +
+                        $"내부예외={ex.GetType().Name}: {ex.Message}", ex);
                 }
                 placed.Add((shape, alignment, diameterMm, spec, segment, zOffsetM));
                 progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingStraights, placed.Count, total));
@@ -98,17 +111,37 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
         PlacementProfiler.Count("직관 DirectShape", placed.Count);
 
         var writer = new PipeParameterWriter();
+        var snapshotWarnings = new HashSet<string>();
         using (PlacementProfiler.Step("06c 직관 파라미터 기록"))
         {
             PipeAlignment? previousAlignment = null;
+            PipeAlignment? snapshotAlignment = null;
             AlignmentStationProfile? stationProfile = null;
+            var alignmentSnapshotId = string.Empty;
             foreach (var (shape, alignment, diameterMm, spec, segment, zOffsetM) in placed)
             {
                 if (info is not { Enabled: true }) continue;
+
                 if (!ReferenceEquals(alignment, previousAlignment))
                 {
                     previousAlignment = alignment;
                     stationProfile = new AlignmentStationProfile(alignment);
+                }
+
+                if (!ReferenceEquals(alignment, snapshotAlignment))
+                {
+                    snapshotAlignment = alignment;
+                    string snapshotWarning;
+                    if (_snapshotStore is null)
+                    {
+                        alignmentSnapshotId = string.Empty;
+                        snapshotWarning = "DHBoost 선형 스냅샷 저장소가 등록되지 않아 측점 편집 스냅샷을 기록하지 못했습니다.";
+                    }
+                    else
+                    {
+                        alignmentSnapshotId = _snapshotStore.EnsureSnapshot(alignment, stationProfile!, origin, out snapshotWarning);
+                    }
+                    if (!string.IsNullOrWhiteSpace(snapshotWarning)) snapshotWarnings.Add(snapshotWarning);
                 }
 
                 var lengthM = segment.Start.DistanceTo(segment.End);
@@ -141,10 +174,17 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
                 writer.YesNo(shape, PlacementStationParameters.Flip, false);
                 writer.Text(shape, PlacementStationParameters.VerticalBasis, "GlobalZ");
                 writer.Text(shape, PlacementStationParameters.ShapeKind, "Cylinder");
+                if (!string.IsNullOrWhiteSpace(alignmentSnapshotId))
+                {
+                    writer.Text(shape, PlacementStationParameters.AlignmentId, alignmentSnapshotId);
+                    writer.Text(shape, PlacementStationParameters.SourceKind, "Pipe");
+                    writer.Text(shape, PlacementStationParameters.SourceOptions, string.Empty);
+                }
             }
         }
 
         var warnings = new List<string>();
+        warnings.AddRange(snapshotWarnings);
         if (missingSpecs.Count > 0)
         {
             var values = string.Join(", ", missingSpecs.OrderBy(x => x.PipeKind).ThenBy(x => x.DiameterMm)
@@ -252,8 +292,8 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
         return radiusFt * slope + UC.MmToFt(1d);
     }
 
-    private static XYZ ToXyz(DHBIMWATER.Core.Geometry.Point3D point, double zOffsetM, AlignmentPlacementOrigin origin, XYZ basePoint)
-        => AlignmentPlacementMapper.ToXyz(point, zOffsetM, origin.X, origin.Y, basePoint);
+    private static XYZ ToXyz(DHBIMWATER.Core.Geometry.Point3D point, double zOffsetM, AlignmentPlacementOrigin origin, XYZ basePoint, double projectNorthRotation)
+        => AlignmentPlacementMapper.ToXyz(point, zOffsetM, origin.X, origin.Y, basePoint, projectNorthRotation);
 
     private static XYZ ToXyz(DHBIMWATER.Core.Geometry.Vector3D vector) => new(vector.X, vector.Y, vector.Z);
     private static DHBIMWATER.Core.Geometry.Vector3D ToVector3D(XYZ vector) => new(vector.X, vector.Y, vector.Z);

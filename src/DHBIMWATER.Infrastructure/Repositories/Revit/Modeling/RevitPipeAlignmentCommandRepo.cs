@@ -13,10 +13,27 @@ public sealed class RevitPipeAlignmentCommandRepo : IPipeAlignmentCommandRepo
     private readonly Func<Document?> _doc;
     public RevitPipeAlignmentCommandRepo(Func<Document?> doc) => _doc = doc;
 
+    public int DeletePreviews()
+    {
+        var doc = _doc() ?? throw new InvalidOperationException("활성 Revit 문서를 찾을 수 없습니다.");
+        var ids = new FilteredElementCollector(doc)
+            .OfClass(typeof(DirectShape))
+            .OfCategory(BuiltInCategory.OST_GenericModel)
+            .WhereElementIsNotElementType()
+            .Where(x => x.LookupParameter("DH_Addin")?.AsString() == "DHBIMWATER"
+                && x.LookupParameter("DH_Category")?.AsString() == "관로")
+            .Select(x => x.Id)
+            .ToList();
+        if (ids.Count == 0) return 0;
+        doc.Delete(ids);
+        return ids.Count;
+    }
+
     public PipeAlignmentCreateResult Create(PipeAlignmentCreateDefinition definition, IProgress<PipeAlignmentProgress>? progress = null)
     {
         var doc = _doc() ?? throw new InvalidOperationException("활성 Revit 문서를 찾을 수 없습니다.");
         var basePoint = AlignmentPlacementMapper.GetProjectBasePoint(doc);
+        var projectNorthRotation = AlignmentPlacementMapper.GetProjectNorthRotation(doc);
         var created = 0; var skipped = 0; var warnings = new List<string>();
         progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingStraights, 0, definition.Alignments.Count));
         for (var alignmentIndex = 0; alignmentIndex < definition.Alignments.Count; alignmentIndex++)
@@ -27,8 +44,8 @@ public sealed class RevitPipeAlignmentCommandRepo : IPipeAlignmentCommandRepo
             var lines = new List<GeometryObject>();
             for (var i = 1; i < alignment.Vertices.Count; i++)
             {
-                var start = ToXyz(alignment.Vertices[i - 1], zOffsetM, definition.Origin, basePoint);
-                var end = ToXyz(alignment.Vertices[i], zOffsetM, definition.Origin, basePoint);
+                var start = ToXyz(alignment.Vertices[i - 1], zOffsetM, definition.Origin, basePoint, projectNorthRotation);
+                var end = ToXyz(alignment.Vertices[i], zOffsetM, definition.Origin, basePoint, projectNorthRotation);
                 if (start.DistanceTo(end) < MinimumSegmentFeet) { skipped++; continue; }
                 lines.Add(Line.CreateBound(start, end));
             }
@@ -52,8 +69,8 @@ public sealed class RevitPipeAlignmentCommandRepo : IPipeAlignmentCommandRepo
         return new PipeAlignmentCreateResult(created, skipped, warnings);
     }
 
-    private static XYZ ToXyz(DHBIMWATER.Core.Geometry.Point3D point, double zOffsetM, AlignmentPlacementOrigin origin, XYZ basePoint)
-        => AlignmentPlacementMapper.ToXyz(point, zOffsetM, origin.X, origin.Y, basePoint);
+    private static XYZ ToXyz(DHBIMWATER.Core.Geometry.Point3D point, double zOffsetM, AlignmentPlacementOrigin origin, XYZ basePoint, double projectNorthRotation)
+        => AlignmentPlacementMapper.ToXyz(point, zOffsetM, origin.X, origin.Y, basePoint, projectNorthRotation);
 
     private static double CalculateLengthMm(IReadOnlyList<DHBIMWATER.Core.Geometry.Point3D> vertices) => vertices.Zip(vertices.Skip(1), (a, b) => a.DistanceTo(b)).Sum() * 1000;
     private static void SetText(Element element, string name, string value) => element.LookupParameter(name)?.Set(value ?? string.Empty);

@@ -2,7 +2,9 @@
 using Autodesk.Revit.UI;
 using DHBIMWATER.Application.DependencyInjection;
 using DHBIMWATER.Application.Interfaces;
+using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Infrastructure.DependencyInjection;
+using DHBIMWATER.Revit.Interop;
 using DHBIMWATER.Revit.Commands;
 using DHBIMWATER.UI.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,6 +35,7 @@ namespace DHBIMWATER.Revit.DependencyInjection
             services.AddRevitServices();                // Revit 관련 서비스
             services.AddApplicationServices();          // Application 서비스
             services.AddInfrastructureServices();       // Infrastructure 서비스
+            services.AddSingleton<IAlignmentSnapshotStore, DhBoostAlignmentSnapshotStore>();
 
             _serviceProvider = services.BuildServiceProvider();
         }

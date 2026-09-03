@@ -23,10 +23,27 @@ public static class AlignmentPlacementMapper
         return basePoint?.Position ?? XYZ.Zero;
     }
 
+    /// <summary>공유좌표의 진북 회전을 프로젝트 좌표로 바꿀 때 쓸 Revit 각도(rad).</summary>
+    public static double GetProjectNorthRotation(Document doc)
+        => doc.ActiveProjectLocation.GetProjectPosition(XYZ.Zero).Angle;
+
+    public static (double X, double Y) RotateRelativeXY(double xFeet, double yFeet, double projectNorthRotation)
+    {
+        var cos = Math.Cos(projectNorthRotation);
+        var sin = Math.Sin(projectNorthRotation);
+        return (xFeet * cos - yFeet * sin, xFeet * sin + yFeet * cos);
+    }
+
     /// <param name="basePoint">GetProjectBasePoint 결과. 정점마다 재조회하지 않도록 호출부에서 1회 조회해 넘긴다.</param>
-    public static XYZ ToXyz(Point3D point, double zOffsetM, double referenceX, double referenceY, XYZ basePoint)
-        => new(
-            basePoint.X + UC.MToFt(point.X - referenceX),
-            basePoint.Y + UC.MToFt(point.Y - referenceY),
-            basePoint.Z + UC.MToFt(point.Z + zOffsetM));
+    /// <param name="projectNorthRotation">GetProjectNorthRotation 결과. 0이면 기존 좌표 변환과 같다.</param>
+    public static XYZ ToXyz(Point3D point, double zOffsetM, double referenceX, double referenceY, XYZ basePoint,
+        double projectNorthRotation = 0)
+    {
+        var relative = new XYZ(
+            UC.MToFt(point.X - referenceX),
+            UC.MToFt(point.Y - referenceY),
+            UC.MToFt(point.Z + zOffsetM));
+        var (x, y) = RotateRelativeXY(relative.X, relative.Y, projectNorthRotation);
+        return new XYZ(basePoint.X + x, basePoint.Y + y, basePoint.Z + relative.Z);
+    }
 }

@@ -19,6 +19,7 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
         if (plans.Count == 0) return new AdaptiveBendPlacementResult(0, Array.Empty<string>());
         var doc = _doc() ?? throw new InvalidOperationException("활성 Revit 문서가 없습니다.");
         var basePoint = AlignmentPlacementMapper.GetProjectBasePoint(doc);
+        var projectNorthRotation = AlignmentPlacementMapper.GetProjectNorthRotation(doc);
         var materialId = PipeSolidFactory.FindOrCreateDcipMaterial(doc);
         var writer = new PipeParameterWriter();
         var warnings = new List<string>();
@@ -36,7 +37,7 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
             try
             {
                 var points = new[] { plan.Points.Start, plan.Points.ArcStart, plan.Points.ArcMid, plan.Points.ArcEnd, plan.Points.End }
-                    .Select(x => AlignmentPlacementMapper.ToXyz(x, plan.ZOffsetM, origin.X, origin.Y, basePoint)).ToArray();
+                    .Select(x => AlignmentPlacementMapper.ToXyz(x, plan.ZOffsetM, origin.X, origin.Y, basePoint, projectNorthRotation)).ToArray();
                 if (!TryBuildSolid(doc.Application.ShortCurveTolerance, points, plan, materialId, out var solid))
                 {
                     skipped++;

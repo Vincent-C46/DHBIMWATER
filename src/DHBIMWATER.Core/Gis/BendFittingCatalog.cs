@@ -33,9 +33,9 @@ public sealed record BendFittingEntry(
     PipeMaterial Material = PipeMaterial.DuctileIron,
     BendConnection Connection = BendConnection.Socket)
 {
-    /// <summary>s — B형(소켓+스피것)만 200mm 고정, A형(양쪽 소켓)은 0. 핸드북 고정값이라 사용자 입력 대상이 아니다.</summary>
+    /// <summary>s — 소켓 B형(소켓+스피것)만 200mm. A형과 플랜지곡관(양단 플랜지)은 스피것이 없어 0이다.</summary>
     [JsonIgnore]
-    public double ExtraLegLengthMm => Form == BendForm.BType ? 200d : 0d;
+    public double ExtraLegLengthMm => Connection == BendConnection.Socket && Form == BendForm.BType ? 200d : 0d;
 }
 
 public sealed class BendFittingCatalog
@@ -278,14 +278,18 @@ public sealed record BendSettings(
     JointDeflectionTable JointDeflections,
     BendFittingCatalog Fittings,
     string ActiveJointType,
-    JointApplicationMode ApplicationMode,
     /// <summary>배치에 쓸 곡관 접합 종류. 모델링 창에서 고르며 기본은 소켓이다.</summary>
-    BendConnection ActiveBendConnection = BendConnection.Socket)
+    BendConnection ActiveBendConnection = BendConnection.Socket,
+    /// <summary>배치에 쓸 곡관 형식. A형(양단 소켓)은 s=0·양쪽 Joint, B형(소켓+스피것)은 s=200·한쪽 Joint를 결정한다(2026-09-03 확정).</summary>
+    BendForm ActiveBendForm = BendForm.BType)
 {
+    /// <summary>허용굴곡 적용 방식은 곡관 형식이 결정한다. A형은 양쪽 Joint(θ₁+θ₂), B형은 한쪽 Joint.</summary>
+    public JointApplicationMode ApplicationMode =>
+        ActiveBendForm == BendForm.AType ? JointApplicationMode.BothJoints : JointApplicationMode.SingleJoint;
+
     public static BendSettings Default { get; } = new(
         StraightPipeSpecTable.Default,
         JointDeflectionTable.Default,
         BendFittingCatalog.Default,
-        JointTypeCatalog.KpMechanical,
-        JointApplicationMode.SingleJoint);
+        JointTypeCatalog.KpMechanical);
 }

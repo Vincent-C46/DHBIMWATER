@@ -48,9 +48,9 @@ public sealed class RevitBendSettingsRepo : IBendSettingsRepo
         var joints = Deserialize<JointDeflectionSpec>(entity.Get<string>(schema.GetField(JointDeflectionField)));
         var fittings = Deserialize<BendFittingEntry>(entity.Get<string>(schema.GetField(FittingField)));
         var activeJointType = entity.Get<string>(schema.GetField(ActiveJointTypeField));
-        var (mode, connection) = ParseModes(entity.Get<string>(schema.GetField(ApplicationModeField)));
+        var (form, connection) = ParseModes(entity.Get<string>(schema.GetField(ApplicationModeField)));
         return new BendSettings(new StraightPipeSpecTable(straight), new JointDeflectionTable(joints),
-            new BendFittingCatalog(fittings), string.IsNullOrWhiteSpace(activeJointType) ? JointTypeCatalog.KpMechanical : activeJointType, mode, connection);
+            new BendFittingCatalog(fittings), string.IsNullOrWhiteSpace(activeJointType) ? JointTypeCatalog.KpMechanical : activeJointType, connection, form);
     }
 
     public void Save(BendSettings settings)
@@ -65,21 +65,25 @@ public sealed class RevitBendSettingsRepo : IBendSettingsRepo
         entity.Set(schema.GetField(FittingField), JsonSerializer.Serialize(settings.Fittings.Entries, JsonOptions));
         entity.Set(schema.GetField(ActiveJointTypeField), settings.ActiveJointType);
         // 기존 Schema에 필드를 추가할 수 없으므로 같은 문자열 필드에 함께 저장한다. 구 값("SingleJoint")도 ParseModes가 그대로 읽는다.
-        entity.Set(schema.GetField(ApplicationModeField), $"{settings.ApplicationMode}|{settings.ActiveBendConnection}");
+        entity.Set(schema.GetField(ApplicationModeField), $"{settings.ApplicationMode}|{settings.ActiveBendConnection}|{settings.ActiveBendForm}");
         storage.SetEntity(entity);
     }
 
     private static List<T> Deserialize<T>(string? json)
         => string.IsNullOrWhiteSpace(json) ? new List<T>() : JsonSerializer.Deserialize<List<T>>(json, JsonOptions) ?? new List<T>();
 
-    private static (JointApplicationMode Mode, BendConnection Connection) ParseModes(string? text)
+    /// <summary>구 저장본(형식 필드 없음)은 ApplicationMode로 형식을 역매핑한다: 양쪽 Joint→A형, 그 외→B형(2026-09-03).</summary>
+    private static (BendForm Form, BendConnection Connection) ParseModes(string? text)
     {
         var parts = (text ?? string.Empty).Split('|');
         var mode = Enum.TryParse<JointApplicationMode>(parts[0], out var parsedMode) ? parsedMode : JointApplicationMode.SingleJoint;
         var connection = parts.Length > 1 && Enum.TryParse<BendConnection>(parts[1], out var parsedConnection)
             ? parsedConnection
             : BendConnection.Socket;
-        return (mode, connection);
+        var form = parts.Length > 2 && Enum.TryParse<BendForm>(parts[2], out var parsedForm)
+            ? parsedForm
+            : (mode == JointApplicationMode.BothJoints ? BendForm.AType : BendForm.BType);
+        return (form, connection);
     }
 
     private static DataStorage? FindStorage(Document doc)

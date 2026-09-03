@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1788308090370,
+  "lastScanned": 1788398008643,
   "projectRoot": "F:\\02_Work\\04_Addin\\DHBIMWATER",
   "techStack": {
     "languages": [],
@@ -39,8 +39,8 @@
     "docs": {
       "path": "docs",
       "purpose": "Documentation",
-      "fileCount": 116,
-      "lastAccessed": 1788308089203,
+      "fileCount": 120,
+      "lastAccessed": 1788398007642,
       "keyFiles": [
         "02_컨트럴등록.md",
         "03_뷰모델구현.md",
@@ -53,7 +53,7 @@
       "path": "installer",
       "purpose": null,
       "fileCount": 6,
-      "lastAccessed": 1788308089224,
+      "lastAccessed": 1788398007649,
       "keyFiles": [
         "README.md",
         "DHBIMWATER_2025.nsi",
@@ -66,25 +66,37 @@
       "path": "sandbox",
       "purpose": null,
       "fileCount": 0,
-      "lastAccessed": 1788308089239,
+      "lastAccessed": 1788398007655,
       "keyFiles": []
     },
     "src": {
       "path": "src",
       "purpose": "Source code",
       "fileCount": 0,
-      "lastAccessed": 1788308089254,
+      "lastAccessed": 1788398007663,
       "keyFiles": []
     },
     "tests": {
       "path": "tests",
       "purpose": "Test files",
       "fileCount": 0,
-      "lastAccessed": 1788308089269,
+      "lastAccessed": 1788398007668,
       "keyFiles": []
     }
   },
   "hotPaths": [
+    {
+      "path": "src\\DHBIMWATER.UI\\ViewModels\\Modeling\\PipeAlignmentModelingViewModel.cs",
+      "accessCount": 9,
+      "lastAccessed": 1788403767848,
+      "type": "file"
+    },
+    {
+      "path": "PROGRESS.md",
+      "accessCount": 9,
+      "lastAccessed": 1788404245341,
+      "type": "file"
+    },
     {
       "path": "docs\\91_관로모델링_입력열정리_좌표계요약_기본등급_필수입력안내_지시서.md",
       "accessCount": 6,
@@ -92,21 +104,75 @@
       "type": "file"
     },
     {
-      "path": "PROGRESS.md",
+      "path": "src",
+      "accessCount": 5,
+      "lastAccessed": 1788404096598,
+      "type": "directory"
+    },
+    {
+      "path": "src\\DHBIMWATER.UI\\ViewModels\\Modeling\\JointDeflectionSettingsViewModel.cs",
       "accessCount": 4,
-      "lastAccessed": 1788227496399,
+      "lastAccessed": 1788396020606,
       "type": "file"
     },
     {
-      "path": "src",
+      "path": "src\\DHBIMWATER.Infrastructure\\Repositories\\Local\\JsonFileBendSettingsFileStore.cs",
       "accessCount": 3,
-      "lastAccessed": 1788247937289,
-      "type": "directory"
+      "lastAccessed": 1788396095292,
+      "type": "file"
+    },
+    {
+      "path": "tests\\DHBIMWATER.UI.Tests\\Gis\\BendResolverTests.cs",
+      "accessCount": 3,
+      "lastAccessed": 1788396340723,
+      "type": "file"
+    },
+    {
+      "path": "src\\DHBIMWATER.Infrastructure\\Repositories\\Revit\\Gis\\RevitAlignmentStraightDirectShapeRepo.cs",
+      "accessCount": 3,
+      "lastAccessed": 1788404257426,
+      "type": "file"
     },
     {
       "path": "docs\\93_드레인피트_추가_Floor_DirectShape_공통_지시서.md",
       "accessCount": 2,
       "lastAccessed": 1788229161755,
+      "type": "file"
+    },
+    {
+      "path": "src\\DHBIMWATER.Core\\Gis\\BendFittingCatalog.cs",
+      "accessCount": 2,
+      "lastAccessed": 1788395860822,
+      "type": "file"
+    },
+    {
+      "path": "src\\DHBIMWATER.Core\\Gis\\JointDeflectionRule.cs",
+      "accessCount": 2,
+      "lastAccessed": 1788395898863,
+      "type": "file"
+    },
+    {
+      "path": "src\\DHBIMWATER.UI\\ViewModels\\Modeling\\BendSettingsRows.cs",
+      "accessCount": 2,
+      "lastAccessed": 1788395914332,
+      "type": "file"
+    },
+    {
+      "path": "src\\DHBIMWATER.UI\\ViewModels\\Modeling\\PipeSpecTableViewModel.cs",
+      "accessCount": 2,
+      "lastAccessed": 1788396033561,
+      "type": "file"
+    },
+    {
+      "path": "src\\DHBIMWATER.Infrastructure\\Repositories\\Revit\\Gis\\RevitBendSettingsRepo.cs",
+      "accessCount": 2,
+      "lastAccessed": 1788396061835,
+      "type": "file"
+    },
+    {
+      "path": "docs\\104_직관DirectShape생성실패_내부예외노출_지시서.md",
+      "accessCount": 2,
+      "lastAccessed": 1788404173880,
       "type": "file"
     },
     {
@@ -167,6 +233,90 @@
       "path": "docs\\100_이경관_대소반전_기준면분할_수정_지시서.md",
       "accessCount": 1,
       "lastAccessed": 1788332150929,
+      "type": "file"
+    },
+    {
+      "path": "docs\\101_미리보기유지_재모델링허용_지시서.md",
+      "accessCount": 1,
+      "lastAccessed": 1788391819656,
+      "type": "file"
+    },
+    {
+      "path": "docs\\103_곡관형식_AB선택_플랜지허용굴곡0_지시서.md",
+      "accessCount": 1,
+      "lastAccessed": 1788395081746,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\admin\\.claude\\projects\\F--02-Work-04-Addin-DHBIMWATER\\memory\\project_flange_no_deflection.md",
+      "accessCount": 1,
+      "lastAccessed": 1788395104679,
+      "type": "file"
+    },
+    {
+      "path": "src\\DHBIMWATER.UI\\Views\\Modeling\\PipeAlignmentModelingView.xaml",
+      "accessCount": 1,
+      "lastAccessed": 1788395972669,
+      "type": "file"
+    },
+    {
+      "path": "src\\DHBIMWATER.UI\\Views\\Modeling\\PipeSpecTableView.xaml",
+      "accessCount": 1,
+      "lastAccessed": 1788395988221,
+      "type": "file"
+    },
+    {
+      "path": "tests\\DHBIMWATER.UI.Tests\\ViewModels\\Modeling\\PipeSpecTableViewModelTests.cs",
+      "accessCount": 1,
+      "lastAccessed": 1788396287951,
+      "type": "file"
+    },
+    {
+      "path": "tests\\DHBIMWATER.UI.Tests\\Gis\\BendSettingsFileStoreTests.cs",
+      "accessCount": 1,
+      "lastAccessed": 1788396349066,
+      "type": "file"
+    },
+    {
+      "path": "tests\\DHBIMWATER.UI.Tests\\Gis\\BendCoordinateDiagnosticTests.cs",
+      "accessCount": 1,
+      "lastAccessed": 1788396364709,
+      "type": "file"
+    },
+    {
+      "path": "src\\DHBIMWATER.Infrastructure\\Helpers\\AlignmentPlacementMapper.cs",
+      "accessCount": 1,
+      "lastAccessed": 1788403735160,
+      "type": "file"
+    },
+    {
+      "path": "src\\DHBIMWATER.Application\\UseCases\\Gis\\ModelPipeAlignmentUseCase.cs",
+      "accessCount": 1,
+      "lastAccessed": 1788403747756,
+      "type": "file"
+    },
+    {
+      "path": "src\\DHBIMWATER.Infrastructure\\Repositories\\Revit\\Gis\\RevitAlignmentStraightPlacementRepo.cs",
+      "accessCount": 1,
+      "lastAccessed": 1788403848796,
+      "type": "file"
+    },
+    {
+      "path": "src\\DHBIMWATER.Revit",
+      "accessCount": 1,
+      "lastAccessed": 1788404102528,
+      "type": "directory"
+    },
+    {
+      "path": "src\\DHBIMWATER.Revit\\Commands\\PipeAlignmentModelingRequestHandler.cs",
+      "accessCount": 1,
+      "lastAccessed": 1788404106228,
+      "type": "file"
+    },
+    {
+      "path": "docs\\105_직관DirectShape_설계범위초과_메시지단순화_지시서.md",
+      "accessCount": 1,
+      "lastAccessed": 1788404214068,
       "type": "file"
     }
   ],

@@ -75,9 +75,10 @@ public sealed class PipeSpecTableViewModel : ViewModelBase
             StraightRows.Add(row);
         }
         // DN×각도 한 행 — A형/B형은 더 이상 별도 행이 아니다(2026-08-20, e·R·t는 형식 무관·s와 무게만 다름).
+        // 형식(A/B)은 2026-09-03부터 프로젝트 전역 설정(_baseSettings.ActiveBendForm)이다. 행별 형식은 저장하지 않는다.
         foreach (var x in fittings.Entries)
         {
-            var row = NewFittingRow(x.Connection); row.DiameterMm = x.DiameterMm; row.AngleDeg = x.AngleDeg; row.Form = x.Form;
+            var row = NewFittingRow(x.Connection); row.DiameterMm = x.DiameterMm; row.AngleDeg = x.AngleDeg; row.Form = _baseSettings.ActiveBendForm;
             row.WallThicknessMm = x.WallThicknessMm; row.LayingLengthMm = x.LayingLengthMm; row.CenterlineRadiusMm = x.CenterlineRadiusMm;
             row.WeightKpMechanicalKg = x.WeightKpMechanicalKg; row.WeightTytonKg = x.WeightTytonKg;
             (x.Connection == BendConnection.Flanged ? FlangedFittingRows : SocketFittingRows).Add(row);

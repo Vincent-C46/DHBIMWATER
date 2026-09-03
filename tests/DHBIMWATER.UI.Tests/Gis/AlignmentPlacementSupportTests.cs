@@ -3,12 +3,25 @@ using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Infrastructure.Repositories.Gis;
+using DHBIMWATER.Infrastructure.Helpers;
 using Xunit;
 
 namespace DHBIMWATER.UI.Tests.Gis;
 
 public class AlignmentPlacementSupportTests
 {
+    [Fact]
+    public void PlacementMapper_rotates_relative_xy_by_project_north_angle()
+    {
+        var rotated = AlignmentPlacementMapper.RotateRelativeXY(10d / 0.3048d, 0, -Math.PI / 2);
+        var unrotated = AlignmentPlacementMapper.RotateRelativeXY(10d / 0.3048d, 0, 0);
+
+        Assert.Equal(0d, rotated.X, 9);
+        Assert.Equal(-10d / 0.3048d, rotated.Y, 9);
+        Assert.Equal(10d / 0.3048d, unrotated.X, 9);
+        Assert.Equal(0d, unrotated.Y, 9);
+    }
+
     [Fact]
     public void ReferencePoint_takes_plan_coordinates_of_first_vertex_and_drops_elevation()
     {

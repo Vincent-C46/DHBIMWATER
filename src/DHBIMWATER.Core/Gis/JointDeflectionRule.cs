@@ -32,9 +32,11 @@ public sealed class JointDeflectionRule : IBendingRule
 
         var actual = node.DeflectionDeg;
         var jointType = settings.ActiveJointType;
-        var singleAllowable = settings.JointDeflections.AllowableFor(jointType, node.MaxDiameterMm) ?? 0d;
-        var effectiveValue = GetAllowableDeflection(settings.JointDeflections, jointType, node.MaxDiameterMm, settings.ApplicationMode);
-        var hasDeflectionSetting = effectiveValue.HasValue;
+        // 플랜지 접합은 조인트 굴곡이 없다. 허용굴곡은 소켓 접합(KP 메커니컬·타이튼)에서만 성립한다(2026-09-03 확정).
+        var isFlanged = settings.ActiveBendConnection == BendConnection.Flanged;
+        var singleAllowable = isFlanged ? 0d : settings.JointDeflections.AllowableFor(jointType, node.MaxDiameterMm) ?? 0d;
+        var effectiveValue = isFlanged ? 0d : GetAllowableDeflection(settings.JointDeflections, jointType, node.MaxDiameterMm, settings.ApplicationMode);
+        var hasDeflectionSetting = isFlanged || effectiveValue.HasValue;
         var effective = effectiveValue ?? 0d;
 
         if (forcedAngleDeg is null && hasDeflectionSetting && actual <= effective + Epsilon)
@@ -64,12 +66,18 @@ public sealed class JointDeflectionRule : IBendingRule
             return Empty(node, kind, actual, selectedAngle, singleAllowable, residual, jointType, settings.ApplicationMode, effective, isAcceptable);
 
         var tangent = BendResolver.TangentLength(fitting.CenterlineRadiusMm, selectedAngle);
+        // 곡관 형식(A/B)은 프로젝트 전역 설정이다(행별 편집 없음, 2026-09-03 확정). 카탈로그 행의 Form이 아니라 여기서 전역값을 쓴다.
+        var form = isFlanged ? BendForm.BType : settings.ActiveBendForm;
+        var extraLeg = settings.ActiveBendConnection == BendConnection.Socket && form == BendForm.BType ? 200d : 0d;
         var weightKg = jointType == JointTypeCatalog.Tyton ? fitting.WeightTytonKg : fitting.WeightKpMechanicalKg;
+        if (settings.ActiveBendConnection == BendConnection.Socket
+            && BendFittingCatalog.TryGetHandbookWeight(node.MaxDiameterMm, selectedAngle, form, out var kpKg, out var tytonKg))
+            weightKg = jointType == JointTypeCatalog.Tyton ? tytonKg : kpKg;
         return new BendResolution(
             node.NodeId, kind, actual, selectedAngle, singleAllowable, residual,
             fitting.LayingLengthMm, fitting.CenterlineRadiusMm, tangent, true,
             jointType, settings.ApplicationMode, effective, isAcceptable,
-            fitting.ExtraLegLengthMm, fitting.WallThicknessMm, fitting.Form, weightKg);
+            extraLeg, fitting.WallThicknessMm, form, weightKg);
     }
 
     private static BendResolution Empty(NodeClassification node, BendResolutionKind kind, double actual, double standardAngle,

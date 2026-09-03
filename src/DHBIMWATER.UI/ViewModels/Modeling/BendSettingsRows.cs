@@ -50,8 +50,8 @@ public sealed class BendFittingRow : ViewModelBase
     public BendConnection Connection { get => _connection; set => SetProperty(ref _connection, value); }
     public double LayingLengthMm { get => _layingLengthMm; set { if (SetProperty(ref _layingLengthMm, value)) OnPropertyChanged(nameof(LongLegLengthMm)); } }
     public double CenterlineRadiusMm { get => _centerlineRadiusMm; set { if (SetProperty(ref _centerlineRadiusMm, value)) OnPropertyChanged(nameof(TangentLengthMm)); } }
-    /// <summary>s — B형만 200mm, A형은 0. 핸드북 고정값이라 계산만 하고 편집 대상이 아니다.</summary>
-    public double ExtraLegLengthMm => Form == BendForm.BType ? 200d : 0d;
+    /// <summary>s — 소켓 B형만 200mm, A형과 플랜지는 0. 핸드북 고정값이라 계산만 하고 편집 대상이 아니다.</summary>
+    public double ExtraLegLengthMm => Connection == BendConnection.Socket && Form == BendForm.BType ? 200d : 0d;
     public double WallThicknessMm { get => _wallThicknessMm; set => SetProperty(ref _wallThicknessMm, value); }
     /// <summary>KP 메커니컬 조인트 기준 무게(kg). 현재 <see cref="Form"/>에 대응하는 값이다.</summary>
     public double WeightKpMechanicalKg { get => _weightKpMechanicalKg; set => SetProperty(ref _weightKpMechanicalKg, value); }

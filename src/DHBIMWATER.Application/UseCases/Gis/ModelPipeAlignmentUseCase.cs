@@ -54,10 +54,13 @@ public sealed class ModelPipeAlignmentUseCase
                         _sharedParameterRepo.EnsureParameters(PipeAlignmentParameters.Definitions.Concat(GetPreviewOnlyParameterDefinitions()).ToList());
                     if (request.ApplySharedCoordinates)
                         _projectLocationRepo.SetInternalOriginSharedPosition(origin.X, origin.Y, 0);
+                    var deletedPreviews = _alignmentRepo.DeletePreviews();
                     var (count, skipped, warnings) = ToDirectShape(loaded.Alignments, origin, progress);
                     _transaction.Commit();
                     return new PipeAlignmentModelingResult(request.OutputMode, count, skipped,
-                        loaded.Warnings.Concat(FindMiterLimitWarnings(loaded.Alignments)).Concat(warnings).ToList());
+                        loaded.Warnings.Concat(FindMiterLimitWarnings(loaded.Alignments))
+                            .Concat(deletedPreviews > 0 ? new[] { $"이전 선형 미리보기 {deletedPreviews:N0}개를 지우고 다시 만들었습니다." } : Array.Empty<string>())
+                            .Concat(warnings).ToList());
                 }
                 catch { _transaction.Rollback(); throw; }
             }

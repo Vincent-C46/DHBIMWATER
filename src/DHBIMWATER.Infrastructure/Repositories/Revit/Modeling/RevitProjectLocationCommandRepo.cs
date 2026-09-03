@@ -27,12 +27,12 @@ internal sealed class RevitProjectLocationCommandRepo : IProjectLocationCommandR
         var offset = (basePoint as BasePoint)?.Position ?? XYZ.Zero;
 
         // Revit API 양의 각도는 반시계방향이다. UI 입력값은 진북→도북 시계방향이므로 부호를 반전한다.
-        // TODO: 각도가 0이 아니면 offset도 같은 각도로 회전시켜야 한다(현재 호출부는 항상 0을 넘긴다).
         var angle = -RevitUnitConverter.DegToRad(trueNorthToProjectNorthClockwiseDegrees);
+        var rotatedOffset = Transform.CreateRotation(XYZ.BasisZ, angle).OfVector(offset);
         var position = doc.Application.Create.NewProjectPosition(
-            RevitUnitConverter.MToFt(eastWestMeters) - offset.X,
-            RevitUnitConverter.MToFt(northSouthMeters) - offset.Y,
-            -offset.Z,
+            RevitUnitConverter.MToFt(eastWestMeters) - rotatedOffset.X,
+            RevitUnitConverter.MToFt(northSouthMeters) - rotatedOffset.Y,
+            -rotatedOffset.Z,
             angle);
 
         doc.ActiveProjectLocation.SetProjectPosition(XYZ.Zero, position);

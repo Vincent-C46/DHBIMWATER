@@ -93,7 +93,7 @@ public sealed class PipeSpecTableViewModelTests
             new StraightPipeSpecTable(new[] { new StraightPipeSpec(PipeKindCatalog.Water2, 100, 118, 6.8) }),
             new JointDeflectionTable(new[] { new JointDeflectionSpec(JointTypeCatalog.Tyton, 100, 3) }),
             new BendFittingCatalog(new[] { new BendFittingEntry(100, 45, BendForm.BType, 120, 210, 8.8) }),
-            JointTypeCatalog.Tyton, JointApplicationMode.BothJoints, BendConnection.Flanged);
+            JointTypeCatalog.Tyton, BendConnection.Flanged, BendForm.AType);
         var vm = Create(repo, dialogs, new StubFileStore { LoadResult = imported });
 
         vm.ImportCommand.Execute(null);
@@ -103,12 +103,13 @@ public sealed class PipeSpecTableViewModelTests
         Assert.Single(vm.SocketFittingRows);
         Assert.Equal(8.8, vm.SocketFittingRows[0].WallThicknessMm);
         Assert.Equal(JointTypeCatalog.Tyton, vm.Joint.ActiveJointType);
-        Assert.Equal(JointApplicationMode.BothJoints, vm.Joint.ApplicationMode);
 
         vm.SaveCommand.Execute(null);
 
         Assert.NotNull(repo.Saved);
         Assert.Equal(BendConnection.Flanged, repo.Saved!.ActiveBendConnection);
+        Assert.Equal(BendForm.AType, repo.Saved.ActiveBendForm);
+        Assert.Equal(JointApplicationMode.BothJoints, repo.Saved.ApplicationMode);
         Assert.Equal(8.8, repo.Saved.Fittings.Find(100, 45)!.WallThicknessMm);
     }
 

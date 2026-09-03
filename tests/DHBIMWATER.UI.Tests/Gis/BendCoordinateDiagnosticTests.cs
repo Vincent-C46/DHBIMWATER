@@ -75,8 +75,7 @@ public class BendCoordinateDiagnosticTests
             StraightPipeSpecTable.Default,
             new JointDeflectionTable(new[] { new JointDeflectionSpec(JointTypeCatalog.KpMechanical, 100, 10d) }),
             new BendFittingCatalog(new[] { new BendFittingEntry(100, 45d, BendForm.AType, 130d, 210d) }),
-            JointTypeCatalog.KpMechanical,
-            JointApplicationMode.SingleJoint);
+            JointTypeCatalog.KpMechanical);
         var resolutions = BendResolver.ResolveAll(nodes, settings);
 
         var plan = BendTrimPlanner.Plan(alignments, graph, resolutions, snapTolerance);

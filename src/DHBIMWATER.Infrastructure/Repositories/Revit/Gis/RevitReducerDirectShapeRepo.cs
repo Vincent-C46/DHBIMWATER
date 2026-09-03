@@ -19,6 +19,7 @@ internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
         if (plans.Count == 0) return new ReducerPlacementResult(0, Array.Empty<string>());
         var doc = _doc() ?? throw new InvalidOperationException("활성 Revit 문서가 없습니다.");
         var basePoint = AlignmentPlacementMapper.GetProjectBasePoint(doc);
+        var projectNorthRotation = AlignmentPlacementMapper.GetProjectNorthRotation(doc);
         var materialId = PipeSolidFactory.FindOrCreateDcipMaterial(doc);
         var writer = new PipeParameterWriter();
         var count = 0;
@@ -30,8 +31,8 @@ internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
         {
             try
             {
-                var start = AlignmentPlacementMapper.ToXyz(plan.Placement.UpstreamEnd, plan.ZOffsetM, origin.X, origin.Y, basePoint);
-                var end = AlignmentPlacementMapper.ToXyz(plan.Placement.DownstreamEnd, plan.ZOffsetM, origin.X, origin.Y, basePoint);
+                var start = AlignmentPlacementMapper.ToXyz(plan.Placement.UpstreamEnd, plan.ZOffsetM, origin.X, origin.Y, basePoint, projectNorthRotation);
+                var end = AlignmentPlacementMapper.ToXyz(plan.Placement.DownstreamEnd, plan.ZOffsetM, origin.X, origin.Y, basePoint, projectNorthRotation);
                 if (!TryBuildSolid(start, end, plan, materialId, out var solid, out var isSolid))
                 {
                     failed++;

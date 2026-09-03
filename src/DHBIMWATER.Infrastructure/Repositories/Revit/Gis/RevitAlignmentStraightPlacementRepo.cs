@@ -21,7 +21,12 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
     private const int RegenerateBatchSize = 200;
 
     private readonly Func<Document?> _doc;
-    public RevitAlignmentStraightPlacementRepo(Func<Document?> doc) => _doc = doc;
+    private readonly IAlignmentSnapshotStore? _snapshotStore;
+    public RevitAlignmentStraightPlacementRepo(Func<Document?> doc, IAlignmentSnapshotStore? snapshotStore = null)
+    {
+        _doc = doc;
+        _snapshotStore = snapshotStore;
+    }
 
     public AlignmentStraightPlacementResult PlaceAlong(IReadOnlyList<PipeAlignment> alignments, string straightFamilyTypeName, double intervalM, AlignmentPlacementOrigin origin,
         StraightPipeSpecTable specs, IReadOnlyList<IReadOnlyList<VertexTrim>>? trims = null, string? diameterParameterName = null,
@@ -33,6 +38,7 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
         // Revit 짧은 커브 허용치(약 0.00256ft ≈ 0.78mm)보다 짧은 세그먼트는 배치 의미가 없어 건너뛴다.
         var minLengthFt = doc.Application.ShortCurveTolerance;
         var basePoint = AlignmentPlacementMapper.GetProjectBasePoint(doc);
+        var projectNorthRotation = AlignmentPlacementMapper.GetProjectNorthRotation(doc);
         // 파라미터는 형상이 확정된 뒤(최종 Regenerate 이후) 한꺼번에 설정한다.
         var placed = new List<(FamilyInstance Instance, PipeAlignment Alignment, double DiameterMm, StraightPipeSpec? Spec, AlignmentSampleSegment Segment, double ZOffsetM)>();
         var specCache = new Dictionary<(string PipeKind, double DiameterMm), StraightPipeSpec?>();
@@ -55,8 +61,8 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
                 if (!specCache.TryGetValue(specKey, out var spec))
                     specCache[specKey] = spec = specs.Find(alignment.PipeKind, diameterMm);
                 var zOffsetM = origin.GetZOffsetM(alignment.PipeKind, diameterMm);
-                var start = ToXyz(segment.Start, zOffsetM, origin, basePoint);
-                var end = ToXyz(segment.End, zOffsetM, origin, basePoint);
+                var start = ToXyz(segment.Start, zOffsetM, origin, basePoint, projectNorthRotation);
+                var end = ToXyz(segment.End, zOffsetM, origin, basePoint, projectNorthRotation);
                 if (start.DistanceTo(end) < minLengthFt) continue;
 
                 FamilyInstance instance;
@@ -95,9 +101,12 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
         // 패밀리별로 한 번만 경고하면 충분하다 — 세그먼트마다 같은 누락 메시지가 반복되면 오히려 안 읽힌다.
         var missingParameters = new HashSet<string>();
         var writer = new PipeParameterWriter();
+        var snapshotWarnings = new HashSet<string>();
         var parameterScope = PlacementProfiler.Step("06c 직관 파라미터 기록");
         PipeAlignment? previousAlignment = null;
+        PipeAlignment? snapshotAlignment = null;
         AlignmentStationProfile? stationProfile = null;
+        var alignmentSnapshotId = string.Empty;
         Point3D? previousEnd = null;
         Vector3D? previousOwnDirection = null;
         for (var i = 0; i < placed.Count; i++)
@@ -133,6 +142,22 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
 
             if (info is not { Enabled: true }) continue;
 
+            if (!ReferenceEquals(alignment, snapshotAlignment))
+            {
+                snapshotAlignment = alignment;
+                string snapshotWarning;
+                if (_snapshotStore is null)
+                {
+                    alignmentSnapshotId = string.Empty;
+                    snapshotWarning = "DHBoost 선형 스냅샷 저장소가 등록되지 않아 측점 편집 스냅샷을 기록하지 못했습니다.";
+                }
+                else
+                {
+                    alignmentSnapshotId = _snapshotStore.EnsureSnapshot(alignment, stationProfile!, origin, out snapshotWarning);
+                }
+                if (!string.IsNullOrWhiteSpace(snapshotWarning)) snapshotWarnings.Add(snapshotWarning);
+            }
+
             var lengthM = segment.Start.DistanceTo(segment.End);
             var runM = Math.Sqrt(Math.Pow(segment.End.X - segment.Start.X, 2) + Math.Pow(segment.End.Y - segment.Start.Y, 2));
             var riseM = segment.End.Z - segment.Start.Z;
@@ -162,11 +187,18 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
             writer.Number(instance, PlacementStationParameters.ZOffset, zOffsetM);
             writer.YesNo(instance, PlacementStationParameters.Flip, false);
             writer.Text(instance, PlacementStationParameters.VerticalBasis, "GlobalZ");
+            if (!string.IsNullOrWhiteSpace(alignmentSnapshotId))
+            {
+                writer.Text(instance, PlacementStationParameters.AlignmentId, alignmentSnapshotId);
+                writer.Text(instance, PlacementStationParameters.SourceKind, "Pipe");
+                writer.Text(instance, PlacementStationParameters.SourceOptions, string.Empty);
+            }
         }
 
         parameterScope.Dispose();
 
         var warnings = new List<string>();
+        warnings.AddRange(snapshotWarnings);
         var missingRotation = missingParameters.Remove("rot_XY_n/rot_XZ_n");
         if (missingParameters.Count > 0)
             warnings.Add($"직관 패밀리 '{straightFamilyTypeName}'에 {string.Join(", ", missingParameters.OrderBy(x => x))} 파라미터가 없거나 읽기전용이라 값을 설정하지 못했습니다.");
@@ -229,8 +261,8 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
             && parameter.Set(UC.DegToRad(degrees));
     }
 
-    private static XYZ ToXyz(Point3D point, double zOffsetM, AlignmentPlacementOrigin origin, XYZ basePoint)
-        => AlignmentPlacementMapper.ToXyz(point, zOffsetM, origin.X, origin.Y, basePoint);
+    private static XYZ ToXyz(Point3D point, double zOffsetM, AlignmentPlacementOrigin origin, XYZ basePoint, double projectNorthRotation)
+        => AlignmentPlacementMapper.ToXyz(point, zOffsetM, origin.X, origin.Y, basePoint, projectNorthRotation);
 
     private static string AlignmentIdOf(PipeAlignment alignment) => $"{Path.GetFileNameWithoutExtension(alignment.SourceFile)}#{alignment.RecordNumber}";
     private static string MaterialLabelOf(string pipeKind) => PipeKindCatalog.MaterialOf(pipeKind) is { } material ? PipeAlignmentParameters.Label(material) : string.Empty;

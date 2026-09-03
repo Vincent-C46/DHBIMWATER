@@ -23,6 +23,11 @@ public sealed record BendConnectionOption(string Label, BendConnection Value)
     public override string ToString() => Label;
 }
 
+public sealed record BendFormOption(string Label, BendForm Value)
+{
+    public override string ToString() => Label;
+}
+
 /// <summary>DWG·DXF 파일 하나에 포함된 레이어의 다중선택 항목.</summary>
 public sealed class CadLayerOption : ViewModelBase
 {
@@ -138,6 +143,8 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
     private string? _bendDiameterParameterName, _bendWallThicknessParameterName, _bendOuterDiameterParameterName;
     private string _bulkMappingPipeKind = PipeKindCatalog.Water1;
     private BendConnectionOption? _bendConnectionOption;
+    private BendFormOption? _bendFormOption;
+    private const double ExistingSharedCoordinateWarningDistanceM = 10_000d;
     private IReadOnlyList<string> _straightParameterNames = Array.Empty<string>(), _bendParameterNames = Array.Empty<string>();
     private BendSettings _settings = BendSettings.Default;
     private bool _isBusy, _hasResult, _isAwaitingPreviewConfirm;
@@ -211,8 +218,26 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
             if (!SetProperty(ref _bendConnectionOption, value) || value is null) return;
             _settings = _settings with { ActiveBendConnection = value.Value };
             Summary = string.Empty;
+            OnPropertyChanged(nameof(IsBendFormEnabled));
         }
     }
+    public IReadOnlyList<BendFormOption> BendFormOptions { get; } = new[]
+    {
+        new BendFormOption("B형 (소켓 + 스피것)", BendForm.BType),
+        new BendFormOption("A형 (양단 소켓)", BendForm.AType)
+    };
+    public BendFormOption? BendFormOption
+    {
+        get => _bendFormOption;
+        set
+        {
+            if (!SetProperty(ref _bendFormOption, value) || value is null) return;
+            _settings = _settings with { ActiveBendForm = value.Value };
+            Summary = string.Empty;
+        }
+    }
+    /// <summary>플랜지곡관에는 형식(A/B) 구분이 없다.</summary>
+    public bool IsBendFormEnabled => _settings.ActiveBendConnection == BendConnection.Socket;
     public IReadOnlyList<string> MappingPipeKinds => new[] { UseKindFieldOption }.Concat(PipeKindCatalog.All).ToList();
     public string BulkMappingPipeKind { get => _bulkMappingPipeKind; set => SetProperty(ref _bulkMappingPipeKind, value); }
     // DataGrid 셀 편집(EditItem)은 IList를 지원하는 컬렉션 뷰가 필요하다. 지연 평가 IEnumerable(Where만 적용)을 그대로
@@ -285,14 +310,26 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
     public bool HasSpecUnmatched => SpecUnmatchedCount > 0
         && (PipeElevationDatum.NeedsSpec(ZDatum) || UsesStraightAndBendSettings);
     public bool IsBusy { get => _isBusy; private set { if (SetProperty(ref _isBusy, value)) { OnPropertyChanged(nameof(IsInputEnabled)); OnPropertyChanged(nameof(CanCreateModel)); System.Windows.Input.CommandManager.InvalidateRequerySuggested(); } } }
-    public bool IsInputEnabled => !IsBusy;
+    public bool IsInputEnabled => !IsBusy && !IsAwaitingPreviewConfirm;
     public double ProgressPercent { get => _progressPercent; private set => SetProperty(ref _progressPercent, value); }
     public string PhaseText { get => _phaseText; private set => SetProperty(ref _phaseText, value); }
     public string ProgressDetail { get => _progressDetail; private set => SetProperty(ref _progressDetail, value); }
     public string ResultSummary { get => _resultSummary; private set => SetProperty(ref _resultSummary, value); }
     public ObservableCollection<string> ResultWarnings { get; } = new();
     public bool HasResult { get => _hasResult; private set => SetProperty(ref _hasResult, value); }
-    public bool IsAwaitingPreviewConfirm { get => _isAwaitingPreviewConfirm; private set => SetProperty(ref _isAwaitingPreviewConfirm, value); }
+    public bool IsAwaitingPreviewConfirm
+    {
+        get => _isAwaitingPreviewConfirm;
+        private set
+        {
+            if (SetProperty(ref _isAwaitingPreviewConfirm, value))
+            {
+                OnPropertyChanged(nameof(IsInputEnabled));
+                OnPropertyChanged(nameof(CanCreateModel));
+                System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+            }
+        }
+    }
     public string PreviewConfirmMessage { get => _previewConfirmMessage; private set => SetProperty(ref _previewConfirmMessage, value); }
     public ICommand AddCommand { get; }
     public ICommand RemoveCommand { get; }
@@ -732,10 +769,17 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         var y = Math.Round(northSouth, 5, MidpointRounding.AwayFromZero);
         if (Math.Abs(x - ReferenceX) >= 1e-4 || Math.Abs(y - ReferenceY) >= 1e-4)
         {
-            _dialog.Info("공유좌표 확인",
-                $"이 문서에는 이미 공유좌표가 설정되어 있습니다(프로젝트 기준점 = {x:0.00000}, {y:0.00000}).\n"
-                + $"화면의 기준점({ReferenceX:0.00000}, {ReferenceY:0.00000}) 대신 이 좌표를 기준으로 배치해 기존 모델과 위치를 맞춥니다.\n\n"
-                + "화면 기준점으로 배치하려면 [프로젝트 공유좌표에도 기준점 적용]을 체크하세요(문서의 공유좌표가 새 기준점으로 덮어써집니다).");
+            var distanceM = Math.Sqrt(Math.Pow(x - ReferenceX, 2) + Math.Pow(y - ReferenceY, 2));
+            if (distanceM > ExistingSharedCoordinateWarningDistanceM)
+                _dialog.Warn("공유좌표 거리 경고",
+                    $"입력 기준점과 현재 프로젝트 기준점의 거리가 {distanceM / 1000:0.00} km입니다(경고 거리 10.00 km 초과).\n\n"
+                    + $"프로젝트 기준점({x:0.00000}, {y:0.00000})은 변경하지 않고 이 좌표를 기준으로 배치합니다.\n"
+                    + "Revit 정밀도 또는 DirectShape 생성 오류가 발생할 수 있습니다.");
+            else
+                _dialog.Info("공유좌표 확인",
+                    $"이 문서에는 이미 공유좌표가 설정되어 있습니다(프로젝트 기준점 = {x:0.00000}, {y:0.00000}).\n"
+                    + $"화면의 기준점({ReferenceX:0.00000}, {ReferenceY:0.00000}) 대신 이 좌표를 기준으로 배치해 기존 모델과 위치를 맞춥니다.\n\n"
+                    + "화면 기준점으로 배치하려면 [프로젝트 공유좌표에도 기준점 적용]을 체크하세요(문서의 공유좌표가 새 기준점으로 덮어써집니다).");
             ReferenceX = x; ReferenceY = y;
         }
         return (x, y);
@@ -757,7 +801,11 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         UpdateBendParameterOptions();
     }
     private void OpenPipeSpecs() { var vm = new PipeSpecTableViewModel(_settings, _save, _dialog, _fileDialog, _settingsFileStore, _revit); ShowDialog(new PipeSpecTableView(vm)); if (vm.Result is not null) { _settings = vm.Result; SyncBendConnectionOption(); SettingsNotice = string.Empty; RefreshDiameterMappingPreviews(); } }
-    private void SyncBendConnectionOption() => BendConnectionOption = BendConnectionOptions.First(x => x.Value == _settings.ActiveBendConnection);
+    private void SyncBendConnectionOption()
+    {
+        BendConnectionOption = BendConnectionOptions.First(x => x.Value == _settings.ActiveBendConnection);
+        BendFormOption = BendFormOptions.First(x => x.Value == _settings.ActiveBendForm);
+    }
     private void ShowDialog(System.Windows.Window dialog) { if (OwnerWindow is { } owner) dialog.Owner = owner; dialog.ShowDialog(); OwnerWindow?.Activate(); }
 
     public void ApplyProgress(PipeAlignmentProgress progress)
@@ -821,6 +869,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         foreach (var warning in result.Warnings) ResultWarnings.Add(warning);
         HasResult = true;
         IsBusy = false;
+        OnPropertyChanged(nameof(CanCreateModel));
     }
 
     public void ApplyPreviewRetained(PipeAlignmentModelingResult result)
@@ -834,6 +883,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         foreach (var warning in result.Warnings) ResultWarnings.Add(warning);
         HasResult = true;
         IsBusy = false;
+        OnPropertyChanged(nameof(CanCreateModel));
     }
 
     /// <summary>미리보기 커밋 완료. TaskDialog 없이 창 안에서 확인한다.</summary>
@@ -842,13 +892,12 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         ProgressPercent = 100;
         PhaseText = "선형 미리보기 확인 대기";
         ProgressDetail = string.Empty;
-        PreviewConfirmMessage = $"선형 미리보기 {result.CreatedCount:N0}개를 생성했습니다. Revit 화면에서 위치와 진행 방향을 확인한 뒤 [계속 생성]을 누르세요.";
+        PreviewConfirmMessage = $"선형 미리보기 {result.CreatedCount:N0}개를 생성했습니다. Revit 화면에서 위치와 진행 방향을 확인한 뒤 [계속 생성]을 누르세요. 입력을 고치려면 [미리보기 유지·중단]을 누르세요.";
         ResultWarnings.Clear();
         foreach (var warning in result.Warnings) ResultWarnings.Add(warning);
         _pendingPreview = result;
         IsAwaitingPreviewConfirm = true;
         IsBusy = false;
-        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
     }
 
     private void ConfirmPreview()
@@ -884,5 +933,6 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         ResultWarnings.Add(error);
         HasResult = true;
         IsBusy = false;
+        OnPropertyChanged(nameof(CanCreateModel));
     }
 }

@@ -21,6 +21,7 @@ internal sealed class RevitAlignmentPipePlacementRepo : IAlignmentPipePlacementR
         // Revit 짧은 커브 허용치보다 짧은 구간은 Pipe 생성이 불가하므로 건너뛴다 (Beam 리포지토리와 동일 기준).
         var minLengthFt = doc.Application.ShortCurveTolerance;
         var basePoint = AlignmentPlacementMapper.GetProjectBasePoint(doc);
+        var projectNorthRotation = AlignmentPlacementMapper.GetProjectNorthRotation(doc);
         var count = 0;
         foreach (var alignment in alignments)
         {
@@ -28,8 +29,8 @@ internal sealed class RevitAlignmentPipePlacementRepo : IAlignmentPipePlacementR
             Pipe? previous = null;
             foreach (var segment in AlignmentIntervalSampler.SampleSegments(alignment.Vertices, intervalM))
             {
-                var start = ToXyz(segment.Start, zOffsetM, origin, basePoint);
-                var end = ToXyz(segment.End, zOffsetM, origin, basePoint);
+            var start = ToXyz(segment.Start, zOffsetM, origin, basePoint, projectNorthRotation);
+            var end = ToXyz(segment.End, zOffsetM, origin, basePoint, projectNorthRotation);
                 if (start.DistanceTo(end) < minLengthFt) continue;
                 var pipe = Pipe.Create(doc, system.Id, type.Id, level.Id, start, end);
                 if (alignment.DiameterMm > 0) pipe.get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM)?.Set(UC.MmToFt(alignment.DiameterMm));
@@ -51,6 +52,6 @@ internal sealed class RevitAlignmentPipePlacementRepo : IAlignmentPipePlacementR
             System.Diagnostics.Debug.WriteLine($"선형 파이프 구간 연결 생략: {ex.Message}");
         }
     }
-    private static XYZ ToXyz(DHBIMWATER.Core.Geometry.Point3D point, double zOffsetM, AlignmentPlacementOrigin origin, XYZ basePoint)
-        => AlignmentPlacementMapper.ToXyz(point, zOffsetM, origin.X, origin.Y, basePoint);
+    private static XYZ ToXyz(DHBIMWATER.Core.Geometry.Point3D point, double zOffsetM, AlignmentPlacementOrigin origin, XYZ basePoint, double projectNorthRotation)
+        => AlignmentPlacementMapper.ToXyz(point, zOffsetM, origin.X, origin.Y, basePoint, projectNorthRotation);
 }

@@ -6,12 +6,12 @@ namespace DHBIMWATER.UI.Tests.Gis;
 
 public class BendResolverTests
 {
-    private static BendSettings Settings(double allowableDeg, JointApplicationMode mode = JointApplicationMode.SingleJoint,
+    private static BendSettings Settings(double allowableDeg, BendForm form = BendForm.BType,
         string activeJointType = JointTypeCatalog.KpMechanical, BendConnection connection = BendConnection.Socket,
         params BendFittingEntry[] fittings) => new(
         StraightPipeSpecTable.Default,
         new JointDeflectionTable(new[] { new JointDeflectionSpec(activeJointType, 100, allowableDeg) }),
-        new BendFittingCatalog(fittings), activeJointType, mode, connection);
+        new BendFittingCatalog(fittings), activeJointType, connection, form);
 
     private static NodeClassification Bend(double deflectionDeg, double diameterMm = 100, string pipeKind = PipeKindCatalog.Water1) =>
         new(1, new Point3D(0, 0, 0), NodeKind.Bend, 2, deflectionDeg, diameterMm, diameterMm, pipeKind);
@@ -40,12 +40,32 @@ public class BendResolverTests
     public void Flanged_mode_limits_candidates_and_uses_flanged_dimensions()
     {
         var flanged = new BendFittingEntry(100, 45, BendForm.BType, 140, 230, Connection: BendConnection.Flanged);
-        var result = BendResolver.Resolve(Bend(22.5), Settings(3, connection: BendConnection.Flanged, fittings: flanged));
+        var result = BendResolver.Resolve(Bend(22.5), Settings(3, form: BendForm.AType, connection: BendConnection.Flanged, fittings: flanged));
 
         Assert.Equal(BendResolutionKind.Unresolved, result.Kind);
         Assert.Equal(45, result.StandardAngleDeg);
         Assert.Equal(140, result.LayingLengthMm);
         Assert.Equal(230, result.CenterlineRadiusMm);
+        Assert.Equal(0, result.EffectiveAllowableDeg);
+        Assert.Equal(0, result.ExtraLegLengthMm);
+        Assert.Equal(BendForm.BType, result.Form);
+    }
+
+    [Theory]
+    [InlineData(BendForm.AType, JointApplicationMode.BothJoints, 0d, 12.7d)]
+    [InlineData(BendForm.BType, JointApplicationMode.SingleJoint, 200d, 11.4d)]
+    public void Socket_form_controls_application_mode_spigot_and_handbook_weight(
+        BendForm form, JointApplicationMode expectedMode, double expectedExtraLegMm, double expectedWeightKg)
+    {
+        var fitting = new BendFittingEntry(100, 45, BendForm.BType, 90, 100, WeightKpMechanicalKg: 999d);
+        var settings = Settings(1, form: form, fittings: fitting);
+
+        var result = BendResolver.Resolve(Bend(45), settings);
+
+        Assert.Equal(expectedMode, settings.ApplicationMode);
+        Assert.Equal(expectedExtraLegMm, result.ExtraLegLengthMm);
+        Assert.Equal(expectedWeightKg, result.WeightKg);
+        Assert.Equal(form, result.Form);
     }
 
     [Fact]
@@ -67,7 +87,7 @@ public class BendResolverTests
         // (2026-08-18 이전에는 JointDeflectionTable.Default가 빈 표라 그것을 썼지만, 이제 핸드북 값이 들어 있다.)
         var settings = new BendSettings(StraightPipeSpecTable.Default, new JointDeflectionTable(Array.Empty<JointDeflectionSpec>()),
             new BendFittingCatalog(new[] { new BendFittingEntry(100, 45, BendForm.AType, 130, 210) }),
-            JointTypeCatalog.KpMechanical, JointApplicationMode.SingleJoint);
+            JointTypeCatalog.KpMechanical);
         var result = BendResolver.Resolve(Bend(45), settings);
         Assert.Equal(BendResolutionKind.Unresolved, result.Kind);
         Assert.False(result.IsAcceptable);
@@ -243,7 +263,7 @@ public class BendResolverTests
         var nodes = PipeNetworkClassifier.Classify(graph);
         var resolutions = BendResolver.ResolveAll(
             nodes,
-            Settings(10, fittings: new BendFittingEntry(100, angleDeg, form, layingMm, radiusMm)));
+            Settings(10, form: form, fittings: new BendFittingEntry(100, angleDeg, form, layingMm, radiusMm)));
 
         var resolution = Assert.Single(resolutions);
         Assert.Equal(layingMm, resolution.LayingLengthMm, 8);

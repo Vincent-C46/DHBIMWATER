@@ -25,13 +25,15 @@ public sealed class JsonFileBendSettingsFileStore : IBendSettingsFileStore
             if (dto.StraightPipes is null || dto.JointDeflections is null || dto.Fittings is null)
                 throw new InvalidDataException("직관·곡관·허용굴곡 설정이 모두 포함된 파일이 아닙니다.");
 
+            // 형식(ActiveBendForm) 필드가 없는 구 파일은 구 ApplicationMode로 역매핑한다: 양쪽 Joint→A형, 그 외→B형(2026-09-03).
+            var form = dto.ActiveBendForm ?? (dto.ApplicationMode == JointApplicationMode.BothJoints ? BendForm.AType : BendForm.BType);
             return new BendSettings(
                 new StraightPipeSpecTable(dto.StraightPipes),
                 new JointDeflectionTable(dto.JointDeflections),
                 new BendFittingCatalog(dto.Fittings),
                 string.IsNullOrWhiteSpace(dto.ActiveJointType) ? JointTypeCatalog.KpMechanical : dto.ActiveJointType,
-                dto.ApplicationMode,
-                dto.ActiveBendConnection);
+                dto.ActiveBendConnection,
+                form);
         }
         catch (JsonException ex)
         {
@@ -53,7 +55,8 @@ public sealed class JsonFileBendSettingsFileStore : IBendSettingsFileStore
             Fittings = settings.Fittings.Entries.ToList(),
             ActiveJointType = settings.ActiveJointType,
             ApplicationMode = settings.ApplicationMode,
-            ActiveBendConnection = settings.ActiveBendConnection
+            ActiveBendConnection = settings.ActiveBendConnection,
+            ActiveBendForm = settings.ActiveBendForm
         };
         File.WriteAllText(path, JsonSerializer.Serialize(dto, JsonOptions));
     }
@@ -66,5 +69,6 @@ public sealed class JsonFileBendSettingsFileStore : IBendSettingsFileStore
         public string? ActiveJointType { get; set; }
         public JointApplicationMode ApplicationMode { get; set; }
         public BendConnection ActiveBendConnection { get; set; } = BendConnection.Socket;
+        public BendForm? ActiveBendForm { get; set; }
     }
 }
