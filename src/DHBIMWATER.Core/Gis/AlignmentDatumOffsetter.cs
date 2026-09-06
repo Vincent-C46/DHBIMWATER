@@ -60,9 +60,9 @@ public static class AlignmentDatumOffsetter
                 continue;
             }
 
-            var diameter = diameterChanged && isBend ? Math.Max(upstreamDiameter, downstreamDiameter) : downstreamDiameter;
-            var offsetMm = OffsetMm(alignment, datum, specs, diameter, warnings);
-            var point = OffsetVertex(vertices[v], upstream, downstream, offsetMm, warnings);
+            var upstreamOffsetMm = OffsetMm(alignment, datum, specs, upstreamDiameter, warnings);
+            var downstreamOffsetMm = OffsetMm(alignment, datum, specs, downstreamDiameter, warnings);
+            var point = OffsetVertex(vertices[v], upstream, downstream, upstreamOffsetMm, downstreamOffsetMm, warnings);
             output.Add(point ?? vertices[v], v);
         }
         return (output.Build(), stepVertexIndices);
@@ -79,16 +79,16 @@ public static class AlignmentDatumOffsetter
     }
 
     private static Point3D? OffsetVertex(Point3D vertex, Vector3D? upstream, Vector3D? downstream,
-        double offsetM, OffsetWarnings warnings)
+        double upstreamOffsetM, double downstreamOffsetM, OffsetWarnings warnings)
     {
         if (upstream is null && downstream is null) return null;
-        if (upstream is null) return OffsetEnd(vertex, downstream, offsetM, warnings);
-        if (downstream is null) return OffsetEnd(vertex, upstream, offsetM, warnings);
+        if (upstream is null) return OffsetEnd(vertex, downstream, downstreamOffsetM, warnings);
+        if (downstream is null) return OffsetEnd(vertex, upstream, upstreamOffsetM, warnings);
         var firstNormal = UpNormal(upstream);
         var secondNormal = UpNormal(downstream);
         if (firstNormal is null || secondNormal is null) { warnings.VerticalVertices++; return null; }
-        var first = Move(vertex, firstNormal, offsetM);
-        var second = Move(vertex, secondNormal, offsetM);
+        var first = Move(vertex, firstNormal, upstreamOffsetM);
+        var second = Move(vertex, secondNormal, downstreamOffsetM);
         if (AreCollinear(upstream, downstream)) return Midpoint(first, second);
         var (a, b, residualM) = ClosestPoints(first, upstream, second, downstream);
         if (residualM > SkewResidualToleranceMm / 1000d)

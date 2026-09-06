@@ -8,8 +8,8 @@ namespace DHBIMWATER.Core.Gis;
 /// </summary>
 /// <remarks>
 /// rot_XY는 진행방향을 XY평면에 투영한 방향각(+X축 기준)이다. rot_XZ는 패밀리 회전축 규약이 기하학적
-/// 종단경사각과 반대이므로 그 경사각의 음수를 쓴다. 좌표 변환은 평행이동뿐이므로 GIS 방위각이 Revit 프로젝트
-/// X축 기준 각과 같다(진북 회전은 반영하지 않는다).
+/// 종단경사각과 반대이므로 그 경사각의 음수를 쓴다. <see cref="Compute"/>는 입력 벡터 프레임을 유지한다.
+/// 공유좌표(GIS) 벡터 결과를 모델좌표에 기록할 때는 <see cref="ApplyProjectNorth"/>로 진북각을 더한다.
 /// </remarks>
 public static class BendOrientation
 {
@@ -45,6 +45,16 @@ public static class BendOrientation
         var rotXy = Math.Atan2(forward.Y, forward.X) * 180d / Math.PI;
         var rotXz = -Math.Atan2(forward.Z, horizontal) * 180d / Math.PI;
         return (rotXy, rotXz);
+    }
+
+    /// <summary>공유좌표 rot_XY에 모델좌표 진북각을 더한다. rot_XZ는 보정하지 않는다.</summary>
+    public static double ApplyProjectNorth(double rotXyDeg, double trueNorthClockwiseDeg)
+    {
+        if (trueNorthClockwiseDeg == 0d) return rotXyDeg;
+
+        var normalized = (rotXyDeg + trueNorthClockwiseDeg + 180d) % 360d;
+        if (normalized <= 0d) normalized += 360d;
+        return normalized - 180d;
     }
 
     private static Vector3D Cross(Vector3D a, Vector3D b)

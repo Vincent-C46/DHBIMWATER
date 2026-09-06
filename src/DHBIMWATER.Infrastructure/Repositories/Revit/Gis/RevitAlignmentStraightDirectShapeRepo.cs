@@ -1,6 +1,7 @@
 using Autodesk.Revit.DB;
 using System.IO;
 using DHBIMWATER.Application.DTOs.Gis;
+using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Infrastructure.Helpers;
@@ -18,22 +19,23 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
     // 150도 마이터의 반각 75도. 더 큰 기울기는 압출 길이 폭주 위험.
     private static readonly double MaxCutSlope = Math.Tan(StraightJointCutPlane.MaxMiterDeflectionDeg / 2d * Math.PI / 180d);
     private readonly Func<Document?> _doc;
+    private readonly IProjectLocationCoordinateTransformRepo _coordinateTransform;
     private readonly IAlignmentSnapshotStore? _snapshotStore;
-    public RevitAlignmentStraightDirectShapeRepo(Func<Document?> doc, IAlignmentSnapshotStore? snapshotStore = null)
+    public RevitAlignmentStraightDirectShapeRepo(Func<Document?> doc, IProjectLocationCoordinateTransformRepo coordinateTransform,
+        IAlignmentSnapshotStore? snapshotStore = null)
     {
         _doc = doc;
+        _coordinateTransform = coordinateTransform;
         _snapshotStore = snapshotStore;
     }
 
     public AlignmentStraightPlacementResult PlaceAlong(IReadOnlyList<PipeAlignment> alignments, string straightFamilyTypeName, double intervalM, AlignmentPlacementOrigin origin,
         StraightPipeSpecTable specs, IReadOnlyList<IReadOnlyList<VertexTrim>>? trims = null, string? diameterParameterName = null,
         string? outerDiameterParameterName = null, string? thicknessParameterName = null, PipeInfoParameterContext? info = null,
-        IProgress<PipeAlignmentProgress>? progress = null)
+        IProgress<PipeAlignmentProgress>? progress = null, IReadOnlyList<IReadOnlySet<int>>? stepVertices = null)
     {
         var doc = _doc() ?? throw new InvalidOperationException("활성 Revit 문서가 없습니다.");
         var minLengthFt = doc.Application.ShortCurveTolerance;
-        var basePoint = AlignmentPlacementMapper.GetProjectBasePoint(doc);
-        var projectNorthRotation = AlignmentPlacementMapper.GetProjectNorthRotation(doc);
         var placed = new List<(DirectShape Shape, PipeAlignment Alignment, double DiameterMm, StraightPipeSpec? Spec, AlignmentSampleSegment Segment, double ZOffsetM)>();
         var specCache = new Dictionary<(string PipeKind, double DiameterMm), StraightPipeSpec?>();
         var missingSpecs = new HashSet<(string PipeKind, double DiameterMm)>();
@@ -41,7 +43,8 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
         var oversizedOuterDiameters = new HashSet<(string PipeKind, double DiameterMm, double OuterDiameterMm)>();
         var cappedCutExtensions = 0;
         var sampled = alignments.Select((alignment, index) => AlignmentIntervalSampler.SampleSegments(
-            alignment, intervalM, trims is not null && index < trims.Count ? trims[index] : null)).ToList();
+            alignment, intervalM, trims is not null && index < trims.Count ? trims[index] : null,
+            stepVertices is not null && index < stepVertices.Count ? stepVertices[index] : null)).ToList();
         var total = sampled.Sum(x => x.Count);
         var materialId = total > 0 ? PipeSolidFactory.FindOrCreateDcipMaterial(doc) : ElementId.InvalidElementId;
         progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingStraights, 0, total));
@@ -51,6 +54,13 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
             var alignment = alignments[index];
             var diameterProfile = new AlignmentDiameterProfile(alignment);
             var segments = sampled[index];
+            var sourcePoints = segments.SelectMany(segment => new[] { segment.Start, segment.End }).ToArray();
+            var zOffsetsM = segments.SelectMany(segment =>
+            {
+                var zOffsetM = origin.GetZOffsetM(alignment.PipeKind, diameterProfile.Find(segment.DistanceFromStart));
+                return new[] { zOffsetM, zOffsetM };
+            }).ToArray();
+            var converted = ProjectLocationCoordinateConverter.Convert(_coordinateTransform, sourcePoints, zOffsetsM);
             for (var segmentIndex = 0; segmentIndex < segments.Count; segmentIndex++)
             {
                 var segment = segments[segmentIndex];
@@ -62,8 +72,8 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
                 var outerDiameterMm = spec?.OuterDiameterMm ?? diameterMm;
 
                 var zOffsetM = origin.GetZOffsetM(alignment.PipeKind, diameterMm);
-                var start = ToXyz(segment.Start, zOffsetM, origin, basePoint, projectNorthRotation);
-                var end = ToXyz(segment.End, zOffsetM, origin, basePoint, projectNorthRotation);
+                var start = converted[segmentIndex * 2];
+                var end = converted[segmentIndex * 2 + 1];
                 if (start.DistanceTo(end) < minLengthFt) continue;
                 if (outerDiameterMm > OversizedOuterDiameterMm)
                     oversizedOuterDiameters.Add((alignment.PipeKind, diameterMm, outerDiameterMm));
@@ -75,7 +85,7 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
                 {
                     using (PlacementProfiler.Step("06a 직관 DirectShape 생성"))
                     {
-                        var cutNormals = CutNormals(segments, segmentIndex);
+                        var cutNormals = CutNormals(segments, converted, segmentIndex);
                         if (cutNormals.StartMiterAbandoned)
                             abandonedMiters.Add(new MiterWarning(AlignmentIdOf(alignment), segment.Start));
 
@@ -255,18 +265,22 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
 
     private static (DHBIMWATER.Core.Geometry.Vector3D Start, DHBIMWATER.Core.Geometry.Vector3D End,
         bool StartMiterAbandoned, bool EndMiterAbandoned) CutNormals(
-        IReadOnlyList<AlignmentSampleSegment> segments, int index)
+        IReadOnlyList<AlignmentSampleSegment> segments, IReadOnlyList<XYZ> convertedPoints, int index)
     {
-        var own = DirectionOf(segments[index]);
-        var hasPrevious = index > 0 && segments[index - 1].End.DistanceTo(segments[index].Start) <= JoinToleranceM;
-        var previous = hasPrevious ? DirectionOf(segments[index - 1]) : own;
+        var own = DirectionOf(convertedPoints, index);
+        var hasPrevious = index > 0
+            && !segments[index - 1].IsDatumStep && !segments[index].IsDatumStep
+            && segments[index - 1].End.DistanceTo(segments[index].Start) <= JoinToleranceM;
+        var previous = hasPrevious ? DirectionOf(convertedPoints, index - 1) : own;
         var startMiterAbandoned = hasPrevious && StraightJointCutPlane.ExceedsMiterLimit(
             previous, own, StraightJointCutPlane.MaxMiterDeflectionDeg);
         var start = hasPrevious && !startMiterAbandoned
             ? StraightJointCutPlane.Bisect(previous, own)
             : own;
-        var hasNext = index + 1 < segments.Count && segments[index].End.DistanceTo(segments[index + 1].Start) <= JoinToleranceM;
-        var next = hasNext ? DirectionOf(segments[index + 1]) : own;
+        var hasNext = index + 1 < segments.Count
+            && !segments[index + 1].IsDatumStep && !segments[index].IsDatumStep
+            && segments[index].End.DistanceTo(segments[index + 1].Start) <= JoinToleranceM;
+        var next = hasNext ? DirectionOf(convertedPoints, index + 1) : own;
         var endMiterAbandoned = hasNext && StraightJointCutPlane.ExceedsMiterLimit(
             own, next, StraightJointCutPlane.MaxMiterDeflectionDeg);
         var end = hasNext && !endMiterAbandoned
@@ -275,11 +289,8 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
         return (start, end, startMiterAbandoned, endMiterAbandoned);
     }
 
-    private static DHBIMWATER.Core.Geometry.Vector3D DirectionOf(AlignmentSampleSegment segment)
-        => new DHBIMWATER.Core.Geometry.Vector3D(
-            segment.End.X - segment.Start.X,
-            segment.End.Y - segment.Start.Y,
-            segment.End.Z - segment.Start.Z).Normalize();
+    private static DHBIMWATER.Core.Geometry.Vector3D DirectionOf(IReadOnlyList<XYZ> convertedPoints, int segmentIndex)
+        => ToVector3D(convertedPoints[segmentIndex * 2 + 1] - convertedPoints[segmentIndex * 2]).Normalize();
 
     private static XYZ OrientToAxis(XYZ normal, XYZ axis)
         => normal.DotProduct(axis) >= 0d ? normal : -normal;
@@ -291,9 +302,6 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
         var slope = Math.Min(rawSlope, MaxCutSlope);
         return radiusFt * slope + UC.MmToFt(1d);
     }
-
-    private static XYZ ToXyz(DHBIMWATER.Core.Geometry.Point3D point, double zOffsetM, AlignmentPlacementOrigin origin, XYZ basePoint, double projectNorthRotation)
-        => AlignmentPlacementMapper.ToXyz(point, zOffsetM, origin.X, origin.Y, basePoint, projectNorthRotation);
 
     private static XYZ ToXyz(DHBIMWATER.Core.Geometry.Vector3D vector) => new(vector.X, vector.Y, vector.Z);
     private static DHBIMWATER.Core.Geometry.Vector3D ToVector3D(XYZ vector) => new(vector.X, vector.Y, vector.Z);

@@ -138,6 +138,23 @@ public class AlignmentDatumOffsetterTests
     }
 
     [Fact]
+    public void Datum_step_is_marked_on_exactly_one_untrimmed_segment()
+    {
+        var input = DiameterChangeAlignment(
+            new Point3D(0, 0, 0), new Point3D(1, 0, 0), new Point3D(2, 0, 0));
+        var offset = AlignmentDatumOffsetter.ToCenterline(new[] { input }, ZDatum.Invert, Specs);
+        var alignment = offset.Alignments.Single();
+
+        var segments = AlignmentIntervalSampler.SampleSegments(
+            alignment, 6d, trims: null, offset.DiameterStepVertexIndices.Single());
+
+        var step = Assert.Single(segments.Where(segment => segment.IsDatumStep));
+        var stepVertex = offset.DiameterStepVertexIndices.Single().Single();
+        Assert.Equal(alignment.Vertices[stepVertex - 1], step.Start);
+        Assert.Equal(alignment.Vertices[stepVertex], step.End);
+    }
+
+    [Fact]
     public void Nearly_collinear_excel_rounding_noise_still_splits_diameter_step()
     {
         var input = DiameterChangeAlignment(
@@ -159,6 +176,19 @@ public class AlignmentDatumOffsetterTests
 
         Assert.Equal(3, result.Alignments.Single().Vertices.Count);
         Assert.Empty(result.DiameterStepVertexIndices.Single());
+    }
+
+    [Fact]
+    public void Diameter_changing_bend_uses_each_side_invert_offset()
+    {
+        var input = DiameterChangeAlignment(
+            new Point3D(0, 0, 0), new Point3D(1, 0, 0), new Point3D(1, 1, 0));
+        var upstreamOffsetM = PipeElevationDatum.OffsetMm(ZDatum.Invert, Specs.Find(PipeKindCatalog.Water1, 300d), 300d) / 1000d;
+        var downstreamOffsetM = PipeElevationDatum.OffsetMm(ZDatum.Invert, Specs.Find(PipeKindCatalog.Water1, 500d), 500d) / 1000d;
+
+        var result = AlignmentDatumOffsetter.ToCenterline(new[] { input }, ZDatum.Invert, Specs).Alignments.Single();
+
+        Assert.Equal((upstreamOffsetM + downstreamOffsetM) / 2d, result.Vertices[1].Z, 12);
     }
 
     [Fact]

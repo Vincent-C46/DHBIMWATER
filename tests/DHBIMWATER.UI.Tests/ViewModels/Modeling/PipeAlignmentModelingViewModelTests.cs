@@ -172,6 +172,28 @@ public sealed class PipeAlignmentModelingViewModelTests
     }
 
     [Fact]
+    public void ApplyFailure_WhenDirectShapeIsOutsideDesignLimits_ShowsShortSummary()
+    {
+        var vm = CreatePreviewTestViewModel();
+        const string error = "DirectShape 생성 실패: 내부원점으로부터 너무 멀리 떨어진 곳에 모델링을 시도했습니다.";
+
+        vm.ApplyFailure(error);
+
+        Assert.Equal("내부원점에서 너무 멀어 생성할 수 없습니다.", vm.ResultSummary);
+        Assert.Equal(new[] { error }, vm.ResultWarnings);
+    }
+
+    [Fact]
+    public void ApplyFailure_WhenNotDesignLimitFailure_ShowsGenericSummary()
+    {
+        var vm = CreatePreviewTestViewModel();
+
+        vm.ApplyFailure("직관 DirectShape 생성 실패: 테스트");
+
+        Assert.Equal("모델 생성에 실패했습니다.", vm.ResultSummary);
+    }
+
+    [Fact]
     public void DiameterMappingRow_DefaultPipeKindIsNotUserModified()
     {
         var row = new DiameterMappingRow { RawValue = "DN300", KindRawValue = "(값 없음)", FileName = "sample.shp", FileKey = "sample", Count = 1 };

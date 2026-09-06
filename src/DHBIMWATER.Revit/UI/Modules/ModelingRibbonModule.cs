@@ -41,7 +41,7 @@ namespace DHBIMWATER.Revit.UI.Modules
                 panel.AddItem(valveRoomBtn),
                 panel.AddItem(pipeLayoutBtn),
                 panel.AddItem(coordinateLinkBtn),
-                panel.AddItem(placementStationBtn),
+                //panel.AddItem(placementStationBtn),
             ];
         }
     }

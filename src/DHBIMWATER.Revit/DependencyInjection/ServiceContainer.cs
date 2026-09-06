@@ -35,7 +35,11 @@ namespace DHBIMWATER.Revit.DependencyInjection
             services.AddRevitServices();                // Revit 관련 서비스
             services.AddApplicationServices();          // Application 서비스
             services.AddInfrastructureServices();       // Infrastructure 서비스
-            services.AddSingleton<IAlignmentSnapshotStore, DhBoostAlignmentSnapshotStore>();
+            services.AddSingleton<IAlignmentSnapshotStore, AlignmentSnapshotStore>();
+            services.AddTransient<ProjectLocationAdapter>();
+            services.AddTransient<IProjectLocationCommandRepo>(provider => provider.GetRequiredService<ProjectLocationAdapter>());
+            services.AddTransient<IProjectLocationQueryRepo>(provider => provider.GetRequiredService<ProjectLocationAdapter>());
+            services.AddTransient<IProjectLocationCoordinateTransformRepo>(provider => provider.GetRequiredService<ProjectLocationAdapter>());
 
             _serviceProvider = services.BuildServiceProvider();
         }

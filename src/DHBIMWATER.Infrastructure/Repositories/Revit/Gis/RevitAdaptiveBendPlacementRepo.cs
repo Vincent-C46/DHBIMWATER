@@ -1,6 +1,7 @@
 using Autodesk.Revit.DB;
 using System.IO;
 using DHBIMWATER.Application.DTOs.Gis;
+using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Infrastructure.Helpers;
@@ -20,15 +21,15 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
     private const int RegenerateBatchSize = 50;
 
     private readonly Func<Document?> _doc;
-    public RevitAdaptiveBendPlacementRepo(Func<Document?> doc) => _doc = doc;
+    private readonly IProjectLocationCoordinateTransformRepo _coordinateTransform;
+    public RevitAdaptiveBendPlacementRepo(Func<Document?> doc, IProjectLocationCoordinateTransformRepo coordinateTransform)
+    { _doc = doc; _coordinateTransform = coordinateTransform; }
 
     public AdaptiveBendPlacementResult Place(IReadOnlyList<AdaptiveBendPlacementPlan> plans, AlignmentPlacementOrigin origin, PipeInfoParameterContext? info = null, IProgress<PipeAlignmentProgress>? progress = null)
     {
         if (plans.Count == 0) return new AdaptiveBendPlacementResult(0, Array.Empty<string>());
         progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingBends, 0, plans.Count));
         var doc = _doc() ?? throw new InvalidOperationException("활성 Revit 문서가 없습니다.");
-        var basePoint = AlignmentPlacementMapper.GetProjectBasePoint(doc);
-        var projectNorthRotation = AlignmentPlacementMapper.GetProjectNorthRotation(doc);
         var symbols = new Dictionary<(string Family, string Type), FamilySymbol>();
         // 비활성 Symbol 활성화 시 필요한 Regenerate가 곡관 생성 배치 중간에 끼지 않도록 유형별로 먼저 확정한다.
         using (PlacementProfiler.Step("07a 곡관 Symbol 확정"))
@@ -68,12 +69,25 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
                 rotationParameters = ResolveRotationParameters(instance, plan);
 
             var points = new[] { plan.Points.Start, plan.Points.ArcStart, plan.Points.ArcMid, plan.Points.ArcEnd, plan.Points.End };
+            var converted = ProjectLocationCoordinateConverter.Convert(_coordinateTransform, points,
+                Enumerable.Repeat(plan.ZOffsetM, points.Length).ToArray());
             using (PlacementProfiler.Step("07d 곡관 P1~P5 좌표 설정"))
             using (PlacementProfiler.StepBucketed("07d 곡관 P1~P5 좌표 설정", count))
                 for (var i = 0; i < 5; i++)
                 {
                     var refPoint = (ReferencePoint)doc.GetElement(pointIds[i]);
-                    refPoint.Position = AlignmentPlacementMapper.ToXyz(points[i], plan.ZOffsetM, origin.X, origin.Y, basePoint, projectNorthRotation);
+                    try
+                    {
+                        refPoint.Position = converted[i];
+                    }
+                    catch (ArgumentException outOfRange) when (
+                        outOfRange.ParamName == "point" ||
+                        outOfRange.Message.Contains("design limits", StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidOperationException(
+                            $"곡관 배치 실패({plan.FamilyName}:{plan.TypeName}, 절점 {plan.NodeId}): " +
+                            "내부원점으로부터 너무 멀리 떨어진 곳에 모델링을 시도했습니다.", outOfRange);
+                    }
                 }
             if (info is { Enabled: true })
             {
@@ -125,7 +139,8 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
                 missingOuterDiameter.Add((plan.PipeKind, plan.DiameterMm));
             for (var i = 0; i < 5; i++)
             {
-                SetRequiredAngleParameter(rotationParameters[i].Xy, plan, $"{RotationXyParameterPrefix}{i + 1}", plan.RotXYDeg[i]);
+                SetRequiredAngleParameter(rotationParameters[i].Xy, plan, $"{RotationXyParameterPrefix}{i + 1}",
+                    BendOrientation.ApplyProjectNorth(plan.RotXYDeg[i], origin.TrueNorthClockwiseDegrees));
                 SetRequiredAngleParameter(rotationParameters[i].Xz, plan, $"{RotationXzParameterPrefix}{i + 1}", plan.RotXZDeg[i]);
             }
             }

@@ -37,8 +37,6 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IElementTypeQueryRepo, RevitElementTypeQueryRepo>();
         services.AddTransient<IElementTypeCommandRepo, RevitElementTypeCommandRepo>();
         services.AddTransient<IWallCommandRepo, RevitWallCommandRepo>();
-        services.AddTransient<IProjectLocationCommandRepo, RevitProjectLocationCommandRepo>();
-        services.AddTransient<IProjectLocationQueryRepo, RevitProjectLocationQueryRepo>();
         services.AddTransient<IGenericModelCommandRepo, RevitGenericModelCommandRepo>();
         services.AddTransient<IPipeCommandRepo, RevitPipeMepCommandRepo>();
         services.AddTransient<IPipeCommandRepo, RevitPipeGenericModelCommandRepo>();

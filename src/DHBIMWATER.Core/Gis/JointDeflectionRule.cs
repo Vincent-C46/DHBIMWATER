@@ -66,9 +66,10 @@ public sealed class JointDeflectionRule : IBendingRule
             return Empty(node, kind, actual, selectedAngle, singleAllowable, residual, jointType, settings.ApplicationMode, effective, isAcceptable);
 
         var tangent = BendResolver.TangentLength(fitting.CenterlineRadiusMm, selectedAngle);
-        // 곡관 형식(A/B)은 프로젝트 전역 설정이다(행별 편집 없음, 2026-09-03 확정). 카탈로그 행의 Form이 아니라 여기서 전역값을 쓴다.
-        var form = isFlanged ? BendForm.BType : settings.ActiveBendForm;
-        var extraLeg = settings.ActiveBendConnection == BendConnection.Socket && form == BendForm.BType ? 200d : 0d;
+        // 곡관 형식(A/B)은 프로젝트 전역 설정이다(행별 편집 없음, 2026-09-03 확정).
+        // 플랜지도 형식 선택을 그대로 따른다(2026-09-04 확정).
+        var form = settings.ActiveBendForm;
+        var extraLeg = form == BendForm.BType ? 200d : 0d;
         var weightKg = jointType == JointTypeCatalog.Tyton ? fitting.WeightTytonKg : fitting.WeightKpMechanicalKg;
         if (settings.ActiveBendConnection == BendConnection.Socket
             && BendFittingCatalog.TryGetHandbookWeight(node.MaxDiameterMm, selectedAngle, form, out var kpKg, out var tytonKg))

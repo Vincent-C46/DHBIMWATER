@@ -3,7 +3,7 @@ using DHBIMWATER.Core.Geometry;
 namespace DHBIMWATER.Core.Gis;
 
 public sealed record AlignmentSamplePoint(Point3D Position, Vector3D Tangent, double DistanceFromStart);
-public sealed record AlignmentSampleSegment(Point3D Start, Point3D End, double DistanceFromStart);
+public sealed record AlignmentSampleSegment(Point3D Start, Point3D End, double DistanceFromStart, bool IsDatumStep = false);
 
 /// <summary>
 /// 한 정점에서 직관을 비워야 하는 길이. 정점에 곡관·이형관이 들어가면 그 몸통 자리만큼 직관이 물러난다.
@@ -51,14 +51,15 @@ public static class AlignmentIntervalSampler
         => SampleSegments(vertices, interval, null);
 
     /// <summary>직선상 중간 측점은 넘기고 DN 변경점·굴곡점에서만 6m 기준을 다시 시작한다.</summary>
-    public static IReadOnlyList<AlignmentSampleSegment> SampleSegments(PipeAlignment alignment, double interval, IReadOnlyList<VertexTrim>? trims = null)
+    public static IReadOnlyList<AlignmentSampleSegment> SampleSegments(PipeAlignment alignment, double interval,
+        IReadOnlyList<VertexTrim>? trims = null, IReadOnlySet<int>? stepVertices = null)
     {
         ArgumentNullException.ThrowIfNull(alignment);
         var requiredBreaks = new HashSet<int>();
         for (var i = 1; i < alignment.Vertices.Count; i++)
             if (AlignmentDiameterProfile.ChangesAtVertex(alignment, i))
                 requiredBreaks.Add(i);
-        return SampleSegmentsCore(alignment.Vertices, interval, trims, requiredBreaks, preserveAllVertices: false);
+        return SampleSegmentsCore(alignment.Vertices, interval, trims, requiredBreaks, stepVertices, preserveAllVertices: false);
     }
 
     /// <summary>
@@ -68,11 +69,12 @@ public static class AlignmentIntervalSampler
     /// <param name="trims">
     /// 인덱스 = <paramref name="vertices"/> 인덱스. null이거나 길이가 다르면 차감 없이 동작한다.
     /// </param>
-    public static IReadOnlyList<AlignmentSampleSegment> SampleSegments(IReadOnlyList<Point3D> vertices, double interval, IReadOnlyList<VertexTrim>? trims)
-        => SampleSegmentsCore(vertices, interval, trims, null, preserveAllVertices: true);
+    public static IReadOnlyList<AlignmentSampleSegment> SampleSegments(IReadOnlyList<Point3D> vertices, double interval,
+        IReadOnlyList<VertexTrim>? trims, IReadOnlySet<int>? stepVertices = null)
+        => SampleSegmentsCore(vertices, interval, trims, null, stepVertices, preserveAllVertices: true);
 
     private static IReadOnlyList<AlignmentSampleSegment> SampleSegmentsCore(IReadOnlyList<Point3D> vertices, double interval, IReadOnlyList<VertexTrim>? trims,
-        IReadOnlySet<int>? requiredBreaks, bool preserveAllVertices)
+        IReadOnlySet<int>? requiredBreaks, IReadOnlySet<int>? stepVertices, bool preserveAllVertices)
     {
         ValidateInterval(interval);
         var parts = BuildParts(vertices);
@@ -80,6 +82,7 @@ public static class AlignmentIntervalSampler
 
         var total = parts[^1].EndDistance;
         var excluded = BuildExclusions(vertices, trims, total);
+        var datumSteps = BuildDatumSteps(vertices, stepVertices);
 
         // 경계: 굴곡점·필수점·차감 끝. 같은 직선 측점은 6m 흐름 유지.
         var anchors = new List<double> { 0d, total };
@@ -94,6 +97,7 @@ public static class AlignmentIntervalSampler
             AddRequiredBreaks(vertices, requiredBreaks, anchors);
         }
         foreach (var range in excluded) { anchors.Add(range.Start); anchors.Add(range.End); }
+        foreach (var range in datumSteps) { anchors.Add(range.Start); anchors.Add(range.End); }
 
         anchors.Sort();
         var boundaries = new List<double>(anchors.Count);
@@ -122,8 +126,10 @@ public static class AlignmentIntervalSampler
         for (var i = 1; i < final.Count; i++)
         {
             // 차감 구간 안에 든 조각은 곡관 몸통 자리라 직관을 만들지 않는다.
-            if (IsExcluded(excluded, (final[i - 1] + final[i]) * 0.5)) continue;
-            result.Add(new AlignmentSampleSegment(PointAt(parts, final[i - 1]), PointAt(parts, final[i]), final[i - 1]));
+            var midpoint = (final[i - 1] + final[i]) * 0.5;
+            if (IsInRange(excluded, midpoint)) continue;
+            result.Add(new AlignmentSampleSegment(PointAt(parts, final[i - 1]), PointAt(parts, final[i]), final[i - 1],
+                IsInRange(datumSteps, midpoint)));
         }
         return result;
     }
@@ -155,9 +161,25 @@ public static class AlignmentIntervalSampler
         return merged;
     }
 
-    private static bool IsExcluded(List<(double Start, double End)> excluded, double distance)
+    private static List<(double Start, double End)> BuildDatumSteps(IReadOnlyList<Point3D> vertices, IReadOnlySet<int>? stepVertices)
     {
-        foreach (var range in excluded)
+        var ranges = new List<(double Start, double End)>();
+        if (stepVertices is null || stepVertices.Count == 0) return ranges;
+
+        var distance = 0d;
+        for (var i = 1; i < vertices.Count; i++)
+        {
+            var start = distance;
+            distance += vertices[i - 1].DistanceTo(vertices[i]);
+            if (stepVertices.Contains(i) && distance - start > Tolerance)
+                ranges.Add((start, distance));
+        }
+        return ranges;
+    }
+
+    private static bool IsInRange(IReadOnlyList<(double Start, double End)> ranges, double distance)
+    {
+        foreach (var range in ranges)
             if (distance > range.Start - Tolerance && distance < range.End + Tolerance) return true;
         return false;
     }

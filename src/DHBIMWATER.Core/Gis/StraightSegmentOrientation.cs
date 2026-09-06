@@ -13,15 +13,18 @@ public static class StraightSegmentOrientation
     public static (Vector3D Start, Vector3D End, Vector3D Own) Resolve(
         Point3D segmentStart, Point3D segmentEnd,
         Point3D? previousEnd, Vector3D? previousOwnDirection,
-        Point3D? nextStart, Vector3D? nextOwnDirection)
+        Point3D? nextStart, Vector3D? nextOwnDirection,
+        bool previousIsDatumStep = false, bool nextIsDatumStep = false, bool ownIsDatumStep = false)
     {
         var own = new Vector3D(
             segmentEnd.X - segmentStart.X,
             segmentEnd.Y - segmentStart.Y,
             segmentEnd.Z - segmentStart.Z);
-        var joinsPrevious = previousEnd is { } end && previousOwnDirection is not null
+        var joinsPrevious = !previousIsDatumStep && !ownIsDatumStep
+            && previousEnd is { } end && previousOwnDirection is not null
             && end.DistanceTo(segmentStart) <= JoinToleranceM;
-        var joinsNext = nextStart is { } start && nextOwnDirection is not null
+        var joinsNext = !nextIsDatumStep && !ownIsDatumStep
+            && nextStart is { } start && nextOwnDirection is not null
             && segmentEnd.DistanceTo(start) <= JoinToleranceM;
         var startDirection = joinsPrevious
             ? StraightJointCutPlane.Bisect(previousOwnDirection!, own)

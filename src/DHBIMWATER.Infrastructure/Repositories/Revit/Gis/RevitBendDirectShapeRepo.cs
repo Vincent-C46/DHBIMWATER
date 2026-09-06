@@ -1,6 +1,7 @@
 using Autodesk.Revit.DB;
 using System.IO;
 using DHBIMWATER.Application.DTOs.Gis;
+using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Infrastructure.Helpers;
@@ -11,15 +12,15 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Gis;
 internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
 {
     private readonly Func<Document?> _doc;
-    public RevitBendDirectShapeRepo(Func<Document?> doc) => _doc = doc;
+    private readonly IProjectLocationCoordinateTransformRepo _coordinateTransform;
+    public RevitBendDirectShapeRepo(Func<Document?> doc, IProjectLocationCoordinateTransformRepo coordinateTransform)
+    { _doc = doc; _coordinateTransform = coordinateTransform; }
 
     public AdaptiveBendPlacementResult Place(IReadOnlyList<AdaptiveBendPlacementPlan> plans, AlignmentPlacementOrigin origin,
         PipeInfoParameterContext? info = null, IProgress<PipeAlignmentProgress>? progress = null)
     {
         if (plans.Count == 0) return new AdaptiveBendPlacementResult(0, Array.Empty<string>());
         var doc = _doc() ?? throw new InvalidOperationException("활성 Revit 문서가 없습니다.");
-        var basePoint = AlignmentPlacementMapper.GetProjectBasePoint(doc);
-        var projectNorthRotation = AlignmentPlacementMapper.GetProjectNorthRotation(doc);
         var materialId = PipeSolidFactory.FindOrCreateDcipMaterial(doc);
         var writer = new PipeParameterWriter();
         var warnings = new List<string>();
@@ -36,8 +37,9 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
         {
             try
             {
-                var points = new[] { plan.Points.Start, plan.Points.ArcStart, plan.Points.ArcMid, plan.Points.ArcEnd, plan.Points.End }
-                    .Select(x => AlignmentPlacementMapper.ToXyz(x, plan.ZOffsetM, origin.X, origin.Y, basePoint, projectNorthRotation)).ToArray();
+                var sourcePoints = new[] { plan.Points.Start, plan.Points.ArcStart, plan.Points.ArcMid, plan.Points.ArcEnd, plan.Points.End };
+                var points = ProjectLocationCoordinateConverter.Convert(_coordinateTransform, sourcePoints,
+                    Enumerable.Repeat(plan.ZOffsetM, sourcePoints.Length).ToArray());
                 if (!TryBuildSolid(doc.Application.ShortCurveTolerance, points, plan, materialId, out var solid))
                 {
                     skipped++;
@@ -51,9 +53,10 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
                 if (!plan.IsAcceptable) BendOverrideGraphics.ApplyExceededOverride(overrideView, shape.Id, solidFillPatternId, plan.NodeId, overrideWarnings);
                 count++;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 failed++;
+                warnings.Add($"절점 {plan.NodeId} 곡관 DirectShape 생성 실패: {ex.GetType().Name} — {ex.Message}");
             }
             finally { progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingBends, count, plans.Count)); }
         }

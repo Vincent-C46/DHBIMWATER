@@ -1,6 +1,7 @@
 using Autodesk.Revit.DB;
 using System.IO;
 using DHBIMWATER.Application.DTOs.Gis;
+using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Infrastructure.Helpers;
@@ -11,15 +12,15 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Gis;
 internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
 {
     private readonly Func<Document?> _doc;
-    public RevitReducerDirectShapeRepo(Func<Document?> doc) => _doc = doc;
+    private readonly IProjectLocationCoordinateTransformRepo _coordinateTransform;
+    public RevitReducerDirectShapeRepo(Func<Document?> doc, IProjectLocationCoordinateTransformRepo coordinateTransform)
+    { _doc = doc; _coordinateTransform = coordinateTransform; }
 
     public ReducerPlacementResult Place(IReadOnlyList<ReducerDirectShapePlacementPlan> plans, AlignmentPlacementOrigin origin,
         PipeInfoParameterContext? info = null, IProgress<PipeAlignmentProgress>? progress = null)
     {
         if (plans.Count == 0) return new ReducerPlacementResult(0, Array.Empty<string>());
         var doc = _doc() ?? throw new InvalidOperationException("활성 Revit 문서가 없습니다.");
-        var basePoint = AlignmentPlacementMapper.GetProjectBasePoint(doc);
-        var projectNorthRotation = AlignmentPlacementMapper.GetProjectNorthRotation(doc);
         var materialId = PipeSolidFactory.FindOrCreateDcipMaterial(doc);
         var writer = new PipeParameterWriter();
         var count = 0;
@@ -31,8 +32,10 @@ internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
         {
             try
             {
-                var start = AlignmentPlacementMapper.ToXyz(plan.Placement.UpstreamEnd, plan.ZOffsetM, origin.X, origin.Y, basePoint, projectNorthRotation);
-                var end = AlignmentPlacementMapper.ToXyz(plan.Placement.DownstreamEnd, plan.ZOffsetM, origin.X, origin.Y, basePoint, projectNorthRotation);
+                var points = ProjectLocationCoordinateConverter.Convert(_coordinateTransform,
+                    new[] { plan.Placement.UpstreamEnd, plan.Placement.DownstreamEnd }, new[] { plan.ZOffsetM, plan.ZOffsetM });
+                var start = points[0];
+                var end = points[1];
                 if (!TryBuildSolid(start, end, plan, materialId, out var solid, out var isSolid))
                 {
                     failed++;

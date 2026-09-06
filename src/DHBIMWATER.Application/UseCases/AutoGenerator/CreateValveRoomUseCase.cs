@@ -58,14 +58,24 @@ public sealed class CreateValveRoomUseCase
                 var pitWarnings = new List<string>();
                 if (request.DrainPits.Count > 0 && slabIds.TryGetValue("기초", out var foundationSlabId))
                 {
+                    if (request.DrainPitVoidMapping is not { } mapping)
+                        throw new InvalidOperationException("드레인 피트 Void 패밀리 매핑이 설정되지 않았습니다.");
+
                     foreach (var pit in request.DrainPits)
                     {
-                        var warning = _drainPitVoidCommand.CreateDrainPitVoid(foundationSlabId, pit);
+                        var foundationDepth = Math.Min(pit.Depth, dto.ProfileSpecDto.FoundationThickness);
+                        var warning = _drainPitVoidCommand.CreateDrainPitVoid(foundationSlabId, pit with { Depth = foundationDepth }, mapping);
                         if (warning != null) pitWarnings.Add(warning);
-                        if (DrainPitGeometry.IsPenetrating(pit, dto.ProfileSpecDto.FoundationThickness) && slabIds.TryGetValue("버림콘크리트", out var leanId))
+                        var remainingDepth = pit.Depth - dto.ProfileSpecDto.FoundationThickness;
+                        if (remainingDepth > 0 && slabIds.TryGetValue("버림콘크리트", out var leanId))
                         {
-                            var leanPit = pit with { TopCenter = pit.TopCenter with { Z = ValveRoomGeometryCalculator.BaseElevation(dto) - dto.ProfileSpecDto.FoundationThickness }, Depth = dto.ProfileSpecDto.PlainConcreteThickness };
-                            warning = _drainPitVoidCommand.CreateDrainPitVoid(leanId, leanPit);
+                            var leanDepth = Math.Min(remainingDepth, dto.ProfileSpecDto.PlainConcreteThickness);
+                            var leanPit = pit with
+                            {
+                                TopCenter = pit.TopCenter with { Z = ValveRoomGeometryCalculator.BaseElevation(dto) - dto.ProfileSpecDto.FoundationThickness },
+                                Depth = leanDepth
+                            };
+                            warning = _drainPitVoidCommand.CreateDrainPitVoid(leanId, leanPit, mapping);
                             if (warning != null) pitWarnings.Add(warning);
                         }
                     }

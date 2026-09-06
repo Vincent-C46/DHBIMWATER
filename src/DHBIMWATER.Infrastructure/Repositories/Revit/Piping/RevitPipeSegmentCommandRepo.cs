@@ -14,6 +14,21 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
 internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
 {
     private const double ConnectionToleranceMm = 1;
+    private sealed record PlacedPart(FamilyInstance Instance, string Role);
+    // TODO: DistanceMm은 미사용이다 — 인라인 부속 보정은 docs/122에서 앵커 축 정사영 방식으로 대체됐다.
+    private readonly record struct NodeLegAnchor(double DistanceMm, XYZ ConnectorOrigin);
+
+    /// <summary>엣지 하나의 배치 축. 원점은 시작 앵커(절점 부속이 있으면 그 실측 커넥터), 방향은 단위벡터다.</summary>
+    private readonly record struct EdgeAxis(XYZ Start, XYZ Direction)
+    {
+        /// <summary>축 원점에서 <paramref name="distanceMm"/>만큼 떨어진 축 위의 점.</summary>
+        public XYZ PointAt(double distanceMm) => Start + Direction * UC.MmToFt(distanceMm);
+    }
+
+    /// <summary>캔버스 점을 배치 축에 정사영한 축 방향 거리(mm). 축 원점이 0이다.
+    /// 점유 구간 계산과 부속 본체 배치가 반드시 같은 식을 써야 커넥터가 맞물린다(docs/122 §A).</summary>
+    private static double AxisDistanceMm(XYZ point, EdgeAxis axis)
+        => UC.FtToMm((point - axis.Start).DotProduct(axis.Direction));
     private readonly Func<Document?> _document;
     public RevitPipeSegmentCommandRepo(Func<Document?> document) => _document = document;
     public PipeOutputMode OutputMode => PipeOutputMode.PipeAccessorySegment;
@@ -35,15 +50,21 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         // 여기서는 길이로 검증하지 않고, "2포트인가 / 길이를 쓸 수 있는가"만 확인한다.
         ValidateSegmentSymbol(document, segment, families.LengthParameterName);
 
-        var placedInstances = new List<FamilyInstance>();
+        // 직경·각도 파라미터를 못 쓰면 부속이 기본 형상·기본 각도로 놓여 관이 통째로 어긋난다. 경고만 남기고
+        // 진행하면 사용자가 어긋난 모델을 받게 되므로, 아무것도 배치하기 전에 한 번에 검사하고 중단한다(docs/122 §C).
+        ValidateDrivenParameters(document, network, families, segment);
 
-        // 1) 절점 부속을 먼저 배치하고 커넥터를 실측해 엣지별 차감량을 만든다.
-        var trims = PlaceNodeFittings(document, network, families, placedInstances, hostLevel);
+        var placedInstances = new List<PlacedPart>();
+        var warnings = new List<string>();
+
+        // 1) 절점 부속을 먼저 배치하고 실측 커넥터 원점으로 엣지 배치 축을 정한다.
+        var legAnchors = PlaceNodeFittings(document, network, families, placedInstances, hostLevel, warnings);
 
         // 2) 엣지마다 구간을 분해해 직관·단관을 놓는다.
-        var warnings = new List<string>();
         // null은 물리 배관 커넥터가 1개인 비인라인 부속이다. 주관을 자르지 않고 위치만 배치한다.
         var spanCache = new Dictionary<ElementId, double?>();
+        // 인라인 밸브도 관과 같은 축 위에 놓아야 하므로(docs/122 §A) 엣지별 축을 모아 3) 단계에서 다시 쓴다.
+        var edgeAxes = new Dictionary<Guid, EdgeAxis>();
         var straightCount = 0;
         var shortCount = 0;
         for (var edgeIndex = 0; edgeIndex < network.Edges.Count; edgeIndex++)
@@ -51,13 +72,20 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             var edge = network.Edges[edgeIndex];
             var startXyz = ToXyz(edge.Start, edge.Elevation, network.ReferencePoint);
             var endXyz = ToXyz(edge.End, edge.Elevation, network.ReferencePoint);
-            var lengthMm = edge.Start.DistanceTo(edge.End);
+            var startAnchor = legAnchors.TryGetValue((NodeIdAt(network, edge.Start), edge.Id), out var startLeg)
+                ? startLeg.ConnectorOrigin : startXyz;
+            var endAnchor = legAnchors.TryGetValue((NodeIdAt(network, edge.End), edge.Id), out var endLeg)
+                ? endLeg.ConnectorOrigin : endXyz;
+            var lengthMm = UC.FtToMm(startAnchor.DistanceTo(endAnchor));
             if (lengthMm <= 0) continue;
 
+            // 축 방향은 점유 구간 계산보다 먼저 있어야 한다 — 인라인 부속 위치를 이 축에 정사영해서 잡기 때문이다.
+            var direction = (endAnchor - startAnchor).Normalize();
+            var rotation = Math.Atan2(direction.Y, direction.X);
+            edgeAxes[edge.Id] = new EdgeAxis(startAnchor, direction);
+
             var occupied = new List<OccupiedSpan>();
-            if (trims.TryGetValue((NodeIdAt(network, edge.Start), edge.Id), out var head) && head > 0) occupied.Add(new OccupiedSpan(0, head));
-            if (trims.TryGetValue((NodeIdAt(network, edge.End), edge.Id), out var tail) && tail > 0) occupied.Add(new OccupiedSpan(lengthMm - tail, lengthMm));
-            occupied.AddRange(InlineFittingSpans(document, edge, network, spanCache));
+            occupied.AddRange(InlineFittingSpans(document, edge, network, families, spanCache, startAnchor, direction));
 
             var plan = PipeSegmentPlan.Build(lengthMm, occupied, families.StraightLengthMm);
             if (plan.Errors.Count > 0)
@@ -72,17 +100,14 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             }
             warnings.AddRange(plan.Warnings.Select(x => $"[{FormatEdge(edge)}] {x}"));
 
-            var direction = (endXyz - startXyz).Normalize();
-            var rotation = Math.Atan2(direction.Y, direction.X);
             foreach (var placement in plan.Segments)
             {
-                var center = startXyz + direction * UC.MmToFt(placement.CenterMm);
+                var center = startAnchor + direction * UC.MmToFt(placement.CenterMm);
                 var instance = PlaceAt(document, segment, center, rotation, hostLevel);
-                placedInstances.Add(instance);
-
                 // 직관·단관이 같은 패밀리이므로 길이 구동과 검증 경로도 하나다.
                 // 직관/단관 구분은 패밀리 내부 수식이 정척 길이로 판정하며, 여기서는 집계에만 쓴다.
                 var role = placement.Kind == PipeSegmentKind.Straight ? "직관" : "단관";
+                placedInstances.Add(new PlacedPart(instance, role));
                 // 직경을 먼저 구동한다. 직경이 형상을 바꾸는 패밀리에서, 뒤따르는 길이 구동·커넥터 실측(RecenterOnConnectors,
                 // ValidateCenteredSpan)이 최종 형상 기준으로 이뤄져야 하기 때문이다.
                 if (!string.IsNullOrWhiteSpace(families.DiameterParameterName))
@@ -97,18 +122,25 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             }
         }
 
-        // 3) 인라인 밸브류는 기존과 같은 위치에 그대로 배치한다(파이프 분할이 없으므로 끼워 넣기만 하면 된다).
+        // 3) 인라인 밸브류를 배치한다(파이프 분할이 없으므로 끼워 넣기만 하면 된다).
+        // 위치·회전은 관과 같은 앵커 축을 쓴다(docs/122 §A). 캔버스 절점 기준으로 놓으면 절점 부속 레그 길이만큼
+        // 관 조각과 어긋나 커넥터가 연결되지 않는다.
         var singlePortCount = 0;
         foreach (var fitting in network.InlineFittings.Where(x => !string.IsNullOrWhiteSpace(x.FamilyTypeName)))
         {
             var edge = network.Edges.FirstOrDefault(x => x.Id == fitting.EdgeId);
             if (edge is null) continue;
             var symbol = ResolveSymbol(document, fitting.FamilyTypeName, "배관부속");
-            var start = ToXyz(edge.Start, edge.Elevation, network.ReferencePoint);
-            var end = ToXyz(edge.End, edge.Elevation, network.ReferencePoint);
-            var direction = (end - start).Normalize();
-            var point = ToXyz(fitting.Position, fitting.Elevation, network.ReferencePoint);
-            var instance = PlaceAt(document, symbol, point, Math.Atan2(direction.Y, direction.X), hostLevel);
+            var canvasPoint = ToXyz(fitting.Position, fitting.Elevation, network.ReferencePoint);
+            // 축이 없는 엣지(길이 0으로 건너뛴 경우)는 캔버스 좌표를 그대로 쓴다.
+            var axis = edgeAxes.TryGetValue(edge.Id, out var found)
+                ? found
+                : new EdgeAxis(ToXyz(edge.Start, edge.Elevation, network.ReferencePoint),
+                    (ToXyz(edge.End, edge.Elevation, network.ReferencePoint) - ToXyz(edge.Start, edge.Elevation, network.ReferencePoint)).Normalize());
+            var point = axis.PointAt(AxisDistanceMm(canvasPoint, axis));
+            var instance = PlaceAt(document, symbol, point, Math.Atan2(axis.Direction.Y, axis.Direction.X), hostLevel);
+            SetOptionalDiameterParameter(instance, families.ValveDiameterParameterName, network.DiameterMm, "배관부속", warnings);
+            document.Regenerate();
             var connectors = GetMepConnectors(instance);
             if (connectors.Count == 1)
             {
@@ -119,7 +151,7 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             else if (connectors.Count == 2)
             {
                 ValidateCenteredSpan(instance, point, ConnectorSpanMm(connectors), "배관부속");
-                placedInstances.Add(instance);
+                placedInstances.Add(new PlacedPart(instance, "배관부속"));
             }
             else
             {
@@ -140,12 +172,12 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
     private static Guid NodeIdAt(PipeNetworkDefinition network, DHBIMWATER.Core.Geometry.Point2D point)
         => network.Nodes.FirstOrDefault(x => x.Position.DistanceTo(point) <= 0.01)?.Id ?? Guid.Empty;
 
-    /// <summary>절점마다 곡관·T형을 배치하고, 각 레그 방향의 커넥터까지 거리를 (절점, 엣지)별 차감량으로 돌려준다.</summary>
-    private static Dictionary<(Guid NodeId, Guid EdgeId), double> PlaceNodeFittings(
+    /// <summary>절점마다 곡관·T형을 배치하고, 각 레그의 실측 커넥터 원점을 돌려준다.</summary>
+    private static Dictionary<(Guid NodeId, Guid EdgeId), NodeLegAnchor> PlaceNodeFittings(
         Document document, PipeNetworkDefinition network, PipeSegmentFamilySelection families,
-        ICollection<FamilyInstance> placedInstances, Level? hostLevel)
+        ICollection<PlacedPart> placedInstances, Level? hostLevel, List<string> warnings)
     {
-        var trims = new Dictionary<(Guid, Guid), double>();
+        var legAnchors = new Dictionary<(Guid, Guid), NodeLegAnchor>();
         foreach (var node in network.Nodes)
         {
             var legs = PipeNodeAngle.Legs(node, network.Edges);
@@ -177,7 +209,18 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             }
 
             var instance = PlaceAt(document, symbol, origin, 0, hostLevel);
-            placedInstances.Add(instance);
+            var diameterParameterName = node.NodeKind == NodeKind.Elbow
+                ? families.BendDiameterParameterName : families.TeeDiameterParameterName;
+            var role = node.NodeKind == NodeKind.Elbow ? "곡관" : "T형";
+            SetOptionalDiameterParameter(instance, diameterParameterName, network.DiameterMm, role, warnings);
+            if (node.NodeKind == NodeKind.Elbow)
+            {
+                var deflectionDeg = PipeNodeAngle.Deflection(node, network.Edges);
+                if (deflectionDeg is not null)
+                    SetOptionalAngleParameter(instance, families.BendAngleParameterName, deflectionDeg.Value, role, warnings);
+            }
+            document.Regenerate();
+            placedInstances.Add(new PlacedPart(instance, role));
             var connectors = GetMepConnectors(instance);
             if (connectors.Count != expectedConnectors)
                 throw new InvalidOperationException(
@@ -185,17 +228,18 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
 
             RotateTo(document, instance, origin, connectors, targetRotation, node.NodeKind);
 
-            // 회전 후 실측: 레그 방향과 가장 잘 맞는 커넥터까지의 거리가 그 레그의 차감량이다.
+            // 회전 후 실측: 레그 방향과 가장 잘 맞는 실제 커넥터가 직관·단관 배치 축의 끝점이다.
             foreach (var leg in legs)
             {
                 var legDirection = new XYZ(leg.DirectionX, leg.DirectionY, 0);
                 var best = GetMepConnectors(instance)
                     .OrderByDescending(c => Direction(c.Origin - origin).DotProduct(legDirection))
                     .First();
-                trims[(node.Id, leg.Edge.Id)] = UC.FtToMm(best.Origin.DistanceTo(origin));
+                legAnchors[(node.Id, leg.Edge.Id)] = new NodeLegAnchor(
+                    UC.FtToMm(best.Origin.DistanceTo(origin)), best.Origin);
             }
         }
-        return trims;
+        return legAnchors;
     }
 
     /// <summary>부속의 기준 방향(곡관은 커넥터 이등분, T형은 나머지 둘과 직교하는 분기 커넥터)이
@@ -236,28 +280,43 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         return flat.GetLength() <= 1e-9 ? XYZ.BasisX : flat.Normalize();
     }
 
-    /// <summary>인라인 밸브가 축 위에서 차지하는 구간. 커넥터 2개 사이 길이를 실측해 쓴다.</summary>
+    /// <summary>인라인 밸브가 축 위에서 차지하는 구간. 커넥터 2개 사이 길이를 실측해 쓴다.
+    /// 구간 중심은 캔버스 점을 배치 축(<paramref name="startAnchor"/>, <paramref name="direction"/>)에
+    /// 정사영해 잡는다 — 관 조각과 같은 축 좌표라야 커넥터가 맞물린다(docs/122 §A).</summary>
     private static IEnumerable<OccupiedSpan> InlineFittingSpans(
         Document document, PipeEdgeDefinition edge, PipeNetworkDefinition network,
-        Dictionary<ElementId, double?> spanCache)
+        PipeSegmentFamilySelection families,
+        Dictionary<ElementId, double?> spanCache, XYZ startAnchor, XYZ direction)
     {
+        var axis = new EdgeAxis(startAnchor, direction);
         foreach (var fitting in network.InlineFittings.Where(x => x.EdgeId == edge.Id && !string.IsNullOrWhiteSpace(x.FamilyTypeName)))
         {
             var symbol = ResolveSymbol(document, fitting.FamilyTypeName, "배관부속");
             if (!spanCache.TryGetValue(symbol.Id, out var widthMm))
-                spanCache[symbol.Id] = widthMm = InlineConnectorSpanMm(document, symbol);
+                spanCache[symbol.Id] = widthMm = InlineConnectorSpanMm(
+                    document, symbol, families.ValveDiameterParameterName, network.DiameterMm);
             if (widthMm is null) continue; // 1포트는 주관을 자르지 않는 위치 배치다.
-            var center = fitting.Position.DistanceTo(edge.Start);
+            var center = AxisDistanceMm(ToXyz(fitting.Position, fitting.Elevation, network.ReferencePoint), axis);
             yield return new OccupiedSpan(center - widthMm.Value / 2, center + widthMm.Value / 2);
         }
     }
 
     /// <summary>인라인 부속이면 커넥터 간 길이, 1포트 위치 부속이면 null. 그 외 커넥터 수는 지원하지 않는다.</summary>
-    private static double? InlineConnectorSpanMm(Document document, FamilySymbol symbol)
+    private static double? InlineConnectorSpanMm(
+        Document document, FamilySymbol symbol, string? diameterParameterName, double diameterMm)
     {
         var probe = PlaceAt(document, symbol, XYZ.Zero, 0, null);
         try
         {
+            if (!string.IsNullOrWhiteSpace(diameterParameterName))
+            {
+                var parameter = probe.LookupParameter(diameterParameterName);
+                if (parameter is not null && !parameter.IsReadOnly && parameter.StorageType == StorageType.Double)
+                {
+                    parameter.Set(UC.MmToFt(diameterMm));
+                    document.Regenerate();
+                }
+            }
             var connectors = GetMepConnectors(probe);
             if (connectors.Count == 1) return null;
             if (connectors.Count != 2)
@@ -271,6 +330,62 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         {
             document.Delete(probe.Id);
             document.Regenerate();
+        }
+    }
+
+    /// <summary>이번 네트워크에서 실제로 쓰는 패밀리·파라미터 조합을 배치 전에 모두 검사한다(docs/122 §C).
+    /// 파라미터명이 비어 있으면 "구동하지 않음"이 정상 설정이므로 검사 대상이 아니다.
+    /// 실패는 모아서 한 번에 던진다 — 하나 고칠 때마다 다시 돌려 다음 실패를 만나는 일을 막는다.</summary>
+    private static void ValidateDrivenParameters(
+        Document document, PipeNetworkDefinition network, PipeSegmentFamilySelection families, FamilySymbol segment)
+    {
+        var failures = new List<string>();
+        var probeCache = new Dictionary<ElementId, FamilyInstance>();
+        try
+        {
+            Check(segment, "관", families.DiameterParameterName, "직경", false);
+
+            if (network.Nodes.Any(x => x.NodeKind == NodeKind.Elbow))
+            {
+                var bend = ResolveSymbol(document, families.BendFamilyTypeName, "곡관");
+                Check(bend, "곡관", families.BendDiameterParameterName, "직경", false);
+                Check(bend, "곡관", families.BendAngleParameterName, "각도", true);
+            }
+            if (network.Nodes.Any(x => x.NodeKind == NodeKind.Tee))
+                Check(ResolveSymbol(document, families.TeeFamilyTypeName, "T형"), "T형", families.TeeDiameterParameterName, "직경", false);
+
+            foreach (var familyTypeName in network.InlineFittings
+                         .Where(x => !string.IsNullOrWhiteSpace(x.FamilyTypeName))
+                         .Select(x => x.FamilyTypeName).Distinct())
+                Check(ResolveSymbol(document, familyTypeName, "배관부속"), "배관부속", families.ValveDiameterParameterName, "직경", false);
+        }
+        finally
+        {
+            foreach (var probe in probeCache.Values) document.Delete(probe.Id);
+            if (probeCache.Count > 0) document.Regenerate();
+        }
+
+        if (failures.Count == 0) return;
+        throw new InvalidOperationException(
+            $"아래 파라미터에 값을 쓸 수 없어 모델을 생성하지 않았습니다.{Environment.NewLine}{Environment.NewLine}" +
+            $"{string.Join(Environment.NewLine, failures)}{Environment.NewLine}{Environment.NewLine}" +
+            "패밀리에서 인스턴스 파라미터로 바꾸거나, 모델링 창에서 해당 파라미터 선택을 비우세요(비우면 구동하지 않습니다).");
+
+        void Check(FamilySymbol symbol, string role, string? parameterName, string kind, bool requiresAngleType)
+        {
+            if (string.IsNullOrWhiteSpace(parameterName)) return;
+            if (!probeCache.TryGetValue(symbol.Id, out var probe))
+                probeCache[symbol.Id] = probe = PlaceAt(document, symbol, XYZ.Zero, 0, null);
+
+            var parameter = probe.LookupParameter(parameterName);
+            var reason = parameter is null ? "인스턴스 파라미터가 없습니다(유형 파라미터이거나 이름이 다릅니다)."
+                : parameter.IsReadOnly ? "읽기 전용입니다."
+                : parameter.StorageType != StorageType.Double ? "실수형 파라미터가 아닙니다."
+                // 라디안 값을 길이 파라미터에 쓰면 조용히 엉뚱한 형상이 나오므로 각도는 데이터 타입까지 본다.
+                : requiresAngleType && !parameter.Definition.GetDataType().Equals(SpecTypeId.Angle) ? "각도형 파라미터가 아닙니다."
+                : null;
+            if (reason is not null)
+                failures.Add($"- {role} '{symbol.Family.Name} : {symbol.Name}'의 {kind} 파라미터 '{parameterName}': {reason}");
         }
     }
 
@@ -336,6 +451,38 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             throw new InvalidOperationException($"{label} 파라미터 '{parameterName}' 설정에 실패했습니다.");
     }
 
+    private static void SetOptionalDiameterParameter(
+        FamilyInstance instance, string? parameterName, double valueMm, string label, List<string> warnings)
+    {
+        if (string.IsNullOrWhiteSpace(parameterName)) return;
+        var parameter = instance.LookupParameter(parameterName);
+        if (parameter is null || parameter.IsReadOnly || parameter.StorageType != StorageType.Double)
+        {
+            warnings.Add(
+                $"{label} '{instance.Symbol.Family.Name} : {instance.Symbol.Name}'에서 직경 파라미터 '{parameterName}'에 " +
+                "값을 쓸 수 없어 건너뛰었습니다(이름이 없거나, 유형 파라미터이거나, 읽기 전용/실수형이 아닌 경우입니다).");
+            return;
+        }
+        if (!parameter.Set(UC.MmToFt(valueMm)))
+            warnings.Add($"{label} '{instance.Symbol.Family.Name} : {instance.Symbol.Name}'의 직경 파라미터 '{parameterName}' 설정에 실패해 건너뛰었습니다.");
+    }
+
+    private static void SetOptionalAngleParameter(
+        FamilyInstance instance, string? parameterName, double valueDeg, string label, List<string> warnings)
+    {
+        if (string.IsNullOrWhiteSpace(parameterName)) return;
+        var parameter = instance.LookupParameter(parameterName);
+        if (parameter is null || parameter.IsReadOnly || parameter.StorageType != StorageType.Double)
+        {
+            warnings.Add(
+                $"{label} '{instance.Symbol.Family.Name} : {instance.Symbol.Name}'에서 각도 파라미터 '{parameterName}'에 " +
+                "값을 쓸 수 없어 건너뛰었습니다(이름이 없거나, 유형 파라미터이거나, 읽기 전용/실수형이 아닌 경우입니다).");
+            return;
+        }
+        if (!parameter.Set(UC.DegToRad(valueDeg)))
+            warnings.Add($"{label} '{instance.Symbol.Family.Name} : {instance.Symbol.Name}'의 각도 파라미터 '{parameterName}' 설정에 실패해 건너뛰었습니다.");
+    }
+
     /// <summary>길이 구동 뒤 실제 커넥터 중앙이 요청 중앙에 오도록 인스턴스를 평행이동한다.
     /// 길이 치수가 중심 대칭이 아닌 패밀리(한쪽 끝 기준 성장)를 그대로 수용하기 위한 보정이다.</summary>
     private static void RecenterOnConnectors(Document document, FamilyInstance instance, XYZ expectedCenter)
@@ -378,12 +525,13 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
     /// <summary>서로 다른 패밀리의 물리 배관 커넥터가 같은 접점에 하나씩 있으면 실제 Revit 연결을 만든다.
     /// 관 끝점(EndPoint) 이외의 열린 커넥터나 한 점에 3개 이상 모인 모호한 연결은 관망 단절이므로 전체 생성을 중단한다.</summary>
     private static void ConnectCoincidentConnectors(
-        Document document, IReadOnlyCollection<FamilyInstance> instances, PipeNetworkDefinition network)
+        Document document, IReadOnlyCollection<PlacedPart> instances, PipeNetworkDefinition network)
     {
         var tolerance = UC.MmToFt(ConnectionToleranceMm);
         var endPoints = network.Nodes.Where(x => x.NodeKind == NodeKind.EndPoint)
             .Select(x => ToXyz(x.Position, network.Elevation, network.ReferencePoint)).ToList();
-        var connectors = instances.SelectMany(GetMepConnectors).ToList();
+        var partsById = instances.ToDictionary(x => x.Instance.Id);
+        var connectors = instances.SelectMany(x => GetMepConnectors(x.Instance)).ToList();
         var handled = new HashSet<Connector>();
 
         foreach (var connector in connectors)
@@ -407,16 +555,25 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                 }
                 catch (Exception ex)
                 {
-                    throw new InvalidOperationException(
-                        $"배관 부속류 커넥터 연결에 실패했습니다. 접점 {FormatPoint(connector.Origin)}의 두 패밀리 방향과 커넥터 규격을 확인하세요.", ex);
+                    var part = partsById[connector.Owner.Id];
+                    var otherPart = partsById[candidates[0].Owner.Id];
+                    throw BuildFailure(
+                        $"{FormatPart(part)}의 커넥터를 {FormatPart(otherPart)}의 커넥터에 연결하지 못했습니다.{Environment.NewLine}" +
+                        $"접점: {FormatPoint(connector.Origin, network.ReferencePoint)}{Environment.NewLine}" +
+                        "두 패밀리 방향과 커넥터 규격을 확인하세요.", connector, part, network, "Revit ConnectTo 호출 실패", ex);
                 }
                 continue;
             }
 
             if (candidates.Count > 1)
-                throw new InvalidOperationException(
-                    $"접점 {FormatPoint(connector.Origin)}에 연결 가능한 배관 커넥터가 {candidates.Count + 1}개 겹쳐 있습니다. " +
-                    "1포트 분기 부속은 인라인 부속으로 직접 연결할 수 없습니다.");
+            {
+                var part = partsById[connector.Owner.Id];
+                var otherParts = candidates.Select(x => FormatPart(partsById[x.Owner.Id])).Distinct();
+                throw BuildFailure(
+                    $"{FormatPart(part)}의 커넥터 접점: {FormatPoint(connector.Origin, network.ReferencePoint)}{Environment.NewLine}" +
+                    $"연결 가능한 배관 커넥터가 {candidates.Count + 1}개 겹쳐 있습니다. 상대: {string.Join(", ", otherParts)}.{Environment.NewLine}" +
+                    "1포트 분기 부속은 인라인 부속으로 직접 연결할 수 없습니다.", connector, part, network, "커넥터 중첩");
+            }
 
             if (endPoints.Any(x => x.DistanceTo(connector.Origin) <= tolerance))
             {
@@ -424,9 +581,27 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                 continue;
             }
 
-            throw new InvalidOperationException(
-                $"접점 {FormatPoint(connector.Origin)}에서 연결 상대를 찾지 못했습니다. " +
-                "직관·단관 길이와 곡관/T형 커넥터 방향을 확인하세요.");
+            var unmatchedPart = partsById[connector.Owner.Id];
+            var nearest = connectors
+                .Where(other => other.Owner.Id != connector.Owner.Id)
+                .OrderBy(other => other.Origin.DistanceTo(connector.Origin))
+                .FirstOrDefault();
+            var nearestMessage = nearest is null
+                ? "주변에 다른 커넥터가 없습니다."
+                : $"가장 가까운 커넥터는 {FormatPart(partsById[nearest.Owner.Id])}의 커넥터로 " +
+                  $"{UC.FtToMm(nearest.Origin.DistanceTo(connector.Origin)):N1}mm 떨어져 있습니다(허용 {ConnectionToleranceMm:N0}mm).";
+            var nearestDistanceMm = nearest is null ? 0 : UC.FtToMm(nearest.Origin.DistanceTo(connector.Origin));
+            var hint = nearestDistanceMm >= ConnectionToleranceMm * 10
+                ? $"{Environment.NewLine}(10mm 이상 이탈 — 부속이 관 배치 축에서 벗어났을 가능성이 큽니다. " +
+                  "곡관 꺾임각이 캔버스와 다르게 적용됐는지, 곡관/T형/밸브 직경·각도 파라미터가 실제 패밀리의 " +
+                  "인스턴스 파라미터와 이름이 맞는지 확인하세요.)"
+                : "";
+            throw BuildFailure(
+                $"{FormatPart(unmatchedPart)}의 커넥터가 연결 상대를 찾지 못했습니다.{Environment.NewLine}" +
+                $"접점: {FormatPoint(connector.Origin, network.ReferencePoint)}{Environment.NewLine}" +
+                $"{nearestMessage}{Environment.NewLine}" +
+                $"부속 커넥터가 배관 축에서 벗어났는지, 직관·단관 길이와 곡관/T형 방향을 확인하세요.{hint}",
+                connector, unmatchedPart, network, nearestMessage);
         }
 
         document.Regenerate();
@@ -452,8 +627,24 @@ internal sealed class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             .Where(x => x.Domain == Domain.DomainPiping && x.ConnectorType == ConnectorType.End)
             .ToList() ?? [];
 
-    private static string FormatPoint(XYZ point)
-        => FormattableString.Invariant($"({UC.FtToMm(point.X):N0}, {UC.FtToMm(point.Y):N0}, {UC.FtToMm(point.Z):N0})mm");
+    private static PipeNetworkBuildException BuildFailure(
+        string message, Connector connector, PlacedPart part, PipeNetworkDefinition network, string detail, Exception? innerException = null)
+    {
+        var point = connector.Origin;
+        var failure = new PipeConnectionFailure(
+            new DHBIMWATER.Core.Geometry.Point2D(UC.FtToMm(point.X) - network.ReferencePoint.X, UC.FtToMm(point.Y) - network.ReferencePoint.Y),
+            UC.FtToMm(point.Z), part.Role, $"{part.Instance.Symbol.Family.Name} : {part.Instance.Symbol.Name}", connector.Owner.Id.Value, detail);
+        return innerException is null
+            ? new PipeNetworkBuildException(message, [failure])
+            : new PipeNetworkBuildException(message, [failure]) { Source = innerException.Source };
+    }
+
+    private static string FormatPart(PlacedPart part)
+        => $"{part.Role} '{part.Instance.Symbol.Family.Name} : {part.Instance.Symbol.Name}'(ID {part.Instance.Id.Value})";
+
+    private static string FormatPoint(XYZ point, DHBIMWATER.Core.Geometry.Point2D referencePoint)
+        => FormattableString.Invariant(
+            $"캔버스 ({UC.FtToMm(point.X) - referencePoint.X:N0}, {UC.FtToMm(point.Y) - referencePoint.Y:N0})mm, Elev {UC.FtToMm(point.Z):N0}mm  [Revit 좌표 ({UC.FtToMm(point.X):N0}, {UC.FtToMm(point.Y):N0}, {UC.FtToMm(point.Z):N0})mm]");
 
     private static string FormatEdge(PipeEdgeDefinition edge)
         => FormattableString.Invariant($"({edge.Start.X:N0}, {edge.Start.Y:N0}) → ({edge.End.X:N0}, {edge.End.Y:N0})");

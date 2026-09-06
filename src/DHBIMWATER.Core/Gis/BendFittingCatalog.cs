@@ -10,7 +10,7 @@ public enum BendConnection { Socket, Flanged }
 
 /// <param name="DiameterMm">호칭지름 DN. 조회는 Exact Match다.</param>
 /// <param name="Form">
-/// A형(양쪽 소켓)/B형(소켓+스피것). 핸드북상 e·R·t는 형식과 무관하게 같고 s(스피것 길이)·무게만 다르다
+/// A형(양쪽 소켓)/B형(한쪽 소켓). 핸드북상 e·R·t는 형식과 무관하게 같고 s(추가 다리 길이)·무게만 다르다
 /// (2026-08-19 확인). 행 하나가 한 형식만 대표하므로 기본은 B형이고, A형이 필요한 자리만 사용자가 바꾼다.
 /// </param>
 /// <param name="WallThicknessMm">e — 곡관 자체의 규격상 벽두께(mm).</param>
@@ -33,9 +33,9 @@ public sealed record BendFittingEntry(
     PipeMaterial Material = PipeMaterial.DuctileIron,
     BendConnection Connection = BendConnection.Socket)
 {
-    /// <summary>s — 소켓 B형(소켓+스피것)만 200mm. A형과 플랜지곡관(양단 플랜지)은 스피것이 없어 0이다.</summary>
+    /// <summary>s — B형(한쪽 소켓)만 200mm, A형(양쪽 소켓)은 0. 접합 종류와 무관하다(2026-09-04 확정).</summary>
     [JsonIgnore]
-    public double ExtraLegLengthMm => Connection == BendConnection.Socket && Form == BendForm.BType ? 200d : 0d;
+    public double ExtraLegLengthMm => Form == BendForm.BType ? 200d : 0d;
 }
 
 public sealed class BendFittingCatalog
@@ -69,8 +69,8 @@ public sealed class BendFittingCatalog
     //   e → WallThicknessMm, R → CenterlineRadiusMm, t → LayingLengthMm(절점→관 끝), s → ExtraLegLengthMm(계산값)
     //
     // 판단 근거 (2026-08-19 / 2026-08-20 사용자 확인)
-    //   · A형(양쪽 소켓)과 B형(소켓+스피것)은 치수 e·R·t가 동일하고 s·무게만 다르다 → 행은 DN×각도 72개로 두고
-    //     형식별 무게만 따로 둔다. s=200은 도면상 B형 스피것 쪽에만 표기된다 → A형 0, B형 200(계산값).
+    //   · A형(양쪽 소켓)과 B형(한쪽 소켓)은 치수 e·R·t가 동일하고 s·무게만 다르다 → 행은 DN×각도 72개로 두고
+    //     형식별 무게만 따로 둔다. s=200은 도면상 B형의 소켓 없는 쪽에만 표기된다 → A형 0, B형 200(계산값).
     //   · 표에 DE(외경) 열이 없다 → 곡관 외경은 직관 제원표(StraightPipeSpecTable)의 DE를 쓴다. DE는 관종 무관 DN 단일값이다.
     //   · 이형관 벽두께 e는 관종과 무관한 단일값이며 4개 각도가 모두 같다. 직관 두께(관종별)와는 다른 계열이다.
     //   · 무게는 조인트 종류(KP메커니컬/타이튼)·형식(A/B)별로 다르다. 핸드북에는 KP-L(장소켓) 무게도 있으나
@@ -280,7 +280,7 @@ public sealed record BendSettings(
     string ActiveJointType,
     /// <summary>배치에 쓸 곡관 접합 종류. 모델링 창에서 고르며 기본은 소켓이다.</summary>
     BendConnection ActiveBendConnection = BendConnection.Socket,
-    /// <summary>배치에 쓸 곡관 형식. A형(양단 소켓)은 s=0·양쪽 Joint, B형(소켓+스피것)은 s=200·한쪽 Joint를 결정한다(2026-09-03 확정).</summary>
+    /// <summary>배치에 쓸 곡관 형식. A형(양쪽 소켓)은 s=0·양쪽 Joint, B형(한쪽 소켓)은 s=200·한쪽 Joint를 결정하며 접합 종류와 무관하다(2026-09-04 확정).</summary>
     BendForm ActiveBendForm = BendForm.BType)
 {
     /// <summary>허용굴곡 적용 방식은 곡관 형식이 결정한다. A형은 양쪽 Joint(θ₁+θ₂), B형은 한쪽 Joint.</summary>

@@ -16,6 +16,7 @@ public sealed class ModelPipeAlignmentUseCase
     private readonly IAlignmentStraightPlacementRepo _straightRepo;
     private readonly IAlignmentPipePlacementRepo _pipeRepo;
     private readonly IProjectLocationCommandRepo _projectLocationRepo;
+    private readonly IProjectLocationQueryRepo _projectLocationQueryRepo;
     private readonly ISharedParameterRepository _sharedParameterRepo;
     private readonly BendSettingsProvider _bendSettings;
     private readonly IAdaptiveBendPlacementRepo _adaptiveBendRepo;
@@ -25,9 +26,10 @@ public sealed class ModelPipeAlignmentUseCase
 
     public ModelPipeAlignmentUseCase(ITransactionContext transaction, AlignmentSourceLoader loader, IPipeAlignmentCommandRepo alignmentRepo,
         IAlignmentStraightPlacementRepo straightRepo, IAlignmentPipePlacementRepo pipeRepo, IProjectLocationCommandRepo projectLocationRepo,
+        IProjectLocationQueryRepo projectLocationQueryRepo,
         ISharedParameterRepository sharedParameterRepo, BendSettingsProvider bendSettings, IAdaptiveBendPlacementRepo adaptiveBendRepo,
         IBendDirectShapeRepo bendDirectShapeRepo, IReducerDirectShapeRepo reducerRepo, IAlignmentStraightDirectShapeRepo straightDirectShapeRepo)
-    { _transaction = transaction; _loader = loader; _alignmentRepo = alignmentRepo; _straightRepo = straightRepo; _pipeRepo = pipeRepo; _projectLocationRepo = projectLocationRepo; _sharedParameterRepo = sharedParameterRepo; _bendSettings = bendSettings; _adaptiveBendRepo = adaptiveBendRepo; _bendDirectShapeRepo = bendDirectShapeRepo; _reducerRepo = reducerRepo; _straightDirectShapeRepo = straightDirectShapeRepo; }
+    { _transaction = transaction; _loader = loader; _alignmentRepo = alignmentRepo; _straightRepo = straightRepo; _pipeRepo = pipeRepo; _projectLocationRepo = projectLocationRepo; _projectLocationQueryRepo = projectLocationQueryRepo; _sharedParameterRepo = sharedParameterRepo; _bendSettings = bendSettings; _adaptiveBendRepo = adaptiveBendRepo; _bendDirectShapeRepo = bendDirectShapeRepo; _reducerRepo = reducerRepo; _straightDirectShapeRepo = straightDirectShapeRepo; }
 
     /// <summary>최종 모델 전 Line DirectShape 선형 미리보기 커밋.</summary>
     public PipeAlignmentModelingResult Preview(PipeAlignmentModelingRequest request, IProgress<PipeAlignmentProgress>? progress = null)
@@ -53,7 +55,7 @@ public sealed class ModelPipeAlignmentUseCase
                     using (PlacementProfiler.Step("04 미리보기 공유 매개변수 확보"))
                         _sharedParameterRepo.EnsureParameters(PipeAlignmentParameters.Definitions.Concat(GetPreviewOnlyParameterDefinitions()).ToList());
                     if (request.ApplySharedCoordinates)
-                        _projectLocationRepo.SetInternalOriginSharedPosition(origin.X, origin.Y, 0);
+                        _projectLocationRepo.SetInternalOriginSharedPositionPreservingAngle(origin.X, origin.Y);
                     var deletedPreviews = _alignmentRepo.DeletePreviews();
                     var (count, skipped, warnings) = ToDirectShape(loaded.Alignments, origin, progress);
                     _transaction.Commit();
@@ -142,7 +144,12 @@ public sealed class ModelPipeAlignmentUseCase
                 if (request.ApplySharedCoordinates)
                 {
                     using var sharedCoordinateScope = PlacementProfiler.Step("05 공유좌표 설정");
-                    _projectLocationRepo.SetInternalOriginSharedPosition(origin.X, origin.Y, 0);
+                    _projectLocationRepo.SetInternalOriginSharedPositionPreservingAngle(origin.X, origin.Y);
+                }
+                if (request.OutputMode == PipeAlignmentOutputMode.Adaptive)
+                {
+                    using var trueNorthScope = PlacementProfiler.Step("05a 진북각 조회");
+                    origin = origin with { TrueNorthClockwiseDegrees = _projectLocationQueryRepo.GetTrueNorthToProjectNorthClockwiseDegrees() };
                 }
                 AlignmentStraightPlacementResult? straightResult = null;
                 int count;
@@ -151,8 +158,8 @@ public sealed class ModelPipeAlignmentUseCase
                 using (PlacementProfiler.Step("06 직관/파이프 배치 전체"))
                     (count, skipped, repoWarnings) = request.OutputMode switch
                 {
-                    PipeAlignmentOutputMode.DirectShape => ToStraight(straightResult = _straightDirectShapeRepo.PlaceAlong(alignments, string.Empty, request.IntervalMm / 1000d, origin, settings.StraightPipes, mergedTrims, info: infoContext, progress: progress), bendWarnings),
-                    PipeAlignmentOutputMode.Adaptive => ToStraight(straightResult = _straightRepo.PlaceAlong(alignments, Require(request.StraightFamilyTypeName, "직관 패밀리"), request.IntervalMm / 1000d, origin, settings.StraightPipes, mergedTrims, request.StraightDiameterParameterName, request.StraightOuterDiameterParameterName, request.StraightThicknessParameterName, infoContext, progress), bendWarnings),
+                    PipeAlignmentOutputMode.DirectShape => ToStraight(straightResult = _straightDirectShapeRepo.PlaceAlong(alignments, string.Empty, request.IntervalMm / 1000d, origin, settings.StraightPipes, mergedTrims, info: infoContext, progress: progress, stepVertices: stepVertices), bendWarnings),
+                    PipeAlignmentOutputMode.Adaptive => ToStraight(straightResult = _straightRepo.PlaceAlong(alignments, Require(request.StraightFamilyTypeName, "직관 패밀리"), request.IntervalMm / 1000d, origin, settings.StraightPipes, mergedTrims, request.StraightDiameterParameterName, request.StraightOuterDiameterParameterName, request.StraightThicknessParameterName, infoContext, progress, stepVertices), bendWarnings),
                     PipeAlignmentOutputMode.PipingSystem => (_pipeRepo.PlaceAlong(alignments, Require(request.PipingSystemTypeName, "파이프 시스템 유형"), Require(request.PipeTypeName, "PipeType"), request.LevelName, request.IntervalMm / 1000d, origin), 0, (IReadOnlyList<string>)Array.Empty<string>()),
                     _ => throw new ArgumentOutOfRangeException(nameof(request.OutputMode))
                 };

@@ -76,7 +76,8 @@ public sealed record PipeInfoParameterContext(string JointType, JointApplication
 // Repo 인터페이스 계약을 보존하는 기존 DTO 정의다.
 public sealed record PipeAlignmentCreateDefinition(IReadOnlyList<PipeAlignment> Alignments, AlignmentPlacementOrigin Origin);
 public sealed record PipeAlignmentCreateResult(int CreatedCount, int SkippedSegments, IReadOnlyList<string> Warnings);
-public sealed record AlignmentPlacementOrigin(double X, double Y, ZDatum ZDatum, StraightPipeSpecTable StraightPipeSpecs)
+public sealed record AlignmentPlacementOrigin(double X, double Y, ZDatum ZDatum, StraightPipeSpecTable StraightPipeSpecs,
+    double TrueNorthClockwiseDegrees = 0d)
 {
     /// <summary>선형별 직관 제원으로 계산한 중심선 Z 오프셋(m). 모든 배치 경로가 이 값을 공유한다.</summary>
     public double GetZOffsetM(PipeAlignment alignment) => GetZOffsetM(alignment.PipeKind, alignment.DiameterMm);

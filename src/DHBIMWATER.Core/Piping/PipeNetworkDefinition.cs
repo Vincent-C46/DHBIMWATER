@@ -24,7 +24,15 @@ public sealed record PipeSegmentFamilySelection(
     /// <summary>직관 1본의 정척 길이(mm). 패밀리 수식의 직관/단관 분기 기준과 같아야 한다.</summary>
     double StraightLengthMm = PipeSegmentPlan.StraightLengthMm,
     /// <summary>관 인스턴스에 직경(mm)을 기록할 파라미터명. 비어 있으면 직경을 구동하지 않는다.</summary>
-    string DiameterParameterName = "");
+    string DiameterParameterName = "",
+    /// <summary>곡관 인스턴스에 직경(mm)을 기록할 파라미터명. 비어 있거나 유형 파라미터면 기록을 건너뛴다.</summary>
+    string BendDiameterParameterName = "",
+    /// <summary>T형 인스턴스에 직경(mm)을 기록할 파라미터명. 비어 있거나 유형 파라미터면 기록을 건너뛴다.</summary>
+    string TeeDiameterParameterName = "",
+    /// <summary>배관 밸브류 인스턴스에 직경(mm)을 기록할 파라미터명. 비어 있거나 유형 파라미터면 기록을 건너뛴다.</summary>
+    string ValveDiameterParameterName = "",
+    /// <summary>곡관 인스턴스에 꺾임각(도)을 기록할 파라미터명.</summary>
+    string BendAngleParameterName = "");
 
 public sealed record PipeNetworkDefinition(
     IReadOnlyList<PipeNodeDefinition> Nodes,

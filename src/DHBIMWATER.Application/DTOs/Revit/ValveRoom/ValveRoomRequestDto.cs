@@ -27,6 +27,8 @@ public record ValveRoomRequestDto
     public double InnerHeight { get; init; }
     /// <summary>드레인 피트 목록. 비어 있으면 피트를 만들지 않는다.</summary>
     public IReadOnlyList<DrainPitDefinition> DrainPits { get; init; } = Array.Empty<DrainPitDefinition>();
+    /// <summary>드레인 피트 Void 패밀리/매개변수 매핑. DrainPits가 비어 있지 않으면 반드시 채워야 한다.</summary>
+    public DrainPitVoidFamilyMappingDto? DrainPitVoidMapping { get; init; }
     /// <summary>RoomType이 "공기밸브실"일 때만 값이 채워진다.</summary>
     public AirValveRoomSpecDto? AirSpec { get; init; }
     /// <summary>RoomType이 "이토밸브실"일 때만 값이 채워진다.</summary>

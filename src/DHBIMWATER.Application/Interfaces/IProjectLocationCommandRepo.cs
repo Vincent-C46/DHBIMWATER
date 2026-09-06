@@ -11,4 +11,9 @@ public interface IProjectLocationCommandRepo
         double eastWestMeters,
         double northSouthMeters,
         double trueNorthToProjectNorthClockwiseDegrees);
+
+    /// <summary>각도를 변경하지 않고 원점만 옮긴다.</summary>
+    void SetInternalOriginSharedPositionPreservingAngle(
+        double eastWestMeters,
+        double northSouthMeters);
 }

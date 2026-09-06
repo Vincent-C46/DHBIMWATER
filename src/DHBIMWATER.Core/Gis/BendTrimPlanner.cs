@@ -152,7 +152,7 @@ public static class BendTrimPlanner
 
                 trims[v] = new VertexTrim(shortLeg * MmToCoordinate, longLeg * MmToCoordinate);
 
-                // P1~P5 각 점의 접선 방향에서 rot_XY_n/rot_XZ_n(도)을 구한다. P1·P2/P4·P5는 직선 구간이라 같은 값이다.
+                // 공유좌표 기준 P1~P5 접선에서 rot_XY_n/rot_XZ_n(도)을 구한다. P1·P2/P4·P5는 직선 구간이라 같은 값이다.
                 var tangents = BendOrientation.Tangents(upstream, downstream, polylineDeflectionDeg);
                 var rotXy = new double[tangents.Count];
                 var rotXz = new double[tangents.Count];

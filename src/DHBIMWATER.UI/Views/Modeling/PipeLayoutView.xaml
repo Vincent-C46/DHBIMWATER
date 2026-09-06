@@ -9,7 +9,7 @@
         mc:Ignorable="d" d:DataContext="{d:DesignInstance vm:PipeLayoutViewModel}"
         Title="DHBIMWATER - Pipe Layout" Width="1180" Height="720" WindowStartupLocation="CenterScreen"
         Background="#F4F7F9" WindowStyle="None" FontFamily="Segoe UI, Malgun Gothic" PreviewKeyDown="OnPreviewKeyDown" Validation.Error="OnValidationError">
-    <Window.Resources><ResourceDictionary><BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/><converters:FamilyTypeNameToTypeNameConverter x:Key="FamilyTypeNameToTypeNameConverter"/><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="/DHBIMWATER.UI;component/Styles/Generic.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary></Window.Resources>
+    <Window.Resources><ResourceDictionary><BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/><converters:FamilyTypeNameToTypeNameConverter x:Key="FamilyTypeNameToTypeNameConverter"/><SolidColorBrush x:Key="PipeErrorBrush" Color="#E74C3C"/><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="/DHBIMWATER.UI;component/Styles/Generic.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary></Window.Resources>
     <WindowChrome.WindowChrome><WindowChrome CaptionHeight="0" CornerRadius="15" GlassFrameThickness="1" UseAeroCaptionButtons="False"/></WindowChrome.WindowChrome>
     <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <controls:TitleBar Grid.Row="0"/>
@@ -205,19 +205,26 @@
                 <TextBlock Text="기준점 좌표" FontWeight="SemiBold"/>
                 <Grid Margin="0,4,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions><TextBlock Text="X" VerticalAlignment="Center"/><TextBox Grid.Column="1" Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding ReferenceX, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="2" Text="mm" Margin="4,0"/></Grid>
                 <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions><TextBlock Text="Y" VerticalAlignment="Center"/><TextBox Grid.Column="1" Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding ReferenceY, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="2" Text="mm" Margin="4,0"/></Grid>
-                <!-- 하나의 관 패밀리를 길이 파라미터로 구동해 직관·단관을 만든다(docs/39, docs/52). PipeLayout은 MEP Pipe를 생성하지 않는다. -->
-                <TextBlock Text="관 설정" FontWeight="Bold" Foreground="#4A6FA5" Margin="0,2,0,4"/>
                 <TextBlock Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6">
                     <Run Text="길이 "/><Run Text="{Binding StraightLengthMm, Mode=OneWay, StringFormat={}{0:N0}mm}" FontWeight="SemiBold"/><Run Text="는 직관, 나머지는 단관. 절점엔 곡관·T형이 자동 배치"/>
                 </TextBlock>
-                <TextBlock Text="관 패밀리 (배관 부속류)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding SegmentFamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding SegmentFamilyTypeName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,8"/>
-                <TextBlock Text="관 길이 파라미터" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding LengthParameterNames, Mode=OneWay}" SelectedItem="{Binding LengthParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,8"/>
-                <TextBlock Text="직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding LengthParameterNames, Mode=OneWay}" SelectedItem="{Binding DiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
-                <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions><TextBlock Text="관경" VerticalAlignment="Center"/><TextBox Grid.Column="1" Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding DiameterMm, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="2" Text="mm" Margin="4,0"/></Grid>
-                <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions><TextBlock Text="정척 길이" VerticalAlignment="Center"/><TextBox Grid.Column="1" Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding StraightLengthMm, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="2" Text="mm" Margin="4,0"/></Grid>
-                <TextBlock Text="곡관 패밀리 (배관 부속류)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding SegmentFamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding BendFamilyTypeName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
-                <TextBlock Text="각도 구분 없이 모든 절점에 이 패밀리 하나를 씁니다. 배관망에 여러 꺾임각이 섞여 있으면 이 패밀리의 실제 형상과 다른 각도에서 커넥터가 어긋날 수 있습니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
-                <TextBlock Text="T형 패밀리 (배관 부속류)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding SegmentFamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding TeeFamilyTypeName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,10"/>
+                <Expander Header="관 패밀리" IsExpanded="False" Margin="0,2,0,6"><StackPanel Margin="0,8,0,0">
+                    <TextBlock Text="관 패밀리 (배관 부속류)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding SegmentFamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding SegmentFamilyTypeName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,8"/>
+                    <TextBlock Text="관 길이 파라미터" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding LengthParameterNames, Mode=OneWay}" SelectedItem="{Binding LengthParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,8"/>
+                    <TextBlock Text="직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding LengthParameterNames, Mode=OneWay}" SelectedItem="{Binding DiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
+                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions><TextBlock Text="관경" VerticalAlignment="Center"/><TextBox Grid.Column="1" Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding DiameterMm, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="2" Text="mm" Margin="4,0"/></Grid>
+                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions><TextBlock Text="정척 길이" VerticalAlignment="Center"/><TextBox Grid.Column="1" Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding StraightLengthMm, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="2" Text="mm" Margin="4,0"/></Grid>
+                </StackPanel></Expander>
+                <Expander Header="곡관 패밀리" IsExpanded="False" Margin="0,2,0,6"><StackPanel Margin="0,8,0,0">
+                    <TextBlock Text="곡관 패밀리 (배관 부속류)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding SegmentFamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding BendFamilyTypeName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
+                    <TextBlock Text="곡관 직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding BendParameterNames, Mode=OneWay}" SelectedItem="{Binding BendDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
+                    <TextBlock Text="곡관 각도 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding BendParameterNames, Mode=OneWay}" SelectedItem="{Binding BendAngleParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
+                    <TextBlock Text="각도 구분 없이 모든 절점에 이 패밀리 하나를 씁니다. 배관망에 여러 꺾임각이 섞여 있으면 이 패밀리의 실제 형상과 다른 각도에서 커넥터가 어긋날 수 있습니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                </StackPanel></Expander>
+                <Expander Header="이형관 패밀리" IsExpanded="False" Margin="0,2,0,6"><StackPanel Margin="0,8,0,0">
+                    <TextBlock Text="이형관 패밀리 (T형/Y형, 배관 부속류)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding SegmentFamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding TeeFamilyTypeName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,10"/>
+                    <TextBlock Text="이형관 직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding TeeParameterNames, Mode=OneWay}" SelectedItem="{Binding TeeDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,10"/>
+                </StackPanel></Expander>
                 <TextBlock Text="배치 기준" FontWeight="Bold" Foreground="#4A6FA5" Margin="0,2,0,4"/>
                 <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions><TextBlock Text="Elev" VerticalAlignment="Center"/><TextBox Grid.Column="1" Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding Elevation, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="2" Text="mm" Margin="4,0"/></Grid>
                 <TextBlock Text="격자 스냅 단위 (직접 입력 가능)" FontWeight="SemiBold"/>
@@ -225,9 +232,8 @@
                     <ComboBox IsTextSearchEnabled="False" ItemsSource="{Binding GridSnapOptions, Mode=OneWay}" Text="{Binding GridSnapMm, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}" Style="{StaticResource EditableComboBoxStyle}"/>
                     <TextBlock Grid.Column="1" Text="mm" Margin="4,0" VerticalAlignment="Center"/>
                 </Grid>
-                <!-- 직관·단관·곡관·T형은 배관 부속류(OST_PipeFitting), 인라인 부속은 배관 밸브류(OST_PipeAccessory)를 쓴다. -->
-                <TextBlock Text="부속 카테고리 : 배관 밸브류" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                <TextBlock Text="밸브 패밀리" FontWeight="SemiBold"/>
+                <Expander Header="밸브" IsExpanded="False" Margin="0,2,0,6"><StackPanel Margin="0,8,0,0">
+                <TextBlock Text="밸브 패밀리 (배관 밸브류)" FontWeight="SemiBold"/>
                 <ComboBox ItemsSource="{Binding ValveFamilyNames, Mode=OneWay}" SelectedValue="{Binding SelectedValveFamilyName, Mode=TwoWay}" SelectedValuePath="Name" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,0">
                     <ComboBox.ItemTemplate>
                         <DataTemplate>
@@ -247,6 +253,7 @@
                     </ComboBox.ItemTemplate>
                 </ComboBox>
                 <TextBlock Text="관경과 같은 DN 패밀리는 굵게 표시됩니다." FontSize="11" Foreground="#566573" Margin="0,2,0,6"/>
+                <TextBlock Text="밸브 직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding ValveParameterNames, Mode=OneWay}" SelectedItem="{Binding ValveDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,8"/>
                 <TextBlock Text="배치할 유형 (선택 후 선 위 클릭)" FontWeight="SemiBold"/>
                 <ListBox Style="{StaticResource PrimaryListBoxStyle}" ItemsSource="{Binding FamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding SelectedFamilyTypeName, Mode=TwoWay}" IsEnabled="{Binding IsDrawMode}" Height="90" Margin="0,4,0,12">
                     <ListBox.ItemTemplate>
@@ -255,6 +262,7 @@
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
+                </StackPanel></Expander>
                 <TextBlock Text="배치된 부속품" FontWeight="Bold" Foreground="#4A6FA5" FontSize="16" Margin="0,0,0,4"/>
                 <ListBox Style="{StaticResource PrimaryListBoxStyle}" ItemsSource="{Binding InlineFittings, Mode=OneWay}" Height="220"><ListBox.ItemTemplate><DataTemplate><DockPanel Margin="3"><Button Content="삭제" Style="{StaticResource CancelButtonStyle}" DockPanel.Dock="Right" Command="{Binding DataContext.RemoveFittingCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/><TextBlock Text="{Binding DisplayOrder, Mode=OneWay}" Width="24"/><TextBlock Text="{Binding FamilyTypeName, Mode=OneWay}" ToolTip="{Binding TypeKey, Mode=OneWay}" TextTrimming="CharacterEllipsis"/></DockPanel></DataTemplate></ListBox.ItemTemplate></ListBox>
             </StackPanel></ScrollViewer></Border>

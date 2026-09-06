@@ -13,6 +13,11 @@ public enum PipeLayoutMode { Selection, Drawing }
 
 public sealed class PipeLayoutViewModel : ViewModelBase
 {
+    private static readonly string[] PipeFamilyDefaultKeywords = ["직관", "단관"];
+    private static readonly string[] BendFamilyDefaultKeywords = ["곡관"];
+    private static readonly string[] ReducerFamilyDefaultKeywords = ["T형관", "Y형관", "T형", "Y형", "티", "TEE"];
+    private static readonly string[] DiameterParameterDefaultKeywords = ["공칭지름", "공칭구경", "직경", "지름", "호칭", "Diameter", "DN"];
+    private static readonly string[] BendAngleParameterDefaultKeywords = ["각도"];
     private readonly IElementTypeQueryRepo _typeRepo;
     private PipeNetwork _network = new();
     private readonly Stack<PipeNetwork> _undoHistory = new();
@@ -36,12 +41,15 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     private string? _segmentFamilyTypeName, _lengthParameterName, _diameterParameterName;
     private double _straightLengthMm = PipeSegmentPlan.StraightLengthMm;
     private string? _bendFamilyTypeName, _teeFamilyTypeName;
+    private string? _bendDiameterParameterName, _bendAngleParameterName, _teeDiameterParameterName, _valveDiameterParameterName;
     /// <summary>관 길이 파라미터를 사용자가 직접 골랐는지. true면 관 패밀리를 바꿔도 자동 추정으로 덮어쓰지 않는다.</summary>
     private bool _lengthParameterPinned;
     private bool _diameterParameterPinned;
     private bool _isCreating;
+    private readonly List<PipeConnectionFailure> _failures = [];
+    private readonly HashSet<Guid> _errorEdgeIds = [];
     private int _inputValidationErrorCount;
-    private bool _useAngleSnap = true, _isPreviewVisible, _snapReferencePoint = true, _snapEndpoint = true, _snapMidpoint = true, _snapQuadrant, _snapIntersection = true, _snapPerpendicular = true, _snapNearest, _isSnapMarkerVisible, _isCursorVisible;
+    private bool _useAngleSnap = true, _isPreviewVisible, _snapReferencePoint = true, _snapEndpoint = true, _snapMidpoint = true, _snapQuadrant, _snapIntersection = true, _snapPerpendicular = true, _snapNearest = true, _isSnapMarkerVisible, _isCursorVisible;
     private double _previewX1, _previewY1, _previewX2, _previewY2, _previewLengthX, _previewLengthY, _snapMarkerX, _snapMarkerY, _cursorX, _cursorY;
     private double _subLineAX1, _subLineAY1, _subLineAX2, _subLineAY2, _subLineBX1, _subLineBY1, _subLineBX2, _subLineBY2;
     private bool _isSubLineVisible;
@@ -73,6 +81,9 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         ValveFamilyNames = [];
         SegmentFamilyTypeNames = [];
         LengthParameterNames = [];
+        BendParameterNames = [];
+        TeeParameterNames = [];
+        ValveParameterNames = [];
         Edges = [];
         Nodes = [];
         InlineFittings = [];
@@ -110,6 +121,9 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     public ObservableCollection<string> SegmentFamilyTypeNames { get; }
     /// <summary>선택된 관 패밀리의 인스턴스 파라미터 후보.</summary>
     public ObservableCollection<string> LengthParameterNames { get; }
+    public ObservableCollection<string> BendParameterNames { get; }
+    public ObservableCollection<string> TeeParameterNames { get; }
+    public ObservableCollection<string> ValveParameterNames { get; }
     public ObservableCollection<OutlineWallItem> OutlineWalls { get; }
     public ObservableCollection<OutlineArrowItem> OutlineArrows { get; }
     public ObservableCollection<TempDimensionItem> TempDimensions { get; }
@@ -166,6 +180,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         {
             if (!SetProperty(ref _selectedValveFamilyName, value)) return;
             RefreshValveTypeNames();
+            RefreshFittingDiameterParameterNames();
         }
     }
     /// <summary>직관·단관을 모두 만드는 단일 관 패밀리. 길이는 <see cref="LengthParameterName"/>으로 구동한다.</summary>
@@ -200,8 +215,12 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             NotifyValidationChanged();
         }
     }
-    public string? BendFamilyTypeName { get => _bendFamilyTypeName; set { if (SetProperty(ref _bendFamilyTypeName, value)) NotifyValidationChanged(); } }
-    public string? TeeFamilyTypeName { get => _teeFamilyTypeName; set { if (SetProperty(ref _teeFamilyTypeName, value)) NotifyValidationChanged(); } }
+    public string? BendFamilyTypeName { get => _bendFamilyTypeName; set { if (SetProperty(ref _bendFamilyTypeName, value)) { RefreshFittingDiameterParameterNames(); NotifyValidationChanged(); } } }
+    public string? TeeFamilyTypeName { get => _teeFamilyTypeName; set { if (SetProperty(ref _teeFamilyTypeName, value)) { RefreshFittingDiameterParameterNames(); NotifyValidationChanged(); } } }
+    public string? BendDiameterParameterName { get => _bendDiameterParameterName; set { if (SetProperty(ref _bendDiameterParameterName, value)) NotifyValidationChanged(); } }
+    public string? BendAngleParameterName { get => _bendAngleParameterName; set { if (SetProperty(ref _bendAngleParameterName, value)) NotifyValidationChanged(); } }
+    public string? TeeDiameterParameterName { get => _teeDiameterParameterName; set { if (SetProperty(ref _teeDiameterParameterName, value)) NotifyValidationChanged(); } }
+    public string? ValveDiameterParameterName { get => _valveDiameterParameterName; set { if (SetProperty(ref _valveDiameterParameterName, value)) NotifyValidationChanged(); } }
     /// <summary>직관 1본의 정척 길이(mm). 관 패밀리 수식의 직관/단관 분기 기준과 같아야 한다.</summary>
     public double StraightLengthMm
     {
@@ -312,6 +331,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         set
         {
             if (!SetProperty(ref _selectedFamilyTypeName, value)) return;
+            RefreshFittingDiameterParameterNames();
             OnPropertyChanged(nameof(IsPlacingFitting));
             OnPropertyChanged(nameof(InteractionModeText));
             if (string.IsNullOrWhiteSpace(value)) HideFittingPreview();
@@ -350,6 +370,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         var (end, _) = ResolveDrawingEnd(start, raw);
         var before = _network.DeepClone();
         _network.AddSegment(start, end);
+        BeginEditing();
         RecordUndoIfChanged(before);
         SetSegmentStart(null); IsPreviewVisible = false; IsSubLineVisible = false; IsSnapMarkerVisible = false; TempDimensions.Clear();
         RefreshGraph();
@@ -373,9 +394,9 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             SnapMarkerX = marker.X;
             SnapMarkerY = marker.Y;
             var isOrigin = snapped.Value.Point.DistanceTo(new DHBIMWATER.Core.Geometry.Point2D(0, 0)) <= double.Epsilon;
-            // 기준점은 Kind가 Intersection이지만 기존 CAD 표기 의미를 유지해 + / 기준점으로 덮어쓴다.
-            SnapMarkerSymbol = isOrigin ? "+" : GetSnapMarkerSymbol(snapped.Value);
-            SnapMarkerLabel = isOrigin ? "기준점" : GetSnapMarkerLabel(snapped.Value);
+            // 기준점 OSNAP만 +로 표시한다. 교차 OSNAP은 원점에서도 ×를 유지한다.
+            SnapMarkerSymbol = isOrigin && SnapReferencePoint ? "+" : GetSnapMarkerSymbol(snapped.Value);
+            SnapMarkerLabel = isOrigin && SnapReferencePoint ? "기준점" : GetSnapMarkerLabel(snapped.Value);
             IsSnapMarkerVisible = true;
         }
         else IsSnapMarkerVisible = false;
@@ -511,6 +532,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         const string category = "배관 밸브류";
         var before = _network.DeepClone();
         _network.AddInlineFitting(_fittingPreviewEdgeId.Value, category, SelectedFamilyTypeName, _fittingPreviewT);
+        BeginEditing();
         RecordUndoIfChanged(before);
         RefreshGraph();
         Status = "부속을 배치했습니다. 계속 배치하거나 Esc로 종료하세요.";
@@ -1059,6 +1081,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             if (edge is not null) _network.RemoveSegment(edge.Id);
         }
 
+        BeginEditing();
         RecordUndoIfChanged(before);
         ClearSelection();
         RefreshGraph();
@@ -1093,13 +1116,14 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         RefreshDiameterMatch();
 
         // 이름으로 기본값을 추정한다. 못 찾으면 비워 두고 검증에서 선택을 요구한다.
-        _segmentFamilyTypeName ??= GuessFamily(fittingNames, "직관", "단관");
-        _bendFamilyTypeName ??= GuessFamily(fittingNames, "소켓곡관") ?? GuessFamily(fittingNames, "곡관");
-        _teeFamilyTypeName ??= GuessFamily(fittingNames, "T형", "티", "TEE");
+        _segmentFamilyTypeName ??= GuessFamily(fittingNames, PipeFamilyDefaultKeywords);
+        _bendFamilyTypeName ??= GuessFamily(fittingNames, BendFamilyDefaultKeywords);
+        _teeFamilyTypeName ??= GuessFamily(fittingNames, ReducerFamilyDefaultKeywords);
         OnPropertyChanged(nameof(SegmentFamilyTypeName));
         OnPropertyChanged(nameof(BendFamilyTypeName));
         OnPropertyChanged(nameof(TeeFamilyTypeName));
         RefreshSegmentParameterNames();
+        RefreshFittingDiameterParameterNames();
     }
 
     /// <summary>선택 패밀리 유형만 표시. 전체 키 유지.</summary>
@@ -1136,8 +1160,14 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         return separatorIndex < 0 ? familyTypeName : familyTypeName[..separatorIndex];
     }
 
-    private static string? GuessFamily(IReadOnlyList<string> names, params string[] keywords)
-        => names.FirstOrDefault(name => keywords.Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase)));
+    private static string? GuessFamily(IReadOnlyList<string> names, IReadOnlyList<string> keywords)
+        => GuessByKeywords(names, keywords, name => name.StartsWith("DH", StringComparison.OrdinalIgnoreCase))
+            ?? GuessByKeywords(names, keywords, _ => true);
+
+    private static string? GuessByKeywords(IEnumerable<string> names, IReadOnlyList<string> keywords, Func<string, bool> condition)
+        => keywords.Select(keyword => names.FirstOrDefault(name => condition(name)
+                && name.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+            .FirstOrDefault(name => name is not null);
 
     /// <summary>선택된 관 패밀리의 인스턴스 파라미터를 다시 읽고, 사용자가 직접 고르지 않은 길이·직경 이름을 자동 추정한다.</summary>
     private void RefreshSegmentParameterNames()
@@ -1161,15 +1191,41 @@ public sealed class PipeLayoutViewModel : ViewModelBase
 
         if (!(_diameterParameterPinned && _diameterParameterName is not null && names.Contains(_diameterParameterName)))
         {
-            _diameterParameterName = names.FirstOrDefault(x => x.Contains("직경", StringComparison.Ordinal))
-                ?? names.FirstOrDefault(x => x.Contains("지름", StringComparison.Ordinal))
-                ?? names.FirstOrDefault(x => x.Contains("호칭", StringComparison.Ordinal))
-                ?? names.FirstOrDefault(x => x.Contains("Diameter", StringComparison.OrdinalIgnoreCase))
-                ?? names.FirstOrDefault(x => string.Equals(x, "DN", StringComparison.OrdinalIgnoreCase));
+            _diameterParameterName = GuessParameter(names, DiameterParameterDefaultKeywords);
             _diameterParameterPinned = false;
             OnPropertyChanged(nameof(DiameterParameterName));
         }
     }
+
+    private void RefreshFittingDiameterParameterNames()
+    {
+        RefreshFittingDiameterParameterNames(BendParameterNames, BendFamilyTypeName,
+            ref _bendDiameterParameterName, nameof(BendDiameterParameterName));
+        _bendAngleParameterName = GuessParameter(BendParameterNames, BendAngleParameterDefaultKeywords);
+        OnPropertyChanged(nameof(BendAngleParameterName));
+        RefreshFittingDiameterParameterNames(TeeParameterNames, TeeFamilyTypeName,
+            ref _teeDiameterParameterName, nameof(TeeDiameterParameterName));
+        RefreshFittingDiameterParameterNames(ValveParameterNames, SelectedFamilyTypeName,
+            ref _valveDiameterParameterName, nameof(ValveDiameterParameterName));
+    }
+
+    private void RefreshFittingDiameterParameterNames(ObservableCollection<string> target, string? familyTypeName,
+        ref string? selectedParameterName, string propertyName)
+    {
+        target.Clear();
+        var names = ParameterNamesFor(familyTypeName);
+        foreach (var name in names) target.Add(name);
+        selectedParameterName = GuessParameter(names, DiameterParameterDefaultKeywords);
+        OnPropertyChanged(propertyName);
+    }
+
+    private IReadOnlyList<string> ParameterNamesFor(string? familyTypeName)
+        => string.IsNullOrWhiteSpace(familyTypeName)
+            ? []
+            : _typeRepo.GetPipeAccessoryInstanceParameterNames(familyTypeName).ToList();
+
+    private static string? GuessParameter(IEnumerable<string> names, IReadOnlyList<string> keywords)
+        => GuessByKeywords(names, keywords, _ => true);
 
     private void RemoveFitting(InlineFittingItem? fitting)
     {
@@ -1180,6 +1236,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         var before = _network.DeepClone();
         var wasSelected = SelectedEdgeIds.Contains(edge.Id);
         _network.RemoveInlineFitting(edge.Id, fitting.Id);
+        BeginEditing();
         RecordUndoIfChanged(before);
         SelectedFittingIds.Remove(fitting.Id);
         var replacement = _network.Edges.FirstOrDefault(x =>
@@ -1202,15 +1259,25 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     }
 
     public void ApplyModelCreationResult(bool succeeded, string message)
+        => ApplyModelCreationResult(succeeded, message, []);
+
+    public void ApplyModelCreationResult(bool succeeded, string message, IReadOnlyList<PipeConnectionFailure> failures)
     {
         IsCreating = false;
-        Status = succeeded ? $"배관 생성을 완료했습니다. {message}" : $"배관 생성 실패: {message}";
+        _failures.Clear();
+        _failures.AddRange(failures);
+        if (!succeeded && _failures.Count > 0) CenterFirstFailureIfOutsideViewport(_failures[0]);
+        RefreshGraph();
+        Status = succeeded
+            ? $"배관 생성을 완료했습니다. {message}"
+            : $"배관 생성 실패: {message}{FormatFailurePoint(_failures.FirstOrDefault())}";
     }
 
     private void Undo()
     {
         if (_undoHistory.Count == 0) return;
         _network = _undoHistory.Pop();
+        BeginEditing();
         _elevation = _network.Elevation;
         OnPropertyChanged(nameof(Elevation));
         SetSegmentStart(null);
@@ -1299,6 +1366,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         var errors = GetValidationErrors();
         if (errors.Count > 0) { Status = errors[0]; return; }
         IsCreating = true;
+        ClearErrorMarkers();
         try
         {
             CreateModelAction?.Invoke(_network.ToDefinition(DiameterMm, PipeOutputMode.PipeAccessorySegment, new(ReferenceX, ReferenceY),
@@ -1306,7 +1374,9 @@ public sealed class PipeLayoutViewModel : ViewModelBase
                 new PipeSegmentFamilySelection(
                     SegmentFamilyTypeName!, LengthParameterName!,
                     BendFamilyTypeName ?? "", TeeFamilyTypeName ?? "",
-                    StraightLengthMm, DiameterParameterName ?? "")));
+                    StraightLengthMm, DiameterParameterName ?? "",
+                    BendDiameterParameterName ?? "", TeeDiameterParameterName ?? "", ValveDiameterParameterName ?? "",
+                    BendAngleParameterName ?? "")));
             Status = "Revit에서 직관·단관을 배치하고 있습니다…";
         }
         catch (Exception ex)
@@ -1318,6 +1388,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
 
     private void Clear()
     {
+        BeginEditing();
         if (_network.Edges.Count == 0) return;
         var before = _network.DeepClone();
         _network.Clear();
@@ -1357,6 +1428,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     private void RefreshGraph()
     {
         Edges.Clear(); Nodes.Clear();
+        RefreshErrorEdges();
         foreach (var edge in _network.Edges)
         {
             var start = _network.Nodes.First(x => x.Id == edge.StartNodeId);
@@ -1366,7 +1438,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             Edges.Add(new PipeEdgeItem(edge.Id, edge.StartNodeId, edge.EndNodeId, a.X, a.Y, b.X, b.Y,
                 start.Position.DistanceTo(end.Position), SelectedEdgeIds.Contains(edge.Id),
                 subLines?.AX1 ?? 0, subLines?.AY1 ?? 0, subLines?.AX2 ?? 0, subLines?.AY2 ?? 0,
-                subLines?.BX1 ?? 0, subLines?.BY1 ?? 0, subLines?.BX2 ?? 0, subLines?.BY2 ?? 0));
+                subLines?.BX1 ?? 0, subLines?.BY1 ?? 0, subLines?.BX2 ?? 0, subLines?.BY2 ?? 0,
+                _errorEdgeIds.Contains(edge.Id)));
         }
         foreach (var node in _network.Nodes)
         {
@@ -1376,6 +1449,68 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         RefreshFittings();
         NotifyValidationChanged();
     }
+
+    private void BeginEditing()
+    {
+        if (IsCreating) IsCreating = false;
+        ClearErrorMarkers();
+    }
+
+    private void ClearErrorMarkers()
+    {
+        _failures.Clear();
+        _errorEdgeIds.Clear();
+    }
+
+    private void RefreshErrorEdges()
+    {
+        _errorEdgeIds.Clear();
+        foreach (var failure in _failures)
+        {
+            var nearestNode = _network.Nodes
+                .OrderBy(node => node.Position.DistanceTo(failure.CanvasPoint))
+                .FirstOrDefault();
+            if (nearestNode is not null && nearestNode.Position.DistanceTo(failure.CanvasPoint) <= 300)
+            {
+                foreach (var edge in _network.Edges.Where(edge => edge.StartNodeId == nearestNode.Id || edge.EndNodeId == nearestNode.Id))
+                    _errorEdgeIds.Add(edge.Id);
+                continue;
+            }
+
+            var nearestEdge = _network.Edges
+                .OrderBy(edge => DistanceToSegment(failure.CanvasPoint,
+                    _network.Nodes.First(node => node.Id == edge.StartNodeId).Position,
+                    _network.Nodes.First(node => node.Id == edge.EndNodeId).Position))
+                .FirstOrDefault();
+            if (nearestEdge is not null) _errorEdgeIds.Add(nearestEdge.Id);
+        }
+    }
+
+    private static double DistanceToSegment(DHBIMWATER.Core.Geometry.Point2D point,
+        DHBIMWATER.Core.Geometry.Point2D start, DHBIMWATER.Core.Geometry.Point2D end)
+    {
+        var dx = end.X - start.X;
+        var dy = end.Y - start.Y;
+        var lengthSquared = dx * dx + dy * dy;
+        if (lengthSquared <= 0) return point.DistanceTo(start);
+        var t = Math.Clamp(((point.X - start.X) * dx + (point.Y - start.Y) * dy) / lengthSquared, 0, 1);
+        return point.DistanceTo(new DHBIMWATER.Core.Geometry.Point2D(start.X + t * dx, start.Y + t * dy));
+    }
+
+    private void CenterFirstFailureIfOutsideViewport(PipeConnectionFailure failure)
+    {
+        if (!_hasCanvasSize) return;
+        var point = Transform.ToScreen(failure.CanvasPoint);
+        if (point.X >= 0 && point.X <= _canvasWidth && point.Y >= 0 && point.Y <= _canvasHeight) return;
+        Transform.PanOrigin = new Point(
+            Transform.PanOrigin.X + _canvasWidth / 2 - point.X,
+            Transform.PanOrigin.Y + _canvasHeight / 2 - point.Y);
+    }
+
+    private string FormatFailurePoint(PipeConnectionFailure? failure)
+        => failure is null ? "" :
+            $"{Environment.NewLine}접점: 캔버스 ({failure.CanvasPoint.X:N0}, {failure.CanvasPoint.Y:N0})mm, Elev {failure.ElevationMm:N0}mm  " +
+            $"[Revit 좌표 ({failure.CanvasPoint.X + ReferenceX:N0}, {failure.CanvasPoint.Y + ReferenceY:N0}, {failure.ElevationMm:N0})mm]";
 
     /// <summary>전체 네트워크의 부속을 보여준다(선택된 엣지만이 아니라). 클릭-배치 흐름에는 엣지 선택 단계가 없으므로
     /// 배치 직후에도 캔버스·사이드바에 남아 있어야 한다.</summary>
@@ -1398,12 +1533,13 @@ public sealed record PipeEdgeItem(
     Guid Id, Guid StartNodeId, Guid EndNodeId,
     double X1, double Y1, double X2, double Y2, double LengthMm, bool IsSelected,
     double SubAX1, double SubAY1, double SubAX2, double SubAY2,
-    double SubBX1, double SubBY1, double SubBX2, double SubBY2)
+    double SubBX1, double SubBY1, double SubBX2, double SubBY2,
+    bool IsError)
 {
     public double LengthX => (X1 + X2) / 2;
     public double LengthY => (Y1 + Y2) / 2;
     public string LengthLabel => $"{LengthMm / 1000:N3} m";
-    public string Stroke => IsSelected ? "#E67E22" : "#2878B8";
+    public string Stroke => IsError ? "#E74C3C" : IsSelected ? "#E67E22" : "#2878B8";
 }
 public sealed record PipeNodeItem(Guid Id, double X, double Y, int Degree, NodeKind NodeKind)
 {

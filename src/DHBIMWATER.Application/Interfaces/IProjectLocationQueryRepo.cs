@@ -5,4 +5,7 @@ public interface IProjectLocationQueryRepo
 {
     /// <summary>프로젝트 기준점(PBP)의 현재 공유좌표(동서, 남북, m)를 읽는다.</summary>
     (double EastWestMeters, double NorthSouthMeters) GetProjectBasePointSharedPosition();
+
+    /// <summary>PBP 진북에서 도북까지 시계방향 각도(도).</summary>
+    double GetTrueNorthToProjectNorthClockwiseDegrees();
 }

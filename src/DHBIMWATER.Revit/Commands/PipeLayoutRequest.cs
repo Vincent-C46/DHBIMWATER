@@ -1,4 +1,4 @@
-using System.Threading;
+using System.Collections.Concurrent;
 
 namespace DHBIMWATER.Revit.Commands;
 
@@ -6,8 +6,8 @@ internal enum PipeLayoutRequestId { None, CreateModel, PickOutline }
 
 internal sealed class PipeLayoutRequest
 {
-    private int _requestId;
+    private readonly ConcurrentQueue<PipeLayoutRequestId> _requestIds = new();
 
-    public PipeLayoutRequestId Take() => (PipeLayoutRequestId)Interlocked.Exchange(ref _requestId, (int)PipeLayoutRequestId.None);
-    public void Make(PipeLayoutRequestId requestId) => Interlocked.Exchange(ref _requestId, (int)requestId);
+    public bool TryTake(out PipeLayoutRequestId requestId) => _requestIds.TryDequeue(out requestId);
+    public void Make(PipeLayoutRequestId requestId) => _requestIds.Enqueue(requestId);
 }

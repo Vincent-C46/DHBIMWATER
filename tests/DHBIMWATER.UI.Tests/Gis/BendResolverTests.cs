@@ -48,7 +48,17 @@ public class BendResolverTests
         Assert.Equal(230, result.CenterlineRadiusMm);
         Assert.Equal(0, result.EffectiveAllowableDeg);
         Assert.Equal(0, result.ExtraLegLengthMm);
+        Assert.Equal(BendForm.AType, result.Form);
+    }
+
+    [Fact]
+    public void Flanged_b_form_uses_200mm_extra_leg()
+    {
+        var flanged = new BendFittingEntry(100, 45, BendForm.BType, 140, 230, Connection: BendConnection.Flanged);
+        var result = BendResolver.Resolve(Bend(45), Settings(3, form: BendForm.BType, connection: BendConnection.Flanged, fittings: flanged));
+
         Assert.Equal(BendForm.BType, result.Form);
+        Assert.Equal(200d, result.ExtraLegLengthMm);
     }
 
     [Theory]
@@ -171,7 +181,7 @@ public class BendResolverTests
     }
 
     [Fact]
-    public void Arc_uses_actual_alignment_deflection_to_stay_tangent_when_fitting_angle_differs()
+    public void Arc_uses_catalog_external_distance_when_fitting_angle_differs()
     {
         const double actualAngleDeg = 40d;
         const double fittingAngleDeg = 45d;
@@ -185,28 +195,11 @@ public class BendResolverTests
             origin, dirA, dirB, fittingAngleDeg, actualAngleDeg, radiusMm, 130, 130);
 
         var tangentMm = BendResolver.TangentLength(radiusMm, fittingAngleDeg);
-        var expectedExternalMm = tangentMm * Math.Tan(actualAngleDeg * Math.PI / 720d);
+        var expectedExternalMm = BendArcGeometry.ExternalDistance(radiusMm, fittingAngleDeg);
         Assert.Equal(tangentMm / 1000d, arc.ArcStart.DistanceTo(origin), 12);
         Assert.Equal(tangentMm / 1000d, arc.ArcEnd.DistanceTo(origin), 12);
         Assert.Equal(expectedExternalMm, arc.ExternalMm, 10);
-        Assert.True(arc.ExternalMm < BendArcGeometry.ExternalDistance(radiusMm, fittingAngleDeg));
-
-        var bisector = new Vector3D(dirA.X + dirB.X, dirA.Y + dirB.Y, dirA.Z + dirB.Z).Normalize();
-        var centerDistance = tangentMm / Math.Sin(actualAngleRad / 2d) / 1000d;
-        var center = new Point3D(
-            bisector.X * centerDistance,
-            bisector.Y * centerDistance,
-            bisector.Z * centerDistance);
-        var effectiveRadius = center.DistanceTo(arc.ArcStart);
-
-        Assert.Equal(effectiveRadius, center.DistanceTo(arc.ArcMid), 12);
-        Assert.Equal(effectiveRadius, center.DistanceTo(arc.ArcEnd), 12);
-
-        var radiusAtStart = new Vector3D(arc.ArcStart.X - center.X, arc.ArcStart.Y - center.Y, arc.ArcStart.Z - center.Z);
-        var radiusAtEnd = new Vector3D(arc.ArcEnd.X - center.X, arc.ArcEnd.Y - center.Y, arc.ArcEnd.Z - center.Z);
-        var forwardA = new Vector3D(-dirA.X, -dirA.Y, -dirA.Z);
-        Assert.Equal(0d, Dot(radiusAtStart, forwardA), 12);
-        Assert.Equal(0d, Dot(radiusAtEnd, dirB), 12);
+        Assert.Equal(expectedExternalMm / 1000d, arc.ArcMid.DistanceTo(origin), 12);
     }
 
     [Theory]
@@ -280,7 +273,7 @@ public class BendResolverTests
     }
 
     [Fact]
-    public void Trim_planner_passes_actual_deflection_to_arc_and_midpoint_orientation()
+    public void Trim_planner_uses_catalog_arc_but_actual_midpoint_orientation()
     {
         const double actualAngleDeg = 40d;
         const double fittingAngleDeg = 45d;
@@ -307,7 +300,7 @@ public class BendResolverTests
 
         var tangentMm = BendResolver.TangentLength(radiusMm, fittingAngleDeg);
         Assert.Equal(actualAngleDeg, placement.DeflectionDeg, 8);
-        Assert.Equal(tangentMm * Math.Tan(actualAngleDeg * Math.PI / 720d), placement.Points.ExternalMm, 8);
+        Assert.Equal(tangentMm * Math.Tan(fittingAngleDeg * Math.PI / 720d), placement.Points.ExternalMm, 8);
         Assert.Equal(actualAngleDeg / 2d, placement.RotXYDeg[2], 8);
     }
 
@@ -376,6 +369,32 @@ public class BendResolverTests
 
         Assert.Equal(-45d, BendOrientation.Compute(new Vector3D(rise, 0, rise)).RotXZDeg, 8);
         Assert.Equal(45d, BendOrientation.Compute(new Vector3D(rise, 0, -rise)).RotXZDeg, 8);
+    }
+
+    [Fact]
+    public void Apply_project_north_keeps_input_when_true_north_is_zero()
+    {
+        Assert.Equal(-180d, BendOrientation.ApplyProjectNorth(-180d, 0d));
+    }
+
+    [Theory]
+    [InlineData(0d, 30d, 30d)]
+    [InlineData(-90d, 30d, -60d)]
+    public void Apply_project_north_adds_clockwise_true_north(double rotXyDeg, double trueNorthDeg, double expected)
+    {
+        Assert.Equal(expected, BendOrientation.ApplyProjectNorth(rotXyDeg, trueNorthDeg), 8);
+    }
+
+    [Fact]
+    public void Apply_project_north_normalizes_to_minus_180_exclusive_and_180_inclusive()
+    {
+        Assert.Equal(-160d, BendOrientation.ApplyProjectNorth(170d, 30d), 8);
+    }
+
+    [Fact]
+    public void Apply_project_north_supports_counterclockwise_true_north()
+    {
+        Assert.Equal(-30d, BendOrientation.ApplyProjectNorth(0d, -30d), 8);
     }
 
     private static double Dot(Vector3D a, Vector3D b)

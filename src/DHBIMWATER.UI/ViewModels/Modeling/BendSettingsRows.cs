@@ -44,14 +44,14 @@ public sealed class BendFittingRow : ViewModelBase
     private BendConnection _connection = BendConnection.Socket;
     public double DiameterMm { get => _diameterMm; set => SetProperty(ref _diameterMm, value); }
     public double AngleDeg { get => _angleDeg; set { if (SetProperty(ref _angleDeg, value)) OnPropertyChanged(nameof(TangentLengthMm)); } }
-    /// <summary>기본은 B형(소켓+스피것). A형이 필요한 자리만 사용자가 바꾸며, 바뀌면 그 형식의 핸드북 무게로 다시 채운다.</summary>
+    /// <summary>기본은 B형(한쪽 소켓). A형이 필요한 자리만 사용자가 바꾸며, 바뀌면 그 형식의 핸드북 무게로 다시 채운다.</summary>
     public BendForm Form { get => _form; set { if (SetProperty(ref _form, value)) { OnPropertyChanged(nameof(LongLegLengthMm)); OnPropertyChanged(nameof(ExtraLegLengthMm)); RefreshWeightDefaults(); } } }
     /// <summary>그리드에는 노출하지 않고 소켓/플랜지 컬렉션을 저장할 때 접합종류를 보존한다.</summary>
     public BendConnection Connection { get => _connection; set => SetProperty(ref _connection, value); }
     public double LayingLengthMm { get => _layingLengthMm; set { if (SetProperty(ref _layingLengthMm, value)) OnPropertyChanged(nameof(LongLegLengthMm)); } }
     public double CenterlineRadiusMm { get => _centerlineRadiusMm; set { if (SetProperty(ref _centerlineRadiusMm, value)) OnPropertyChanged(nameof(TangentLengthMm)); } }
-    /// <summary>s — 소켓 B형만 200mm, A형과 플랜지는 0. 핸드북 고정값이라 계산만 하고 편집 대상이 아니다.</summary>
-    public double ExtraLegLengthMm => Connection == BendConnection.Socket && Form == BendForm.BType ? 200d : 0d;
+    /// <summary>s — B형(한쪽 소켓)만 200mm, A형(양쪽 소켓)은 0. 접합 종류와 무관한 계산값이며 편집 대상이 아니다.</summary>
+    public double ExtraLegLengthMm => Form == BendForm.BType ? 200d : 0d;
     public double WallThicknessMm { get => _wallThicknessMm; set => SetProperty(ref _wallThicknessMm, value); }
     /// <summary>KP 메커니컬 조인트 기준 무게(kg). 현재 <see cref="Form"/>에 대응하는 값이다.</summary>
     public double WeightKpMechanicalKg { get => _weightKpMechanicalKg; set => SetProperty(ref _weightKpMechanicalKg, value); }

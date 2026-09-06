@@ -81,7 +81,7 @@ public class BendDefaultTablesTests
 
     /// <summary>
     /// 행은 DN×각도 하나뿐이다(2026-08-20, A형/B형 중복 행 폐지). 기본 형식은 B형이고,
-    /// A형으로 바꿔도 e·R·t는 그대로이며 s(스피것)·무게만 형식을 따라간다.
+    /// A형으로 바꿔도 e·R·t는 그대로이며 s·무게만 형식을 따라간다.
     /// </summary>
     [Fact]
     public void Bend_default_has_one_row_per_dn_and_angle_defaulting_to_b_form()
@@ -98,7 +98,7 @@ public class BendDefaultTablesTests
                 Assert.True(BendFittingCatalog.TryGetHandbookWeight(dn, angle, BendForm.BType, out var kpB, out var tytonB));
                 Assert.Equal(kpB, entry.WeightKpMechanicalKg);
                 Assert.Equal(tytonB, entry.WeightTytonKg);
-                // A형은 스피것이 없어 더 가볍다(같은 DN·각도).
+                // A형은 s가 없어 더 가볍다(같은 DN·각도).
                 Assert.True(kpA > kpB);
                 Assert.True(tytonA > tytonB);
             }
@@ -140,6 +140,8 @@ public class BendDefaultTablesTests
         Assert.NotNull(flanged45);
         Assert.Equal(210, flanged45!.CenterlineRadiusMm);
         Assert.Equal(130, flanged45.LayingLengthMm);
+        Assert.Equal(200d, flanged45.ExtraLegLengthMm);
+        Assert.Equal(200d, flanged90.ExtraLegLengthMm);
         Assert.Null(BendFittingCatalog.Default.Find(80, 11.25, connection: BendConnection.Flanged));
         Assert.Equal(new[] { 45d, 90d }, BendFittingCatalog.AnglesFor(BendConnection.Flanged));
     }

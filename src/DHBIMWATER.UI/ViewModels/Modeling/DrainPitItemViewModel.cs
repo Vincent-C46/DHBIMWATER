@@ -17,8 +17,9 @@ public sealed class DrainPitItemViewModel : ViewModelBase
     // TODO: 기본 제원 확정 후 갱신
     public double LengthX { get => _lengthX; set => SetProperty(ref _lengthX, value); }
     public double WidthY { get => _widthY; set => SetProperty(ref _widthY, value); }
+    /// <summary>드레인 피트의 실제 굴착 깊이.</summary>
     public double Depth { get => _depth; set => SetProperty(ref _depth, value); }
     public string Name { get => _name; set => SetProperty(ref _name, value); }
-    /// <summary>밸브실 내부공간 코너. 체크박스 선택 UI는 후속 구현한다.</summary>
+    /// <summary>밸브실 내부공간 코너.</summary>
     public string Corner { get => _corner; set => SetProperty(ref _corner, value); }
 }

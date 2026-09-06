@@ -88,4 +88,34 @@ public class StraightSegmentOrientationTests
 
         Assert.Equal(result.Own, result.End);
     }
+
+    [Fact]
+    public void Datum_step_before_segment_uses_own_start_direction()
+    {
+        var joint = new Point3D(1, 0, 0);
+
+        var result = StraightSegmentOrientation.Resolve(
+            joint, new Point3D(1, 1, 0),
+            previousEnd: joint, previousOwnDirection: Vector3D.UnitX,
+            nextStart: null, nextOwnDirection: null,
+            previousIsDatumStep: true);
+
+        Assert.Equal(result.Own, result.Start);
+    }
+
+    [Fact]
+    public void Datum_step_segment_uses_own_direction_at_both_ends()
+    {
+        var start = new Point3D(1, 0, 0);
+        var end = new Point3D(1, 0, 0.1);
+
+        var result = StraightSegmentOrientation.Resolve(
+            start, end,
+            previousEnd: start, previousOwnDirection: Vector3D.UnitX,
+            nextStart: end, nextOwnDirection: Vector3D.UnitY,
+            ownIsDatumStep: true);
+
+        Assert.Equal(result.Own, result.Start);
+        Assert.Equal(result.Own, result.End);
+    }
 }

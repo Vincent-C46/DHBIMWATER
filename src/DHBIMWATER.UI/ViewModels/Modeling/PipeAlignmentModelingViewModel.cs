@@ -218,13 +218,12 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
             if (!SetProperty(ref _bendConnectionOption, value) || value is null) return;
             _settings = _settings with { ActiveBendConnection = value.Value };
             Summary = string.Empty;
-            OnPropertyChanged(nameof(IsBendFormEnabled));
         }
     }
     public IReadOnlyList<BendFormOption> BendFormOptions { get; } = new[]
     {
-        new BendFormOption("B형 (소켓 + 스피것)", BendForm.BType),
-        new BendFormOption("A형 (양단 소켓)", BendForm.AType)
+        new BendFormOption("B형 (한쪽 소켓)", BendForm.BType),
+        new BendFormOption("A형 (양쪽 소켓)", BendForm.AType)
     };
     public BendFormOption? BendFormOption
     {
@@ -236,8 +235,6 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
             Summary = string.Empty;
         }
     }
-    /// <summary>플랜지곡관에는 형식(A/B) 구분이 없다.</summary>
-    public bool IsBendFormEnabled => _settings.ActiveBendConnection == BendConnection.Socket;
     public IReadOnlyList<string> MappingPipeKinds => new[] { UseKindFieldOption }.Concat(PipeKindCatalog.All).ToList();
     public string BulkMappingPipeKind { get => _bulkMappingPipeKind; set => SetProperty(ref _bulkMappingPipeKind, value); }
     // DataGrid 셀 편집(EditItem)은 IList를 지원하는 컬렉션 뷰가 필요하다. 지연 평가 IEnumerable(Where만 적용)을 그대로
@@ -780,7 +777,6 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
                     $"이 문서에는 이미 공유좌표가 설정되어 있습니다(프로젝트 기준점 = {x:0.00000}, {y:0.00000}).\n"
                     + $"화면의 기준점({ReferenceX:0.00000}, {ReferenceY:0.00000}) 대신 이 좌표를 기준으로 배치해 기존 모델과 위치를 맞춥니다.\n\n"
                     + "화면 기준점으로 배치하려면 [프로젝트 공유좌표에도 기준점 적용]을 체크하세요(문서의 공유좌표가 새 기준점으로 덮어써집니다).");
-            ReferenceX = x; ReferenceY = y;
         }
         return (x, y);
     }
@@ -928,7 +924,9 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         IsAwaitingPreviewConfirm = false;
         PhaseText = "실패";
         ProgressDetail = string.Empty;
-        ResultSummary = "모델 생성에 실패했습니다.";
+        ResultSummary = error.Contains("내부원점으로부터 너무 멀리 떨어진 곳에 모델링을 시도했습니다.", StringComparison.Ordinal)
+            ? "내부원점에서 너무 멀어 생성할 수 없습니다."
+            : "모델 생성에 실패했습니다.";
         ResultWarnings.Clear();
         ResultWarnings.Add(error);
         HasResult = true;

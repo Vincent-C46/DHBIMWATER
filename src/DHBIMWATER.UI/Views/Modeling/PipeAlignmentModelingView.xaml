@@ -136,7 +136,7 @@
                             <ListBox ItemsSource="{Binding SelectedItem.LayerOptions, ElementName=DwgGrid, Mode=OneWay}" MaxHeight="100" ScrollViewer.VerticalScrollBarVisibility="Auto">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <CheckBox Content="{Binding Name}" IsChecked="{Binding IsSelected, Mode=TwoWay}"/>
+                                        <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" Content="{Binding Name}" IsChecked="{Binding IsSelected, Mode=TwoWay}"/>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
@@ -241,7 +241,7 @@
                                 <TextBox.Style><Style TargetType="TextBox" BasedOn="{StaticResource PrimaryTextBoxStyle}"><Style.Triggers><DataTrigger Binding="{Binding IsIntervalHighlighted}" Value="True"><Setter Property="BorderBrush" Value="#E67E22"/><Setter Property="BorderThickness" Value="2"/></DataTrigger></Style.Triggers></Style></TextBox.Style>
                             </TextBox>
                             <TextBlock Text="이경관 길이(mm)" Margin="0,8,0,3"/>
-                            <TextBox Text="{Binding ReducerBodyLengthMm}" Width="150" HorizontalAlignment="Left"
+                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding ReducerBodyLengthMm}" Width="150" HorizontalAlignment="Left"
                                      ToolTip="DN이 바뀌는 지점에 넣을 이경관 몸통 길이. 실제 제원표 확정 전 임시 입력값입니다."/>
                             </StackPanel>
                             </Border>
@@ -285,8 +285,7 @@
                             <ComboBox Style="{StaticResource PrimaryComboBoxStyle}"
                                       ItemsSource="{Binding BendFormOptions, Mode=OneWay}"
                                       SelectedItem="{Binding BendFormOption, Mode=TwoWay}"
-                                      IsEnabled="{Binding IsBendFormEnabled}"
-                                      ToolTip="A형은 양단 소켓(s=0, 양쪽 Joint θ₁+θ₂), B형은 소켓+스피것(s=200, 한쪽 Joint). 플랜지곡관에는 형식 구분이 없음"/>
+                                      ToolTip="A형은 양쪽 소켓(s=0, 양쪽 Joint θ₁+θ₂), B형은 한쪽 소켓(s=200, 한쪽 Joint). 소켓·플랜지 공통"/>
                             </StackPanel>
                             </Border>
                             <Border Grid.Column="2" Background="#EEF2F7" CornerRadius="8" Padding="14" Visibility="{Binding IsAdaptive, Converter={StaticResource BoolToVisibility}}">
@@ -324,7 +323,7 @@
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <DockPanel Margin="0,0,0,10">
-                            <CheckBox DockPanel.Dock="Right" Content="해결된 표기도 보기" IsChecked="{Binding ShowResolvedDiameterMappings, Mode=TwoWay}"/>
+                            <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" DockPanel.Dock="Right" Content="해결된 표기도 보기" IsChecked="{Binding ShowResolvedDiameterMappings, Mode=TwoWay}"/>
                             <TextBlock TextWrapping="Wrap" Text="직경 표기 × 관종 표기 → DN·등급 연결. OD·두께는 규격표에서 자동"/>
                         </DockPanel>
                         <Grid Grid.Row="1">
@@ -349,12 +348,12 @@
                                 <DataGridTextColumn Header="자동추정" Binding="{Binding AutoDiameterDisplay, Mode=OneWay}" IsReadOnly="True" Width="80"/>
                                 <DataGridTemplateColumn Header="확정 DN" Width="120">
                                     <DataGridTemplateColumn.CellTemplate><DataTemplate>
-                                        <ComboBox ItemsSource="{Binding DataContext.DiameterOptions, Mode=OneWay, RelativeSource={RelativeSource AncestorType=DataGrid}}" DisplayMemberPath="Display" SelectedItem="{Binding SelectedDiameterOption, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding DataContext.DiameterOptions, Mode=OneWay, RelativeSource={RelativeSource AncestorType=DataGrid}}" DisplayMemberPath="Display" SelectedItem="{Binding SelectedDiameterOption, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                     </DataTemplate></DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
                                 <DataGridTemplateColumn Header="등급" Width="130">
                                     <DataGridTemplateColumn.CellTemplate><DataTemplate>
-                                        <ComboBox ItemsSource="{Binding DataContext.MappingPipeKinds, Mode=OneWay, RelativeSource={RelativeSource AncestorType=DataGrid}}" SelectedItem="{Binding PipeKind, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding DataContext.MappingPipeKinds, Mode=OneWay, RelativeSource={RelativeSource AncestorType=DataGrid}}" SelectedItem="{Binding PipeKind, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                     </DataTemplate></DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
                                 <DataGridTextColumn Header="OD/thk" Binding="{Binding SpecificationDisplay, Mode=OneWay}" IsReadOnly="True" Width="90"/>
@@ -365,7 +364,7 @@
                         </Grid>
                         <Grid Grid.Row="2" Margin="0,10,0,0">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <ComboBox Width="150" ItemsSource="{Binding MappingPipeKinds, Mode=OneWay}" SelectedItem="{Binding BulkMappingPipeKind, Mode=TwoWay}"/>
+                            <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Width="150" ItemsSource="{Binding MappingPipeKinds, Mode=OneWay}" SelectedItem="{Binding BulkMappingPipeKind, Mode=TwoWay}"/>
                             <Button Grid.Column="1" Content="전체 일괄 적용" Style="{StaticResource PrimaryButtonStyle}" Margin="8,0,0,0" Command="{Binding ApplyBulkMappingCommand}" ToolTip="전 행 적용 — DN은 자동추정값, 등급은 왼쪽 선택값"/>
                             <!-- 관·곡관 규격표 진입점은 [관 · 곡관 설정] 탭 하나로 통일했다(2026-08-20, 중복 진입점 정리). -->
                             <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
@@ -400,7 +399,7 @@
                                 <DataGridTextColumn Header="길이(m)" Binding="{Binding LengthDisplay, Mode=OneWay}" IsReadOnly="True" Width="80"/>
                                 <DataGridTemplateColumn Header="반전" Width="60">
                                     <DataGridTemplateColumn.CellTemplate><DataTemplate>
-                                        <CheckBox HorizontalAlignment="Center" IsChecked="{Binding IsReversed, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" HorizontalAlignment="Center" IsChecked="{Binding IsReversed, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                     </DataTemplate></DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
                             </DataGrid.Columns>

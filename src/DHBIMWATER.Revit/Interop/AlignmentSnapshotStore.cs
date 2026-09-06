@@ -1,5 +1,3 @@
-using System.Reflection;
-using System.Runtime.CompilerServices;
 using Autodesk.Revit.DB;
 using DHBoost.Revit.Interop;
 using DHBIMWATER.Application.DTOs.Gis;
@@ -8,27 +6,22 @@ using DHBIMWATER.Core.Gis;
 
 namespace DHBIMWATER.Revit.Interop;
 
-internal sealed class DhBoostAlignmentSnapshotStore : IAlignmentSnapshotStore
+internal sealed class AlignmentSnapshotStore : IAlignmentSnapshotStore
 {
     private const int ExpectedContractVersion = 1;
     private readonly Func<Document?> _document;
 
-    static DhBoostAlignmentSnapshotStore()
-    {
-        var assembly = Assembly.Load("DHBoost.Revit");
-        RuntimeHelpers.RunModuleConstructor(assembly.ManifestModule.ModuleHandle);
-    }
-
-    public DhBoostAlignmentSnapshotStore(Func<Document?> document) => _document = document;
+    public AlignmentSnapshotStore(Func<Document?> document) => _document = document;
 
     public string EnsureSnapshot(PipeAlignment alignment, AlignmentStationProfile profile, AlignmentPlacementOrigin origin, out string warning)
     {
         warning = string.Empty;
         try
         {
+            InteropInitializer.EnsureInitialized();
             if (AlignmentSnapshotInterop.ContractVersion != ExpectedContractVersion)
             {
-                warning = $"libs의 DHBoost.Revit.dll이 오래되었습니다(계약 v{AlignmentSnapshotInterop.ContractVersion} ≠ v{ExpectedContractVersion}).";
+                warning = $"dll이 오래되었습니다(계약 v{AlignmentSnapshotInterop.ContractVersion} ≠ v{ExpectedContractVersion}).";
                 return string.Empty;
             }
 

@@ -21,6 +21,10 @@ public class ValveRoomViewModel : ViewModelBase
     private string _selectedValveRoomType = "이토밸브실";
     private string _selectedColumnTypeName = "(사용 안 함)";
     private string _selectedBeamTypeName = "(사용 안 함)";
+    private string _selectedDrainPitVoidFamily = "(선택 안 함)";
+    private string _selectedDrainPitLengthParam = "(선택 안 함)";
+    private string _selectedDrainPitWidthParam = "(선택 안 함)";
+    private string _selectedDrainPitDepthParam = "(선택 안 함)";
     private double _plainConcreteThickness = 100;
     private double _foundationThickness = 500;
     private double _foundationToe = 300;
@@ -60,6 +64,8 @@ public class ValveRoomViewModel : ViewModelBase
         BeamTypeNames = new ObservableCollection<string>(new[] { "(사용 안 함)" });
         VoidAxes = new ObservableCollection<string>(new[] { "X", "Y" });
         DrainPitCorners = new ObservableCollection<string>(new[] { "좌상단", "좌하단", "우상단", "우하단" });
+        DrainPitVoidFamilyNames = new ObservableCollection<string>(new[] { "(선택 안 함)" });
+        DrainPitVoidParameterNames = new ObservableCollection<string>(new[] { "(선택 안 함)" });
         LoadTypeNames();
 
         ResetCommand = new RelayCommand(_ => ApplyPreset());
@@ -75,6 +81,8 @@ public class ValveRoomViewModel : ViewModelBase
     public ObservableCollection<string> BeamTypeNames { get; }
     public ObservableCollection<string> VoidAxes { get; }
     public ObservableCollection<string> DrainPitCorners { get; }
+    public ObservableCollection<string> DrainPitVoidFamilyNames { get; }
+    public ObservableCollection<string> DrainPitVoidParameterNames { get; }
     public ICommand ResetCommand { get; }
     public ICommand CreateCommand { get; }
     public ObservableCollection<DrainPitItemViewModel> DrainPits { get; } = new();
@@ -112,6 +120,18 @@ public class ValveRoomViewModel : ViewModelBase
 
     public string SelectedColumnTypeName { get => _selectedColumnTypeName; set => SetProperty(ref _selectedColumnTypeName, value); }
     public string SelectedBeamTypeName { get => _selectedBeamTypeName; set => SetProperty(ref _selectedBeamTypeName, value); }
+    public string SelectedDrainPitVoidFamily
+    {
+        get => _selectedDrainPitVoidFamily;
+        set
+        {
+            if (!SetProperty(ref _selectedDrainPitVoidFamily, value)) return;
+            RefreshDrainPitVoidParameterNames();
+        }
+    }
+    public string SelectedDrainPitLengthParam { get => _selectedDrainPitLengthParam; set => SetProperty(ref _selectedDrainPitLengthParam, value); }
+    public string SelectedDrainPitWidthParam { get => _selectedDrainPitWidthParam; set => SetProperty(ref _selectedDrainPitWidthParam, value); }
+    public string SelectedDrainPitDepthParam { get => _selectedDrainPitDepthParam; set => SetProperty(ref _selectedDrainPitDepthParam, value); }
     public double PlainConcreteThickness { get => _plainConcreteThickness; set => SetAndRefresh(ref _plainConcreteThickness, value); }
     public double FoundationThickness { get => _foundationThickness; set => SetAndRefresh(ref _foundationThickness, value); }
     public double FoundationToe { get => _foundationToe; set => SetAndRefresh(ref _foundationToe, value); }
@@ -265,6 +285,14 @@ public class ValveRoomViewModel : ViewModelBase
             return;
         }
 
+        if (DrainPits.Count > 0 && (SelectedDrainPitVoidFamily == "(선택 안 함)" ||
+            SelectedDrainPitLengthParam == "(선택 안 함)" || SelectedDrainPitWidthParam == "(선택 안 함)" ||
+            SelectedDrainPitDepthParam == "(선택 안 함)"))
+        {
+            _dialogService.Warn("입력 확인", "드레인 피트가 있으면 Void 패밀리와 Length/Width/Depth 매개변수를 모두 선택해야 합니다.");
+            return;
+        }
+
         RequestedCreate = new ValveRoomRequestDto
         {
             RoomType = SelectedValveRoomType,
@@ -285,6 +313,15 @@ public class ValveRoomViewModel : ViewModelBase
                 TopCenter = ResolveDrainPitCenter(p),
                 LengthX = p.LengthX, WidthY = p.WidthY, Depth = p.Depth, Name = p.Name
             }).ToList(),
+            DrainPitVoidMapping = DrainPits.Count > 0
+                ? new DrainPitVoidFamilyMappingDto
+                {
+                    FamilyTypeName = SelectedDrainPitVoidFamily,
+                    LengthParameterName = SelectedDrainPitLengthParam,
+                    WidthParameterName = SelectedDrainPitWidthParam,
+                    DepthParameterName = SelectedDrainPitDepthParam
+                }
+                : null,
             AirSpec = IsAir ? new AirValveRoomSpecDto(MainPipeDiameter, FoundationTopToPipeCenterDepth, SelectedVoidAxis) : null,
             // 타입 전용 입력은 선택된 밸브실 타입에 해당하는 쪽만 채운다.
             MudSpec = IsMud
@@ -306,6 +343,21 @@ public class ValveRoomViewModel : ViewModelBase
             ColumnTypeNames.Add(name);
         foreach (var name in _typeQueryRepo.GetBeamTypeNames().Where(name => !string.IsNullOrWhiteSpace(name)).Distinct())
             BeamTypeNames.Add(name);
+        foreach (var name in _typeQueryRepo.GetGenericModelTypeNames().Where(name => !string.IsNullOrWhiteSpace(name)).Distinct())
+            DrainPitVoidFamilyNames.Add(name);
+    }
+
+    private void RefreshDrainPitVoidParameterNames()
+    {
+        DrainPitVoidParameterNames.Clear();
+        DrainPitVoidParameterNames.Add("(선택 안 함)");
+        if (SelectedDrainPitVoidFamily != "(선택 안 함)")
+            foreach (var name in _typeQueryRepo.GetPipeAccessoryInstanceParameterNames(SelectedDrainPitVoidFamily)
+                         .Where(name => !string.IsNullOrWhiteSpace(name)).Distinct())
+                DrainPitVoidParameterNames.Add(name);
+        SelectedDrainPitLengthParam = "(선택 안 함)";
+        SelectedDrainPitWidthParam = "(선택 안 함)";
+        SelectedDrainPitDepthParam = "(선택 안 함)";
     }
 
     private Point3D ResolveDrainPitCenter(DrainPitItemViewModel pit)

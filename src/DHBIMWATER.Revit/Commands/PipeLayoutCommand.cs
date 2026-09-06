@@ -29,7 +29,7 @@ public class PipeLayoutCommand : CommandBase
             if (raiseResult != ExternalEventRequest.Accepted)
             {
                 handler.PendingNetwork = null;
-                viewModel.ApplyModelCreationResult(false, $"Revit 요청을 등록하지 못했습니다: {raiseResult}");
+                viewModel.ApplyModelCreationResult(false, $"Revit 요청을 등록하지 못했습니다: {raiseResult}", []);
             }
         };
 
@@ -46,8 +46,8 @@ public class PipeLayoutCommand : CommandBase
             view.Activate();
             viewModel.ApplyOutline(outline);
         });
-        handler.ModelCreationCompleted = (succeeded, resultMessage) => view.Dispatcher.Invoke(() =>
-            viewModel.ApplyModelCreationResult(succeeded, resultMessage));
+        handler.ModelCreationCompleted = (succeeded, resultMessage, failures) => view.Dispatcher.Invoke(() =>
+            viewModel.ApplyModelCreationResult(succeeded, resultMessage, failures));
 
         new WindowInteropHelper(view).Owner = commandData.Application.MainWindowHandle;
         view.Show();
