@@ -32,7 +32,10 @@ public sealed record PipeSegmentFamilySelection(
     /// <summary>배관 밸브류 인스턴스에 직경(mm)을 기록할 파라미터명. 비어 있거나 유형 파라미터면 기록을 건너뛴다.</summary>
     string ValveDiameterParameterName = "",
     /// <summary>곡관 인스턴스에 꺾임각(도)을 기록할 파라미터명.</summary>
-    string BendAngleParameterName = "");
+    string BendAngleParameterName = "",
+    /// <summary>T형 인스턴스에 분기 직경(mm)을 기록할 파라미터명. 비어 있으면 분기 구경을 구동하지 않는다.
+    /// 주관·분기 구경이 함께 맞아야 형상 수식이 성립하는 패밀리를 위한 항목이다(docs/130).</summary>
+    string TeeBranchDiameterParameterName = "");
 
 public sealed record PipeNetworkDefinition(
     IReadOnlyList<PipeNodeDefinition> Nodes,
@@ -45,4 +48,6 @@ public sealed record PipeNetworkDefinition(
     string PipingSystemTypeName = "",
     string PipeTypeName = "",
     string LevelName = "",
-    PipeSegmentFamilySelection? SegmentFamilies = null);
+    PipeSegmentFamilySelection? SegmentFamilies = null,
+    /// <summary>격점상세도 배관재료표에 쓰는 격점 식별자(docs/131). 비어 있으면 기록만 건너뛴다.</summary>
+    string JunctionId = "");

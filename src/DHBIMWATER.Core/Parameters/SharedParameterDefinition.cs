@@ -80,6 +80,7 @@ namespace DHBIMWATER.Core.Parameters
         Stairs,                 // OST_Stairs
 
         Views,                  // OST_Views
+        PipeAccessory,          // OST_PipeAccessory
     }
     public record SharedParameterDefinition
     {

@@ -18,6 +18,12 @@ namespace DHBIMWATER.Revit.UI.Modules
             PushButtonData valveRoomBtn = new PushButtonData("ValveRoomCommand", "밸브실\n모델링", Assembly.GetExecutingAssembly().Location, RevitCommandType<ValveRoomCommand>.FullName);
             PushButtonData pipeLayoutBtn = new PushButtonData("PipeLayoutCommand", "밸브실\n배관", Assembly.GetExecutingAssembly().Location, RevitCommandType<PipeLayoutCommand>.FullName);
 
+            PushButtonData junctionDetailBtn = new PushButtonData("JunctionDetailCommand", "격점상세\n재료표", Assembly.GetExecutingAssembly().Location, RevitCommandType<JunctionDetailCommand>.FullName)
+            {
+                ToolTip = "밸브실 배관으로 만든 부재를 격점별로 모아 배관재료표를 만듭니다. 창 없이 바로 실행됩니다.",
+                LongDescription = "격점번호(DH_격점번호)별로 일람표와 드래프팅뷰 도면을 각각 1개씩 만듭니다. 열은 번호·명칭·규격·형상·수량·비고로 고정이며, 같은 이름의 뷰가 이미 있으면 건너뜁니다."
+            };
+
             PushButtonData coordinateLinkBtn = new PushButtonData("CoordinateLinkCommand", "기준점\n통합 링크", Assembly.GetExecutingAssembly().Location, RevitCommandType<CoordinateLinkCommand>.FullName);
             PushButtonData placementStationBtn = new PushButtonData("PlacementStationCommand", "측점 편집", Assembly.GetExecutingAssembly().Location, RevitCommandType<PlacementStationCommand>.FullName)
             {
@@ -30,6 +36,7 @@ namespace DHBIMWATER.Revit.UI.Modules
 
             valveRoomBtn.LargeImage = RibbonButtonImages.GetIcon("valve.png");
             pipeLayoutBtn.LargeImage = RibbonButtonImages.GetIcon("pipe.png");
+            junctionDetailBtn.LargeImage = RibbonButtonImages.GetIcon("Quantity.png");
             coordinateLinkBtn.LargeImage = RibbonButtonImages.GetIcon("link.png");
             placementStationBtn.LargeImage = RibbonButtonImages.GetIcon("link.png");
 
@@ -40,6 +47,7 @@ namespace DHBIMWATER.Revit.UI.Modules
                 panel.AddItem(pipingBtn),
                 panel.AddItem(valveRoomBtn),
                 panel.AddItem(pipeLayoutBtn),
+                panel.AddItem(junctionDetailBtn),
                 panel.AddItem(coordinateLinkBtn),
                 //panel.AddItem(placementStationBtn),
             ];

@@ -16,8 +16,9 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     private static readonly string[] PipeFamilyDefaultKeywords = ["직관", "단관"];
     private static readonly string[] BendFamilyDefaultKeywords = ["곡관"];
     private static readonly string[] ReducerFamilyDefaultKeywords = ["T형관", "Y형관", "T형", "Y형", "티", "TEE"];
-    private static readonly string[] DiameterParameterDefaultKeywords = ["공칭지름", "공칭구경", "직경", "지름", "호칭", "Diameter", "DN"];
+    private static readonly string[] DiameterParameterDefaultKeywords = ["공칭지름", "공칭구경", "구경", "관경", "직경", "지름", "호칭", "Diameter", "DN"];
     private static readonly string[] BendAngleParameterDefaultKeywords = ["각도"];
+    private const string RadiusToken = "반지름";
     private readonly IElementTypeQueryRepo _typeRepo;
     private PipeNetwork _network = new();
     private readonly Stack<PipeNetwork> _undoHistory = new();
@@ -35,16 +36,23 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     private string _status = "캔버스를 클릭하여 배관 시작점을 지정하세요.";
     private double _elevation;
     private double _referenceX, _referenceY;
+    private string _junctionId = string.Empty;
     private double _diameterMm = 100;
     private List<string> _accessoryFamilyTypeNames = [];
     private string? _selectedValveFamilyName;
     private string? _segmentFamilyTypeName, _lengthParameterName, _diameterParameterName;
     private double _straightLengthMm = PipeSegmentPlan.StraightLengthMm;
     private string? _bendFamilyTypeName, _teeFamilyTypeName;
-    private string? _bendDiameterParameterName, _bendAngleParameterName, _teeDiameterParameterName, _valveDiameterParameterName;
+    private string? _bendDiameterParameterName, _bendAngleParameterName, _teeDiameterParameterName, _teeBranchDiameterParameterName, _valveDiameterParameterName;
     /// <summary>관 길이 파라미터를 사용자가 직접 골랐는지. true면 관 패밀리를 바꿔도 자동 추정으로 덮어쓰지 않는다.</summary>
     private bool _lengthParameterPinned;
     private bool _diameterParameterPinned;
+    private bool _bendDiameterParameterPinned;
+    private bool _bendAngleParameterPinned;
+    private bool _teeDiameterParameterPinned;
+    private bool _teeBranchDiameterParameterPinned;
+    private bool _valveDiameterParameterPinned;
+    private bool _isRefreshingParameterNames;
     private bool _isCreating;
     private readonly List<PipeConnectionFailure> _failures = [];
     private readonly HashSet<Guid> _errorEdgeIds = [];
@@ -83,6 +91,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         LengthParameterNames = [];
         BendParameterNames = [];
         TeeParameterNames = [];
+        TeeBranchParameterNames = [];
         ValveParameterNames = [];
         Edges = [];
         Nodes = [];
@@ -123,6 +132,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     public ObservableCollection<string> LengthParameterNames { get; }
     public ObservableCollection<string> BendParameterNames { get; }
     public ObservableCollection<string> TeeParameterNames { get; }
+    public ObservableCollection<string> TeeBranchParameterNames { get; }
     public ObservableCollection<string> ValveParameterNames { get; }
     public ObservableCollection<OutlineWallItem> OutlineWalls { get; }
     public ObservableCollection<OutlineArrowItem> OutlineArrows { get; }
@@ -144,6 +154,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     /// <summary>Revit 뷰에서 외곽 벽체 피킹을 시작한다. 결과는 <see cref="ApplyOutline"/>으로 되돌아온다.</summary>
     public Action? PickOutlineAction { get; set; }
     public double Elevation { get => _elevation; set { if (SetProperty(ref _elevation, value)) { _network.Elevation = value; NotifyValidationChanged(); } } }
+    /// <summary>격점상세도 배관재료표에 쓰는 격점 식별자(docs/131 § B-1). 필수 입력이 아니다.</summary>
+    public string JunctionId { get => _junctionId; set => SetProperty(ref _junctionId, value ?? string.Empty); }
     public double ReferenceX { get => _referenceX; set { if (SetProperty(ref _referenceX, value)) { RefreshOutline(); NotifyValidationChanged(); } } }
     public double ReferenceY { get => _referenceY; set { if (SetProperty(ref _referenceY, value)) { RefreshOutline(); NotifyValidationChanged(); } } }
 
@@ -217,10 +229,11 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     }
     public string? BendFamilyTypeName { get => _bendFamilyTypeName; set { if (SetProperty(ref _bendFamilyTypeName, value)) { RefreshFittingDiameterParameterNames(); NotifyValidationChanged(); } } }
     public string? TeeFamilyTypeName { get => _teeFamilyTypeName; set { if (SetProperty(ref _teeFamilyTypeName, value)) { RefreshFittingDiameterParameterNames(); NotifyValidationChanged(); } } }
-    public string? BendDiameterParameterName { get => _bendDiameterParameterName; set { if (SetProperty(ref _bendDiameterParameterName, value)) NotifyValidationChanged(); } }
-    public string? BendAngleParameterName { get => _bendAngleParameterName; set { if (SetProperty(ref _bendAngleParameterName, value)) NotifyValidationChanged(); } }
-    public string? TeeDiameterParameterName { get => _teeDiameterParameterName; set { if (SetProperty(ref _teeDiameterParameterName, value)) NotifyValidationChanged(); } }
-    public string? ValveDiameterParameterName { get => _valveDiameterParameterName; set { if (SetProperty(ref _valveDiameterParameterName, value)) NotifyValidationChanged(); } }
+    public string? BendDiameterParameterName { get => _bendDiameterParameterName; set { if (SetProperty(ref _bendDiameterParameterName, value)) { if (!_isRefreshingParameterNames && !string.IsNullOrWhiteSpace(value)) _bendDiameterParameterPinned = true; NotifyValidationChanged(); } } }
+    public string? BendAngleParameterName { get => _bendAngleParameterName; set { if (SetProperty(ref _bendAngleParameterName, value)) { if (!_isRefreshingParameterNames && !string.IsNullOrWhiteSpace(value)) _bendAngleParameterPinned = true; NotifyValidationChanged(); } } }
+    public string? TeeDiameterParameterName { get => _teeDiameterParameterName; set { if (SetProperty(ref _teeDiameterParameterName, value)) { if (!_isRefreshingParameterNames && !string.IsNullOrWhiteSpace(value)) _teeDiameterParameterPinned = true; NotifyValidationChanged(); } } }
+    public string? TeeBranchDiameterParameterName { get => _teeBranchDiameterParameterName; set { if (SetProperty(ref _teeBranchDiameterParameterName, value)) { if (!_isRefreshingParameterNames && !string.IsNullOrWhiteSpace(value)) _teeBranchDiameterParameterPinned = true; NotifyValidationChanged(); } } }
+    public string? ValveDiameterParameterName { get => _valveDiameterParameterName; set { if (SetProperty(ref _valveDiameterParameterName, value)) { if (!_isRefreshingParameterNames && !string.IsNullOrWhiteSpace(value)) _valveDiameterParameterPinned = true; NotifyValidationChanged(); } } }
     /// <summary>직관 1본의 정척 길이(mm). 관 패밀리 수식의 직관/단관 분기 기준과 같아야 한다.</summary>
     public double StraightLengthMm
     {
@@ -1134,6 +1147,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             foreach (var name in _accessoryFamilyTypeNames.Where(x => GetFamilyName(x) == _selectedValveFamilyName))
                 FamilyTypeNames.Add(name);
         SelectedFamilyTypeName = null;
+        RefreshFittingDiameterParameterNames();
     }
 
     private void RefreshDiameterMatch()
@@ -1199,23 +1213,60 @@ public sealed class PipeLayoutViewModel : ViewModelBase
 
     private void RefreshFittingDiameterParameterNames()
     {
-        RefreshFittingDiameterParameterNames(BendParameterNames, BendFamilyTypeName,
-            ref _bendDiameterParameterName, nameof(BendDiameterParameterName));
-        _bendAngleParameterName = GuessParameter(BendParameterNames, BendAngleParameterDefaultKeywords);
-        OnPropertyChanged(nameof(BendAngleParameterName));
-        RefreshFittingDiameterParameterNames(TeeParameterNames, TeeFamilyTypeName,
-            ref _teeDiameterParameterName, nameof(TeeDiameterParameterName));
-        RefreshFittingDiameterParameterNames(ValveParameterNames, SelectedFamilyTypeName,
-            ref _valveDiameterParameterName, nameof(ValveDiameterParameterName));
+        _isRefreshingParameterNames = true;
+        try
+        {
+            var previousBendAngleParameterName = _bendAngleParameterName;
+            var wasBendAngleParameterPinned = _bendAngleParameterPinned;
+            RefreshFittingDiameterParameterNames(BendParameterNames, BendFamilyTypeName,
+                ref _bendDiameterParameterName, ref _bendDiameterParameterPinned, nameof(BendDiameterParameterName));
+            if (wasBendAngleParameterPinned && previousBendAngleParameterName is not null && BendParameterNames.Contains(previousBendAngleParameterName))
+            {
+                _bendAngleParameterName = previousBendAngleParameterName;
+                _bendAngleParameterPinned = true;
+            }
+            else
+            {
+                _bendAngleParameterName = GuessParameter(BendParameterNames, BendAngleParameterDefaultKeywords);
+                _bendAngleParameterPinned = false;
+            }
+            OnPropertyChanged(nameof(BendAngleParameterName));
+            RefreshFittingDiameterParameterNames(TeeParameterNames, TeeFamilyTypeName,
+                ref _teeDiameterParameterName, ref _teeDiameterParameterPinned, nameof(TeeDiameterParameterName));
+            RefreshFittingDiameterParameterNames(TeeBranchParameterNames, TeeFamilyTypeName,
+                ref _teeBranchDiameterParameterName, ref _teeBranchDiameterParameterPinned, nameof(TeeBranchDiameterParameterName),
+                GuessTeeBranchDiameterParameter);
+            RefreshFittingDiameterParameterNames(ValveParameterNames, SelectedFamilyTypeName ?? FamilyTypeNames.FirstOrDefault(),
+                ref _valveDiameterParameterName, ref _valveDiameterParameterPinned, nameof(ValveDiameterParameterName));
+        }
+        finally
+        {
+            _isRefreshingParameterNames = false;
+        }
     }
 
     private void RefreshFittingDiameterParameterNames(ObservableCollection<string> target, string? familyTypeName,
-        ref string? selectedParameterName, string propertyName)
+        ref string? selectedParameterName, ref bool pinned, string propertyName, Func<IEnumerable<string>, string?>? guess = null)
     {
+        var previousParameterName = selectedParameterName;
+        var wasPinned = pinned;
         target.Clear();
         var names = ParameterNamesFor(familyTypeName);
         foreach (var name in names) target.Add(name);
-        selectedParameterName = GuessParameter(names, DiameterParameterDefaultKeywords);
+        if (wasPinned && previousParameterName is not null && names.Contains(previousParameterName))
+        {
+            selectedParameterName = previousParameterName;
+            pinned = true;
+        }
+        else
+        {
+            selectedParameterName = guess is not null
+                ? guess(names)
+                : propertyName == nameof(TeeDiameterParameterName)
+                    ? GuessTeeDiameterParameter(names)
+                    : GuessParameter(names, DiameterParameterDefaultKeywords);
+            pinned = false;
+        }
         OnPropertyChanged(propertyName);
     }
 
@@ -1224,8 +1275,22 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             ? []
             : _typeRepo.GetPipeAccessoryInstanceParameterNames(familyTypeName).ToList();
 
+    private static string? GuessTeeDiameterParameter(IEnumerable<string> names)
+        => names.FirstOrDefault(name => string.Equals(name, "주관_구경", StringComparison.Ordinal))
+            ?? names.FirstOrDefault(name => name.Contains("구경", StringComparison.Ordinal)
+                                      && !name.Contains(RadiusToken, StringComparison.Ordinal))
+            ?? GuessParameter(names, DiameterParameterDefaultKeywords);
+
+    private static string? GuessTeeBranchDiameterParameter(IEnumerable<string> names)
+        => names.FirstOrDefault(name => string.Equals(name, "수평분기_구경", StringComparison.Ordinal))
+            ?? names.FirstOrDefault(name => name.Contains("분기", StringComparison.Ordinal)
+                                      && name.Contains("구경", StringComparison.Ordinal)
+                                      && !name.Contains(RadiusToken, StringComparison.Ordinal));
+
+    /// <summary>이름에 "반지름"이 든 파라미터는 자동선택하지 않는다(docs/133).
+    /// 관경(지름)을 반지름 파라미터에 쓰면 형상이 2배가 되므로, 못 찾으면 빈 값으로 두고 사용자가 직접 고르게 한다.</summary>
     private static string? GuessParameter(IEnumerable<string> names, IReadOnlyList<string> keywords)
-        => GuessByKeywords(names, keywords, _ => true);
+        => GuessByKeywords(names, keywords, name => !name.Contains(RadiusToken, StringComparison.Ordinal));
 
     private void RemoveFitting(InlineFittingItem? fitting)
     {
@@ -1376,7 +1441,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
                     BendFamilyTypeName ?? "", TeeFamilyTypeName ?? "",
                     StraightLengthMm, DiameterParameterName ?? "",
                     BendDiameterParameterName ?? "", TeeDiameterParameterName ?? "", ValveDiameterParameterName ?? "",
-                    BendAngleParameterName ?? "")));
+                    BendAngleParameterName ?? "", TeeBranchDiameterParameterName ?? ""),
+                JunctionId ?? ""));
             Status = "Revit에서 직관·단관을 배치하고 있습니다…";
         }
         catch (Exception ex)

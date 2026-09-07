@@ -1,6 +1,7 @@
 using DHBIMWATER.Application.UseCases;
 using DHBIMWATER.Application.Gis;
 using DHBIMWATER.Application.UseCases.AutoGenerator;
+using DHBIMWATER.Application.UseCases.Documentation;
 using DHBIMWATER.Application.UseCases.Gis;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -22,6 +23,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<AnalyzePipeNetworkUseCase>();
         services.AddTransient<BendSettingsProvider>();
         services.AddTransient<SaveBendSettingsUseCase>();
+        services.AddTransient<CreatePipeMaterialScheduleUseCase>();
+        services.AddTransient<CreatePipeMaterialDraftingUseCase>();
 
         return services;
     }

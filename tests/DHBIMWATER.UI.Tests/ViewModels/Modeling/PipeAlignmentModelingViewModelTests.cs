@@ -98,6 +98,7 @@ public sealed class PipeAlignmentModelingViewModelTests
         Assert.Equal("미리보기 완료 · 최종 생성 취소", vm.PhaseText);
         Assert.Contains("선형 미리보기 3개 유지", vm.ResultSummary);
         Assert.Equal(new[] { "미리보기 경고" }, vm.ResultWarnings);
+        Assert.Equal("미리보기 경고", vm.ResultWarningsText);
         Assert.True(vm.HasResult);
     }
 

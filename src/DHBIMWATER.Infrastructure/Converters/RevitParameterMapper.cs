@@ -83,6 +83,7 @@ namespace DHBIMWATER.Infrastructure.Converters
                 ParameterCategory.ProjectInformation => BuiltInCategory.OST_ProjectInformation,
                 ParameterCategory.Stairs => BuiltInCategory.OST_Stairs,
                 ParameterCategory.Views => BuiltInCategory.OST_Views,
+                ParameterCategory.PipeAccessory => BuiltInCategory.OST_PipeAccessory,
                 _ => throw new ArgumentOutOfRangeException(
                     nameof(category), category, "지원하지 않는 Category")
             };

@@ -1,4 +1,4 @@
-using DHBIMWATER.Application.DTOs.Revit.ValveRoom;
+﻿using DHBIMWATER.Application.DTOs.Revit.ValveRoom;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.UI.Base;
 using DHBIMWATER.UI.Commands;
@@ -15,16 +15,31 @@ namespace DHBIMWATER.UI.ViewModels.Modeling;
 /// </summary>
 public class ValveRoomViewModel : ViewModelBase
 {
+    private const string NotSelected = "(선택 안 함)";
+    // 드레인 피트 Void 패밀리·매개변수 자동 추정 후보. 앞에서부터 먼저 걸리는 것을 기본값으로 쓴다.
+    // "보이드" 단독 키워드는 넣지 않는다 — 보이드_원형 등을 집으면 사각형만 지원하는 형상 계산과 어긋난다.
+    private static readonly string[] DrainPitVoidFamilyDefaultKeywords = ["보이드_사각형", "보이드_사각"];
+    private static readonly string[] DrainPitLengthParameterDefaultKeywords = ["길이", "Length", "L"];
+    private static readonly string[] DrainPitWidthParameterDefaultKeywords = ["폭", "너비", "Width", "W"];
+    private static readonly string[] DrainPitDepthParameterDefaultKeywords = ["깊이", "높이", "Depth", "Height", "H"];
+
     private readonly IDialogService _dialogService;
     private readonly IElementTypeQueryRepo _typeQueryRepo;
 
     private string _selectedValveRoomType = "이토밸브실";
     private string _selectedColumnTypeName = "(사용 안 함)";
     private string _selectedBeamTypeName = "(사용 안 함)";
-    private string _selectedDrainPitVoidFamily = "(선택 안 함)";
-    private string _selectedDrainPitLengthParam = "(선택 안 함)";
-    private string _selectedDrainPitWidthParam = "(선택 안 함)";
-    private string _selectedDrainPitDepthParam = "(선택 안 함)";
+    private string _selectedDrainPitVoidFamily = NotSelected;
+    private string _selectedDrainPitLengthParam = NotSelected;
+    private string _selectedDrainPitWidthParam = NotSelected;
+    private string _selectedDrainPitDepthParam = NotSelected;
+    private bool _hasDrainPit = true;
+    // 사용자가 콤보에서 직접 고른 매개변수는 pin 해두고, 패밀리를 바꿔도 그 이름이 있으면 유지한다.
+    private bool _drainPitLengthParamPinned;
+    private bool _drainPitWidthParamPinned;
+    private bool _drainPitDepthParamPinned;
+    // 자동 추정으로 값을 넣는 동안에는 pin을 세우지 않기 위한 가드.
+    private bool _isRefreshingDrainPitParameters;
     private double _plainConcreteThickness = 100;
     private double _foundationThickness = 500;
     private double _foundationToe = 300;
@@ -64,15 +79,13 @@ public class ValveRoomViewModel : ViewModelBase
         BeamTypeNames = new ObservableCollection<string>(new[] { "(사용 안 함)" });
         VoidAxes = new ObservableCollection<string>(new[] { "X", "Y" });
         DrainPitCorners = new ObservableCollection<string>(new[] { "좌상단", "좌하단", "우상단", "우하단" });
-        DrainPitVoidFamilyNames = new ObservableCollection<string>(new[] { "(선택 안 함)" });
-        DrainPitVoidParameterNames = new ObservableCollection<string>(new[] { "(선택 안 함)" });
+        DrainPitVoidFamilyNames = new ObservableCollection<string>(new[] { NotSelected });
+        DrainPitVoidParameterNames = new ObservableCollection<string>(new[] { NotSelected });
         LoadTypeNames();
 
         ResetCommand = new RelayCommand(_ => ApplyPreset());
         CreateCommand = new RelayCommand(_ => RequestCreate());
-        AddDrainPitCommand = new RelayCommand(_ => { var pit = new DrainPitItemViewModel(); DrainPits.Add(pit); SelectedDrainPit = pit; });
-        RemoveDrainPitCommand = new RelayCommand(_ => { if (SelectedDrainPit != null) DrainPits.Remove(SelectedDrainPit); });
-        PickDrainPitLocationCommand = new RelayCommand(_ => PickDrainPitLocationAction?.Invoke(), _ => SelectedDrainPit != null);
+        PickDrainPitLocationCommand = new RelayCommand(_ => PickDrainPitLocationAction?.Invoke(), _ => HasDrainPit);
         ApplyPreset();
     }
 
@@ -85,11 +98,8 @@ public class ValveRoomViewModel : ViewModelBase
     public ObservableCollection<string> DrainPitVoidParameterNames { get; }
     public ICommand ResetCommand { get; }
     public ICommand CreateCommand { get; }
-    public ObservableCollection<DrainPitItemViewModel> DrainPits { get; } = new();
-    private DrainPitItemViewModel? _selectedDrainPit;
-    public DrainPitItemViewModel? SelectedDrainPit { get => _selectedDrainPit; set => SetProperty(ref _selectedDrainPit, value); }
-    public ICommand AddDrainPitCommand { get; }
-    public ICommand RemoveDrainPitCommand { get; }
+    /// <summary>밸브실당 드레인 피트는 1개다. 생성 여부는 <see cref="HasDrainPit"/>가 결정한다.</summary>
+    public DrainPitItemViewModel DrainPit { get; } = new();
     public ICommand PickDrainPitLocationCommand { get; }
     public Action? PickDrainPitLocationAction { get; set; }
     public Action<ValveRoomRequestDto>? CreateModelAction { get; set; }
@@ -129,9 +139,38 @@ public class ValveRoomViewModel : ViewModelBase
             RefreshDrainPitVoidParameterNames();
         }
     }
-    public string SelectedDrainPitLengthParam { get => _selectedDrainPitLengthParam; set => SetProperty(ref _selectedDrainPitLengthParam, value); }
-    public string SelectedDrainPitWidthParam { get => _selectedDrainPitWidthParam; set => SetProperty(ref _selectedDrainPitWidthParam, value); }
-    public string SelectedDrainPitDepthParam { get => _selectedDrainPitDepthParam; set => SetProperty(ref _selectedDrainPitDepthParam, value); }
+    public string SelectedDrainPitLengthParam
+    {
+        get => _selectedDrainPitLengthParam;
+        set
+        {
+            if (!SetProperty(ref _selectedDrainPitLengthParam, value)) return;
+            if (!_isRefreshingDrainPitParameters && value != NotSelected) _drainPitLengthParamPinned = true;
+        }
+    }
+    public string SelectedDrainPitWidthParam
+    {
+        get => _selectedDrainPitWidthParam;
+        set
+        {
+            if (!SetProperty(ref _selectedDrainPitWidthParam, value)) return;
+            if (!_isRefreshingDrainPitParameters && value != NotSelected) _drainPitWidthParamPinned = true;
+        }
+    }
+    public string SelectedDrainPitDepthParam
+    {
+        get => _selectedDrainPitDepthParam;
+        set
+        {
+            if (!SetProperty(ref _selectedDrainPitDepthParam, value)) return;
+            if (!_isRefreshingDrainPitParameters && value != NotSelected) _drainPitDepthParamPinned = true;
+        }
+    }
+    /// <summary>드레인 피트를 만들지 여부. 해제하면 DTO의 DrainPits가 빈 목록이 되어 Void를 배치하지 않는다.</summary>
+    public bool HasDrainPit { get => _hasDrainPit; set => SetProperty(ref _hasDrainPit, value); }
+
+    /// <summary>실제로 피트를 만드는지. 공기밸브실은 피트 입력 자체가 숨겨지므로(<see cref="DrainPitVisibility"/>) 체크 상태와 무관하게 만들지 않는다.</summary>
+    private bool CreatesDrainPit => HasDrainPit && !IsAir;
     public double PlainConcreteThickness { get => _plainConcreteThickness; set => SetAndRefresh(ref _plainConcreteThickness, value); }
     public double FoundationThickness { get => _foundationThickness; set => SetAndRefresh(ref _foundationThickness, value); }
     public double FoundationToe { get => _foundationToe; set => SetAndRefresh(ref _foundationToe, value); }
@@ -195,9 +234,9 @@ public class ValveRoomViewModel : ViewModelBase
 
     public void ApplyPickedLocation(Point2D? point)
     {
-        if (point == null || SelectedDrainPit == null) return;
-        SelectedDrainPit.CenterX = point.X;
-        SelectedDrainPit.CenterY = point.Y;
+        if (point == null) return;
+        DrainPit.CenterX = point.X;
+        DrainPit.CenterY = point.Y;
     }
 
     // TODO: Resources/ValveRoomImages/ 폴더와 "{종류}_평면도.png" 등의 참고도가 아직 없어 현재는 빈 칸으로 표시된다.
@@ -285,11 +324,17 @@ public class ValveRoomViewModel : ViewModelBase
             return;
         }
 
-        if (DrainPits.Count > 0 && (SelectedDrainPitVoidFamily == "(선택 안 함)" ||
-            SelectedDrainPitLengthParam == "(선택 안 함)" || SelectedDrainPitWidthParam == "(선택 안 함)" ||
-            SelectedDrainPitDepthParam == "(선택 안 함)"))
+        if (CreatesDrainPit && (SelectedDrainPitVoidFamily == NotSelected ||
+            SelectedDrainPitLengthParam == NotSelected || SelectedDrainPitWidthParam == NotSelected ||
+            SelectedDrainPitDepthParam == NotSelected))
         {
             _dialogService.Warn("입력 확인", "드레인 피트가 있으면 Void 패밀리와 Length/Width/Depth 매개변수를 모두 선택해야 합니다.");
+            return;
+        }
+
+        if (CreatesDrainPit && (DrainPit.LengthX <= 0 || DrainPit.WidthY <= 0 || DrainPit.Depth <= 0))
+        {
+            _dialogService.Warn("입력 확인", "드레인 피트의 길이, 폭, 굴착 깊이는 0보다 커야 합니다.");
             return;
         }
 
@@ -308,12 +353,18 @@ public class ValveRoomViewModel : ViewModelBase
             InnerWidth = InnerWidth,
             InnerLength = InnerLength,
             InnerHeight = InnerHeight,
-            DrainPits = DrainPits.Select(p => new DrainPitDefinition
-            {
-                TopCenter = ResolveDrainPitCenter(p),
-                LengthX = p.LengthX, WidthY = p.WidthY, Depth = p.Depth, Name = p.Name
-            }).ToList(),
-            DrainPitVoidMapping = DrainPits.Count > 0
+            // 밸브실당 피트는 1개지만, 아래 계층(DTO·UseCase·Repo)은 N개를 처리할 수 있게 그대로 둔다.
+            DrainPits = CreatesDrainPit
+                ? new[]
+                {
+                    new DrainPitDefinition
+                    {
+                        TopCenter = ResolveDrainPitCenter(DrainPit),
+                        LengthX = DrainPit.LengthX, WidthY = DrainPit.WidthY, Depth = DrainPit.Depth, Name = DrainPit.Name
+                    }
+                }
+                : Array.Empty<DrainPitDefinition>(),
+            DrainPitVoidMapping = CreatesDrainPit
                 ? new DrainPitVoidFamilyMappingDto
                 {
                     FamilyTypeName = SelectedDrainPitVoidFamily,
@@ -345,19 +396,74 @@ public class ValveRoomViewModel : ViewModelBase
             BeamTypeNames.Add(name);
         foreach (var name in _typeQueryRepo.GetGenericModelTypeNames().Where(name => !string.IsNullOrWhiteSpace(name)).Distinct())
             DrainPitVoidFamilyNames.Add(name);
+
+        // 기본 Void 패밀리를 자동 선택한다. setter가 매개변수 후보 갱신까지 이어서 돌린다.
+        // 가드를 켜둬야 이 초기 선택이 "사용자가 직접 고른 값"으로 오인되지 않는다.
+        _isRefreshingDrainPitParameters = true;
+        try { SelectedDrainPitVoidFamily = GuessDrainPitVoidFamily(DrainPitVoidFamilyNames) ?? NotSelected; }
+        finally { _isRefreshingDrainPitParameters = false; }
     }
 
+    /// <summary>선택된 Void 패밀리의 인스턴스 매개변수를 다시 읽고, 사용자가 직접 고르지 않은 이름만 후보 키워드로 자동 추정한다.</summary>
     private void RefreshDrainPitVoidParameterNames()
     {
-        DrainPitVoidParameterNames.Clear();
-        DrainPitVoidParameterNames.Add("(선택 안 함)");
-        if (SelectedDrainPitVoidFamily != "(선택 안 함)")
-            foreach (var name in _typeQueryRepo.GetPipeAccessoryInstanceParameterNames(SelectedDrainPitVoidFamily)
-                         .Where(name => !string.IsNullOrWhiteSpace(name)).Distinct())
-                DrainPitVoidParameterNames.Add(name);
-        SelectedDrainPitLengthParam = "(선택 안 함)";
-        SelectedDrainPitWidthParam = "(선택 안 함)";
-        SelectedDrainPitDepthParam = "(선택 안 함)";
+        _isRefreshingDrainPitParameters = true;
+        try
+        {
+            DrainPitVoidParameterNames.Clear();
+            DrainPitVoidParameterNames.Add(NotSelected);
+            var names = SelectedDrainPitVoidFamily == NotSelected
+                ? new List<string>()
+                : _typeQueryRepo.GetPipeAccessoryInstanceParameterNames(SelectedDrainPitVoidFamily)
+                    .Where(name => !string.IsNullOrWhiteSpace(name)).Distinct().ToList();
+            foreach (var name in names) DrainPitVoidParameterNames.Add(name);
+
+            // 같은 매개변수가 Length/Width/Depth에 중복 배정되면 형상이 틀어지므로 used로 제외한다.
+            var used = new List<string>();
+            SelectedDrainPitLengthParam = ResolveDrainPitParam(_selectedDrainPitLengthParam, ref _drainPitLengthParamPinned,
+                names, DrainPitLengthParameterDefaultKeywords, used);
+            SelectedDrainPitWidthParam = ResolveDrainPitParam(_selectedDrainPitWidthParam, ref _drainPitWidthParamPinned,
+                names, DrainPitWidthParameterDefaultKeywords, used);
+            SelectedDrainPitDepthParam = ResolveDrainPitParam(_selectedDrainPitDepthParam, ref _drainPitDepthParamPinned,
+                names, DrainPitDepthParameterDefaultKeywords, used);
+        }
+        finally { _isRefreshingDrainPitParameters = false; }
+    }
+
+    /// <summary>사용자가 고른 이름이 새 패밀리에도 있으면 유지하고, 아니면 키워드로 다시 추정한다.
+    /// 선례: PipeLayoutViewModel.RefreshFittingDiameterParameterNames.</summary>
+    private static string ResolveDrainPitParam(string current, ref bool pinned,
+        IReadOnlyList<string> names, IReadOnlyList<string> keywords, ICollection<string> used)
+    {
+        if (pinned && current != NotSelected && names.Contains(current)) { used.Add(current); return current; }
+        pinned = false;
+        var guess = GuessDrainPitParameter(names, keywords, used);
+        if (guess != null) used.Add(guess);
+        return guess ?? NotSelected;
+    }
+
+    /// <summary>키워드를 앞에서부터 시도해 매개변수명을 고른다. 키워드마다 완전일치를 먼저 보고, 두 글자 이상일 때만 부분일치로 넘어간다.
+    /// 한 글자 키워드("L","W","H")는 대소문자 무시 Contains로 오탐이 심해 완전일치만 인정한다.</summary>
+    private static string? GuessDrainPitParameter(IReadOnlyList<string> names, IReadOnlyList<string> keywords, ICollection<string> used)
+    {
+        foreach (var keyword in keywords)
+        {
+            var exact = names.FirstOrDefault(n => !used.Contains(n) && string.Equals(n, keyword, StringComparison.OrdinalIgnoreCase));
+            if (exact != null) return exact;
+            if (keyword.Length == 1) continue;
+            var partial = names.FirstOrDefault(n => !used.Contains(n) && n.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+            if (partial != null) return partial;
+        }
+        return null;
+    }
+
+    /// <summary>"패밀리명 : 타입명" 목록에서 기본 Void 패밀리를 고른다. 못 찾으면 null.</summary>
+    private static string? GuessDrainPitVoidFamily(IEnumerable<string> familyTypeNames)
+    {
+        var names = familyTypeNames.ToList();
+        return DrainPitVoidFamilyDefaultKeywords
+            .Select(keyword => names.FirstOrDefault(n => n.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+            .FirstOrDefault(n => n != null);
     }
 
     private Point3D ResolveDrainPitCenter(DrainPitItemViewModel pit)

@@ -28,6 +28,7 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
         var overrideView = BendOverrideGraphics.ResolveOverrideView(doc);
         var solidFillPatternId = BendOverrideGraphics.FindSolidFillPatternId(doc);
         var outerDiameters = new Dictionary<(string PipeKind, double DiameterMm), double>();
+        var skippedNodes = new List<string>();
         var count = 0;
         var skipped = 0;
         var failed = 0;
@@ -40,9 +41,10 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
                 var sourcePoints = new[] { plan.Points.Start, plan.Points.ArcStart, plan.Points.ArcMid, plan.Points.ArcEnd, plan.Points.End };
                 var points = ProjectLocationCoordinateConverter.Convert(_coordinateTransform, sourcePoints,
                     Enumerable.Repeat(plan.ZOffsetM, sourcePoints.Length).ToArray());
-                if (!TryBuildSolid(doc.Application.ShortCurveTolerance, points, plan, materialId, out var solid))
+                if (!TryBuildSolid(doc.Application.ShortCurveTolerance, points, plan, materialId, out var solid, out var failureReason))
                 {
                     skipped++;
+                    skippedNodes.Add($"{plan.NodeId}({failureReason})");
                     continue;
                 }
                 var shape = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
@@ -61,7 +63,7 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
             finally { progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingBends, count, plans.Count)); }
         }
         progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingBends, plans.Count, plans.Count));
-        if (skipped > 0) warnings.Add($"곡관 DirectShape 경로가 퇴화한 절점 {skipped}곳을 건너뛰었습니다.");
+        if (skipped > 0) warnings.Add($"곡관 DirectShape 경로가 퇴화한 절점 {skipped}곳을 건너뛰었습니다: {string.Join(", ", skippedNodes)}.");
         if (failed > 0) warnings.Add($"곡관 DirectShape 생성 예외가 난 절점 {failed}곳을 건너뛰었습니다.");
         if (writer.InvalidTypes.Count > 0) warnings.Add($"프로젝트 매개변수 {string.Join(", ", writer.InvalidTypes.OrderBy(x => x))}의 타입이 배치 태그 계약과 달라 값을 건너뛰었습니다.");
         var missing = writer.Missing.Except(writer.InvalidTypes).OrderBy(x => x).ToList();
@@ -70,22 +72,19 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
         return new AdaptiveBendPlacementResult(count, warnings, outerDiameters);
     }
 
-    private static bool TryBuildSolid(double tolerance, IReadOnlyList<XYZ> points, AdaptiveBendPlacementPlan plan, ElementId materialId, out Solid solid)
+    private static bool TryBuildSolid(double tolerance, IReadOnlyList<XYZ> points, AdaptiveBendPlacementPlan plan, ElementId materialId, out Solid solid, out string failureReason)
     {
         var path = new CurveLoop();
         var axis = points[1] - points[0];
         if (axis.GetLength() >= tolerance) path.Append(Line.CreateBound(points[0], points[1]));
-        try
-        {
-            var arc = Arc.Create(points[1], points[3], points[2]);
-            if (arc.Length >= tolerance) path.Append(arc);
-        }
-        catch (ArgumentException) { }
+        var arc = Arc.Create(points[1], points[3], points[2]);
+        if (arc.Length < tolerance) { solid = null!; failureReason = "호 퇴화"; return false; }
+        path.Append(arc);
         var endLine = points[4] - points[3];
         if (endLine.GetLength() >= tolerance) path.Append(Line.CreateBound(points[3], points[4]));
-        if (path.IsOpen() == false || path.Count() == 0) { solid = null!; return false; }
+        if (path.IsOpen() == false || path.Count() == 0) { solid = null!; failureReason = "경로 퇴화"; return false; }
         if (axis.GetLength() < tolerance) axis = points[2] - points[1];
-        if (axis.GetLength() < tolerance) { solid = null!; return false; }
+        if (axis.GetLength() < tolerance) { solid = null!; failureReason = "축 퇴화"; return false; }
         axis = axis.Normalize();
         var seed = Math.Abs(axis.Z) > 0.9 ? XYZ.BasisX : XYZ.BasisZ;
         var xAxis = axis.CrossProduct(seed).Normalize();
@@ -96,6 +95,7 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
         if (plan.WallThicknessEMm > 0d && innerRadiusMm > 0.01d)
             loops.Add(PipeSolidFactory.CircleLoop(points[0], UC.MmToFt(innerRadiusMm), xAxis, yAxis));
         solid = GeometryCreationUtilities.CreateSweptGeometry(path, 0, 0d, loops, new SolidOptions(materialId, ElementId.InvalidElementId));
+        failureReason = string.Empty;
         return true;
     }
 

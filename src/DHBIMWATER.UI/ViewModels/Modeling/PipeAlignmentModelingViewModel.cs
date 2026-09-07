@@ -154,7 +154,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
     private ICollectionView? _diameterMappingsView;
     private PipeAlignmentModelingResult? _pendingPreview;
     private double _progressPercent;
-    private string _phaseText = string.Empty, _progressDetail = string.Empty, _resultSummary = string.Empty, _previewConfirmMessage = string.Empty;
+    private string _phaseText = string.Empty, _progressDetail = string.Empty, _resultSummary = string.Empty, _resultWarningsText = string.Empty, _previewConfirmMessage = string.Empty;
     private readonly Stopwatch _phaseStopwatch = new();
     private PipeAlignmentPhase? _phaseTrackedPhase;
     private double _reducerBodyLengthMm = 250d;
@@ -313,6 +313,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
     public string ProgressDetail { get => _progressDetail; private set => SetProperty(ref _progressDetail, value); }
     public string ResultSummary { get => _resultSummary; private set => SetProperty(ref _resultSummary, value); }
     public ObservableCollection<string> ResultWarnings { get; } = new();
+    public string ResultWarningsText { get => _resultWarningsText; private set => SetProperty(ref _resultWarningsText, value); }
     public bool HasResult { get => _hasResult; private set => SetProperty(ref _hasResult, value); }
     public bool IsAwaitingPreviewConfirm
     {
@@ -725,7 +726,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         if (warnings.Count > 0 && !_dialog.Confirm("사전 진단 경고", $"{string.Join(", ", warnings)}을 확인했습니다. 계속 모델링할까요?")) return;
         var reference = ResolveReference();
         RequestedModeling = new PipeAlignmentModelingRequest { Files = SourceFiles(), ReferenceX = reference.X, ReferenceY = reference.Y, ApplySharedCoordinates = ApplySharedCoordinates, ZDatum = ZDatum, OutputMode = OutputMode, IntervalMm = IntervalM * 1000, ReducerBodyLengthMm = ReducerBodyLengthMm, StraightFamilyTypeName = StraightFamilyTypeName, StraightDiameterParameterName = ResolvedParameter(StraightDiameterParameterName), StraightOuterDiameterParameterName = ResolvedParameter(StraightOuterDiameterParameterName), StraightThicknessParameterName = ResolvedParameter(StraightThicknessParameterName), BendFamilyTypeName = BendFamilyTypeName, BendDiameterParameterName = ResolvedParameter(BendDiameterParameterName), BendWallThicknessParameterName = ResolvedParameter(BendWallThicknessParameterName), BendOuterDiameterParameterName = ResolvedParameter(BendOuterDiameterParameterName), PipingSystemTypeName = PipingSystemTypeName, PipeTypeName = PipeTypeName, LevelName = LevelName, SnapToleranceMm = SnapToleranceMm, CurrentBendSettings = _settings };
-        ResultWarnings.Clear(); HasResult = false; ResultSummary = string.Empty;
+        SetResultWarnings([]); HasResult = false; ResultSummary = string.Empty;
         ProgressPercent = 0; PhaseText = "모델링 준비 중"; ProgressDetail = string.Empty; IsBusy = true;
         try
         {
@@ -861,8 +862,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
             PipeAlignmentOutputMode.Adaptive => $"직관 {result.CreatedCount:N0}개 / 곡관 {result.BendCount:N0}개 / 경고 {result.Warnings.Count:N0}건",
             _ => $"배치 {result.CreatedCount:N0}개 / 경고 {result.Warnings.Count:N0}건"
         };
-        ResultWarnings.Clear();
-        foreach (var warning in result.Warnings) ResultWarnings.Add(warning);
+        SetResultWarnings(result.Warnings);
         HasResult = true;
         IsBusy = false;
         OnPropertyChanged(nameof(CanCreateModel));
@@ -875,8 +875,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         PhaseText = "미리보기 완료 · 최종 생성 취소";
         ProgressDetail = string.Empty;
         ResultSummary = $"선형 미리보기 {result.CreatedCount:N0}개 유지 / 스킵된 0길이 구간 {result.SkippedSegments:N0}개 / 경고 {result.Warnings.Count:N0}건";
-        ResultWarnings.Clear();
-        foreach (var warning in result.Warnings) ResultWarnings.Add(warning);
+        SetResultWarnings(result.Warnings);
         HasResult = true;
         IsBusy = false;
         OnPropertyChanged(nameof(CanCreateModel));
@@ -889,8 +888,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         PhaseText = "선형 미리보기 확인 대기";
         ProgressDetail = string.Empty;
         PreviewConfirmMessage = $"선형 미리보기 {result.CreatedCount:N0}개를 생성했습니다. Revit 화면에서 위치와 진행 방향을 확인한 뒤 [계속 생성]을 누르세요. 입력을 고치려면 [미리보기 유지·중단]을 누르세요.";
-        ResultWarnings.Clear();
-        foreach (var warning in result.Warnings) ResultWarnings.Add(warning);
+        SetResultWarnings(result.Warnings);
         _pendingPreview = result;
         IsAwaitingPreviewConfirm = true;
         IsBusy = false;
@@ -927,10 +925,16 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         ResultSummary = error.Contains("내부원점으로부터 너무 멀리 떨어진 곳에 모델링을 시도했습니다.", StringComparison.Ordinal)
             ? "내부원점에서 너무 멀어 생성할 수 없습니다."
             : "모델 생성에 실패했습니다.";
-        ResultWarnings.Clear();
-        ResultWarnings.Add(error);
+        SetResultWarnings([error]);
         HasResult = true;
         IsBusy = false;
         OnPropertyChanged(nameof(CanCreateModel));
+    }
+
+    private void SetResultWarnings(IEnumerable<string> warnings)
+    {
+        ResultWarnings.Clear();
+        foreach (var warning in warnings) ResultWarnings.Add(warning);
+        ResultWarningsText = string.Join(Environment.NewLine, ResultWarnings);
     }
 }

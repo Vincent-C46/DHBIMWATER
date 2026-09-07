@@ -36,7 +36,8 @@ public sealed class PipeNetwork
         string pipingSystemTypeName = "",
         string pipeTypeName = "",
         string levelName = "",
-        PipeSegmentFamilySelection? segmentFamilies = null)
+        PipeSegmentFamilySelection? segmentFamilies = null,
+        string junctionId = "")
     {
         var nodes = _nodes.Select(x => new PipeNodeDefinition(x.Id, x.Position, x.NodeKind)).ToList();
         var edges = _edges.Select(x =>
@@ -54,7 +55,7 @@ public sealed class PipeNetwork
             return new FittingPlacementDefinition(fitting.Id, fitting.TypeKey, fitting.FamilyTypeName, point, Elevation, edge.Id);
         })).ToList();
         return new PipeNetworkDefinition(nodes, edges, fittings, Elevation, diameterMm, outputMode, referencePoint,
-            pipingSystemTypeName, pipeTypeName, levelName, segmentFamilies);
+            pipingSystemTypeName, pipeTypeName, levelName, segmentFamilies, junctionId);
     }
 
     internal PipeNode AddNode(Point2D position) { var node = new PipeNode(Guid.NewGuid(), position); _nodes.Add(node); return node; }

@@ -74,6 +74,8 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             floor.LookupParameter("DH_Part")?.Set(slabDef.Part);
             floor.LookupParameter("DH_Zone")?.Set(slabDef.Zone);
 
+            // 만든 바닥 ID 줘야 함. 전에 0 줬음 → 드레인 피트가 엉뚱한 요소 자르려 함.
+            elementId = (int)floor.Id.Value;
             return elementId;
         }
     }

@@ -3,7 +3,9 @@ namespace DHBIMWATER.Core.Geometry;
 /// <summary>드레인 피트 정의를 Void 돌출 형상으로 바꾼다. Floor·DirectShape 두 경로가 함께 쓴다.</summary>
 public static class DrainPitGeometry
 {
-    /// <summary>면 겹침을 피하기 위해 Void 상단이 호스트 상부면을 넘는 길이(mm).</summary>
+    /// <summary>면 겹침을 피하기 위해 Void 상단이 호스트 상부면을 넘는 길이(mm).
+    /// DirectShape 경로(<see cref="ToVoidExtrusion"/>)에서만 쓴다 — Revit Void 인스턴스 배치 경로는
+    /// 사용자 지시로 오버슛 없이 기초 상면 EL에 그대로 놓는다(docs/134).</summary>
     public const double TopOvershootMm = 10;
 
     /// <summary>Void 돌출 정의를 만든다. 바닥에서 위로 깊이와 여유만큼 밀어 올린다.</summary>

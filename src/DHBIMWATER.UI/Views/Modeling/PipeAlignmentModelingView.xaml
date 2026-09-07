@@ -483,13 +483,10 @@
                     <StackPanel>
                         <TextBlock Text="{Binding ResultSummary, Mode=OneWay}" FontWeight="SemiBold" TextWrapping="Wrap"/>
                         <ScrollViewer MaxHeight="110" Margin="0,6,0,0" VerticalScrollBarVisibility="Auto">
-                            <ItemsControl ItemsSource="{Binding ResultWarnings, Mode=OneWay}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding Mode=OneWay}" Foreground="#B26B00" TextWrapping="Wrap" Margin="0,2"/>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
+                            <TextBox Text="{Binding ResultWarningsText, Mode=OneWay}"
+                                     IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                                     Foreground="#B26B00" Background="Transparent" BorderThickness="0"
+                                     Padding="0" IsTabStop="False"/>
                         </ScrollViewer>
                     </StackPanel>
                 </Border>

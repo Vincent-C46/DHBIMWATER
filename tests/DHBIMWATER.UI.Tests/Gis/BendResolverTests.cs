@@ -181,7 +181,7 @@ public class BendResolverTests
     }
 
     [Fact]
-    public void Arc_uses_catalog_external_distance_when_fitting_angle_differs()
+    public void Arc_uses_measured_deflection_external_distance_when_fitting_angle_differs()
     {
         const double actualAngleDeg = 40d;
         const double fittingAngleDeg = 45d;
@@ -194,8 +194,8 @@ public class BendResolverTests
         var arc = BendArcGeometry.ComputeForAlignment(
             origin, dirA, dirB, fittingAngleDeg, actualAngleDeg, radiusMm, 130, 130);
 
-        var tangentMm = BendResolver.TangentLength(radiusMm, fittingAngleDeg);
-        var expectedExternalMm = BendArcGeometry.ExternalDistance(radiusMm, fittingAngleDeg);
+        var tangentMm = BendResolver.TangentLength(radiusMm, actualAngleDeg);
+        var expectedExternalMm = BendArcGeometry.ExternalDistance(radiusMm, actualAngleDeg);
         Assert.Equal(tangentMm / 1000d, arc.ArcStart.DistanceTo(origin), 12);
         Assert.Equal(tangentMm / 1000d, arc.ArcEnd.DistanceTo(origin), 12);
         Assert.Equal(expectedExternalMm, arc.ExternalMm, 10);
@@ -273,7 +273,7 @@ public class BendResolverTests
     }
 
     [Fact]
-    public void Trim_planner_uses_catalog_arc_but_actual_midpoint_orientation()
+    public void Trim_planner_uses_measured_deflection_for_arc_and_midpoint_orientation()
     {
         const double actualAngleDeg = 40d;
         const double fittingAngleDeg = 45d;
@@ -298,9 +298,8 @@ public class BendResolverTests
 
         var placement = Assert.Single(BendTrimPlanner.Plan(alignments, graph, resolutions, snapTolerance).Placements);
 
-        var tangentMm = BendResolver.TangentLength(radiusMm, fittingAngleDeg);
         Assert.Equal(actualAngleDeg, placement.DeflectionDeg, 8);
-        Assert.Equal(tangentMm * Math.Tan(fittingAngleDeg * Math.PI / 720d), placement.Points.ExternalMm, 8);
+        Assert.Equal(BendArcGeometry.ExternalDistance(radiusMm, actualAngleDeg), placement.Points.ExternalMm, 8);
         Assert.Equal(actualAngleDeg / 2d, placement.RotXYDeg[2], 8);
     }
 

@@ -804,6 +804,200 @@ public sealed class PipeLayoutViewModelTests
     }
 
     [Fact]
+    public void DiameterParameterGuess_DeprioritizesRadius_AndTeePrefersMainDiameter()
+    {
+        var parameterNames = new Dictionary<string, IEnumerable<string>>
+        {
+            ["직관 : DN100"] = ["반지름", "직경", "길이"],
+            ["곡관90 : DN100"] = ["반지름", "지름"],
+            ["T형 : DN100"] = ["수평분기_구경", "지관_구경", "반지름", "주관_구경", "직경"],
+            ["밸브 : DN100"] = ["반지름", "DN"]
+        };
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(
+            accessoryNames: ["밸브 : DN100"], parameterNamesByFamily: parameterNames));
+
+        Assert.Equal("직경", vm.DiameterParameterName);
+        Assert.Contains("반지름", vm.LengthParameterNames);
+        Assert.Equal(["반지름", "지름"], vm.BendParameterNames);
+        Assert.Equal(["수평분기_구경", "지관_구경", "반지름", "주관_구경", "직경"], vm.TeeParameterNames);
+        Assert.Equal("주관_구경", vm.TeeDiameterParameterName);
+        Assert.Equal("수평분기_구경", vm.TeeBranchDiameterParameterName);
+
+        vm.SelectedValveFamilyName = "밸브";
+        vm.SelectedFamilyTypeName = "밸브 : DN100";
+
+        Assert.Equal(["반지름", "DN"], vm.ValveParameterNames);
+        Assert.Equal("DN", vm.ValveDiameterParameterName);
+    }
+
+    [Fact]
+    public void DiameterParameterGuess_StaysEmptyWhenOnlyRadiusCandidateExists()
+    {
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(
+            parameterNamesByFamily: new Dictionary<string, IEnumerable<string>>
+            {
+                ["직관 : DN100"] = ["반지름"]
+            }));
+
+        // 반지름은 자동선택하지 않는다(docs/133). 다만 목록에는 그대로 노출해 사용자가 직접 고를 수 있어야 한다.
+        Assert.Null(vm.DiameterParameterName);
+        Assert.Contains("반지름", vm.LengthParameterNames);
+    }
+
+    [Fact]
+    public void BendDiameterParameterGuess_PrefersDiameterNameOverRadiusName()
+    {
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(
+            parameterNamesByFamily: new Dictionary<string, IEnumerable<string>>
+            {
+                ["곡관90 : DN100"] = ["곡관_구경", "곡관_구경반지름", "곡관_각도"]
+            }));
+
+        Assert.Equal("곡관_구경", vm.BendDiameterParameterName);
+        Assert.Contains("곡관_구경반지름", vm.BendParameterNames);
+    }
+
+    [Fact]
+    public void TeeDiameterParameterGuess_StaysEmptyWhenOnlyRadiusCandidatesExist()
+    {
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(
+            parameterNamesByFamily: new Dictionary<string, IEnumerable<string>>
+            {
+                ["T형 : DN100"] = ["주관_구경반지름", "수평분기_구경반지름"]
+            }));
+
+        Assert.Null(vm.TeeDiameterParameterName);
+        Assert.Null(vm.TeeBranchDiameterParameterName);
+    }
+
+    [Fact]
+    public void TeeBranchDiameterParameter_StaysEmptyWhenNoBranchCandidateExists()
+    {
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(
+            parameterNamesByFamily: new Dictionary<string, IEnumerable<string>>
+            {
+                ["T형 : DN100"] = ["공칭지름"]
+            }));
+
+        Assert.Equal("공칭지름", vm.TeeDiameterParameterName);
+        Assert.Null(vm.TeeBranchDiameterParameterName);
+    }
+
+    [Fact]
+    public void ValveFamilySelection_RefreshesDiameterParametersFromFirstType()
+    {
+        var vm = CreateParameterSelectionViewModel();
+
+        Assert.Equal(["자동 DN", "사용자 DN"], vm.ValveParameterNames);
+        Assert.Equal("자동 DN", vm.ValveDiameterParameterName);
+        Assert.Null(vm.SelectedFamilyTypeName);
+    }
+
+    [Fact]
+    public void ValveDiameterParameter_KeepsUserSelectionWhenPlacementTypeChanges()
+    {
+        var vm = CreateParameterSelectionViewModel();
+        vm.ValveDiameterParameterName = "사용자 DN";
+
+        vm.SelectedFamilyTypeName = "밸브A : DN150";
+
+        Assert.Equal("사용자 DN", vm.ValveDiameterParameterName);
+    }
+
+    [Fact]
+    public void ValveDiameterParameter_ReGuessesWhenNewFamilyDoesNotContainUserSelection()
+    {
+        var vm = CreateParameterSelectionViewModel();
+        vm.ValveDiameterParameterName = "사용자 DN";
+
+        vm.SelectedValveFamilyName = "밸브B";
+
+        Assert.Equal(["대체 DN"], vm.ValveParameterNames);
+        Assert.Equal("대체 DN", vm.ValveDiameterParameterName);
+    }
+
+    [Fact]
+    public void BendAndTeeParameters_KeepValidUserSelectionsWhenFamilyChanges()
+    {
+        var parameterNames = new Dictionary<string, IEnumerable<string>>
+        {
+            ["곡관A : DN100"] = ["자동 DN", "사용자 DN", "각도", "사용자 각도"],
+            ["곡관B : DN100"] = ["자동 DN", "사용자 DN", "각도", "사용자 각도"],
+            ["T형A : DN100"] = ["주관_구경", "사용자 DN", "사용자 분기 DN"],
+            ["T형B : DN100"] = ["주관_구경", "사용자 DN", "사용자 분기 DN"]
+        };
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(
+            fittingNames: ["직관 : DN100", "곡관A : DN100", "곡관B : DN100", "T형A : DN100", "T형B : DN100"],
+            parameterNamesByFamily: parameterNames));
+        vm.BendDiameterParameterName = "사용자 DN";
+        vm.BendAngleParameterName = "사용자 각도";
+        vm.TeeDiameterParameterName = "사용자 DN";
+        vm.TeeBranchDiameterParameterName = "사용자 분기 DN";
+
+        vm.BendFamilyTypeName = "곡관B : DN100";
+        vm.TeeFamilyTypeName = "T형B : DN100";
+
+        Assert.Equal("사용자 DN", vm.BendDiameterParameterName);
+        Assert.Equal("사용자 각도", vm.BendAngleParameterName);
+        Assert.Equal("사용자 DN", vm.TeeDiameterParameterName);
+        Assert.Equal("사용자 분기 DN", vm.TeeBranchDiameterParameterName);
+    }
+
+    [Fact]
+    public void FittingParameters_KeepUserSelectionWhenCollectionResetPushesNull()
+    {
+        var parameterNames = new Dictionary<string, IEnumerable<string>>
+        {
+            ["곡관A : DN100"] = ["자동 DN", "사용자 DN", "각도", "사용자 각도"],
+            ["곡관B : DN100"] = ["자동 DN", "사용자 DN", "각도", "사용자 각도"],
+            ["T형A : DN100"] = ["주관_구경", "사용자 DN"],
+            ["T형B : DN100"] = ["주관_구경", "사용자 DN"],
+            ["밸브A : DN100"] = ["자동 DN", "사용자 DN"],
+            ["밸브A : DN150"] = ["자동 DN", "사용자 DN"]
+        };
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(
+            accessoryNames: ["밸브A : DN100", "밸브A : DN150"],
+            fittingNames: ["직관 : DN100", "곡관A : DN100", "곡관B : DN100", "T형A : DN100", "T형B : DN100"],
+            parameterNamesByFamily: parameterNames));
+        vm.BendParameterNames.CollectionChanged += (_, args) =>
+        {
+            if (args.Action != System.Collections.Specialized.NotifyCollectionChangedAction.Reset) return;
+            vm.BendDiameterParameterName = null;
+            vm.BendAngleParameterName = null;
+        };
+        vm.TeeParameterNames.CollectionChanged += (_, args) =>
+        {
+            if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+                 vm.TeeDiameterParameterName = null;
+        };
+        vm.TeeBranchParameterNames.CollectionChanged += (_, args) =>
+        {
+            if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+                vm.TeeBranchDiameterParameterName = null;
+        };
+        vm.ValveParameterNames.CollectionChanged += (_, args) =>
+        {
+            if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+                vm.ValveDiameterParameterName = null;
+        };
+        vm.BendDiameterParameterName = "사용자 DN";
+        vm.BendAngleParameterName = "사용자 각도";
+        vm.TeeDiameterParameterName = "사용자 DN";
+        vm.TeeBranchDiameterParameterName = "사용자 DN";
+        vm.ValveDiameterParameterName = "사용자 DN";
+
+        vm.BendFamilyTypeName = "곡관B : DN100";
+        vm.TeeFamilyTypeName = "T형B : DN100";
+        vm.SelectedFamilyTypeName = "밸브A : DN150";
+
+        Assert.Equal("사용자 DN", vm.BendDiameterParameterName);
+        Assert.Equal("사용자 각도", vm.BendAngleParameterName);
+        Assert.Equal("사용자 DN", vm.TeeDiameterParameterName);
+        Assert.Equal("사용자 DN", vm.TeeBranchDiameterParameterName);
+        Assert.Equal("사용자 DN", vm.ValveDiameterParameterName);
+    }
+
+    [Fact]
     public void FamilyAndParameterDefaults_PreferDhPrefixAndConfiguredKeywords()
     {
         var parameterNames = new Dictionary<string, IEnumerable<string>>
@@ -832,6 +1026,7 @@ public sealed class PipeLayoutViewModelTests
         Draw(vm, new Point2D(0, 0), new Point2D(1000, 0));
         vm.BendDiameterParameterName = "곡관 직경";
         vm.TeeDiameterParameterName = "T형 직경";
+        vm.TeeBranchDiameterParameterName = "T형 분기 직경";
         vm.ValveDiameterParameterName = "밸브 직경";
         PipeNetworkDefinition? request = null;
         vm.CreateModelAction = value => request = value;
@@ -840,6 +1035,7 @@ public sealed class PipeLayoutViewModelTests
 
         Assert.Equal("곡관 직경", request!.SegmentFamilies!.BendDiameterParameterName);
         Assert.Equal("T형 직경", request.SegmentFamilies.TeeDiameterParameterName);
+        Assert.Equal("T형 분기 직경", request.SegmentFamilies.TeeBranchDiameterParameterName);
         Assert.Equal("밸브 직경", request.SegmentFamilies.ValveDiameterParameterName);
     }
 
@@ -1070,6 +1266,19 @@ public sealed class PipeLayoutViewModelTests
     }
 
     private static PipeLayoutViewModel CreateViewModel(IEnumerable<string>? accessoryNames = null) => new(new StubElementTypeQueryRepo(accessoryNames: accessoryNames));
+
+    private static PipeLayoutViewModel CreateParameterSelectionViewModel()
+    {
+        var parameterNames = new Dictionary<string, IEnumerable<string>>
+        {
+            ["밸브A : DN100"] = ["자동 DN", "사용자 DN"],
+            ["밸브A : DN150"] = ["자동 DN", "사용자 DN"],
+            ["밸브B : DN100"] = ["대체 DN"]
+        };
+        return new PipeLayoutViewModel(new StubElementTypeQueryRepo(
+            accessoryNames: ["밸브A : DN100", "밸브A : DN150", "밸브B : DN100"],
+            parameterNamesByFamily: parameterNames));
+    }
 
     private sealed class StubElementTypeQueryRepo : IElementTypeQueryRepo
     {

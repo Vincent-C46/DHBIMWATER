@@ -113,6 +113,9 @@ public sealed class ModelPipeAlignmentUseCase
             (bendPlan, bendWarnings) = UsesBends(request.OutputMode)
                 ? PlanBends(alignments, stepVertices, request, settings, settingsSource == BendSettingsSource.BuiltInDefault)
                 : (null, Array.Empty<string>());
+        IReadOnlyList<string> infeasibleWarnings = Array.Empty<string>();
+        if (bendPlan is not null)
+            (bendPlan, infeasibleWarnings) = RemoveInfeasibleBends(bendPlan, alignments, origin);
         ReducerTrimPlan? reducerPlan;
         using (PlacementProfiler.Step("02b 이경관 계획"))
             reducerPlan = UsesBends(request.OutputMode)
@@ -181,7 +184,7 @@ public sealed class ModelPipeAlignmentUseCase
                 using (PlacementProfiler.Step("09 트랜잭션 Commit")) _transaction.Commit();
                 var suppressedWarningSummary = SummarizeSuppressedWarnings(_transaction.SuppressedWarnings);
                 return new PipeAlignmentModelingResult(request.OutputMode, count, skipped,
-                    loaded.Warnings.Concat(offset.Warnings).Concat(elevationWarnings).Concat(reducerPlan?.Warnings ?? Array.Empty<string>()).Concat(repoWarnings).Concat(bendResult.Warnings).Concat(reducerResult.Warnings)
+                    loaded.Warnings.Concat(offset.Warnings).Concat(elevationWarnings).Concat(infeasibleWarnings).Concat(reducerPlan?.Warnings ?? Array.Empty<string>()).Concat(repoWarnings).Concat(bendResult.Warnings).Concat(reducerResult.Warnings)
                         .Concat(FindOuterDiameterMismatches(straightResult, bendResult)).Concat(suppressedWarningSummary).ToList(),
                     bendResult.Count);
             }
@@ -279,6 +282,40 @@ public sealed class ModelPipeAlignmentUseCase
         return AddOuterDiameterFallbackWarning(_bendDirectShapeRepo.Place(bendPlans, origin, infoContext, progress), outerDiameterFallbacks);
     }
 
+    private static (BendTrimPlan Plan, IReadOnlyList<string> Warnings) RemoveInfeasibleBends(
+        BendTrimPlan plan, IReadOnlyList<PipeAlignment> alignments, AlignmentPlacementOrigin origin)
+    {
+        var profiles = new Dictionary<int, AlignmentStationProfile>();
+        var impossible = plan.Placements.Select(placement =>
+        {
+            var outerDiameterMm = origin.StraightPipeSpecs.Find(placement.PipeKind, placement.DiameterMm)?.OuterDiameterMm
+                ?? origin.StraightPipeSpecs.FindOuterDiameterByDiameter(placement.DiameterMm)?.OuterDiameterMm
+                ?? placement.DiameterMm;
+            var stationText = GetNodeStationText(placement, alignments, profiles);
+            return (Placement: placement, Feasibility: BendArcGeometry.EvaluatePlacementFeasibility(
+                placement.NodeId, stationText, placement.DeflectionDeg, placement.AngleDeg,
+                placement.CenterlineRadiusMm, outerDiameterMm, placement.UpstreamLegMm, placement.DownstreamLegMm));
+        })
+            .Where(x => !x.Feasibility.IsPlaceable)
+            .ToList();
+        if (impossible.Count == 0) return (plan, Array.Empty<string>());
+
+        var excluded = impossible.Select(x => (x.Placement.AlignmentIndex, x.Placement.VertexIndex)).ToHashSet();
+        var plans = plan.Plans.Select(alignmentPlan =>
+        {
+            var trims = alignmentPlan.Trims.ToArray();
+            foreach (var (_, vertexIndex) in excluded.Where(x => x.AlignmentIndex == alignmentPlan.AlignmentIndex))
+                trims[vertexIndex] = VertexTrim.None;
+            return alignmentPlan with { Trims = trims };
+        }).ToList();
+        var placements = plan.Placements.Where(x => !excluded.Contains((x.AlignmentIndex, x.VertexIndex))).ToList();
+        var details = string.Join(", ", impossible.Take(10).Select(x =>
+            $"절점 {x.Feasibility.NodeId}(측점 {x.Feasibility.NodeStationText}, 실측 {x.Feasibility.AlignmentDeflectionDeg:0.##}° / 지정 {x.Feasibility.StandardAngleDeg:0.##}°, {x.Feasibility.FailureReason})"));
+        if (impossible.Count > 10) details += $", 외 {impossible.Count - 10}건";
+        var warning = $"배치할 수 없는 곡관 {impossible.Count}곳은 건너뛰고 직관을 절점까지 붙였습니다: {details}. 엑셀 곡관유형 열의 지정각이 실제 편각과 맞는지 확인하세요.";
+        return (plan with { Plans = plans, Placements = placements }, new[] { warning });
+    }
+
     private static (IReadOnlyList<AdaptiveBendPlacementPlan> Plans, HashSet<(string PipeKind, double DiameterMm, string SourceKind, double OuterDiameterMm)> Fallbacks) BuildBendPlans(BendTrimPlan plan, IReadOnlyList<PipeAlignment> alignments, AlignmentPlacementOrigin origin, PipeAlignmentModelingRequest request, string familyName, string typeName, bool isAdaptive)
     {
         var fallbacks = new HashSet<(string PipeKind, double DiameterMm, string SourceKind, double OuterDiameterMm)>();
@@ -288,9 +325,7 @@ public sealed class ModelPipeAlignmentUseCase
             var alignment = alignments[x.AlignmentIndex];
             if (!profiles.TryGetValue(x.AlignmentIndex, out var profile)) profiles[x.AlignmentIndex] = profile = new AlignmentStationProfile(alignment);
             var nodeStationM = profile.StationAt(profile.DistanceAtVertex(x.VertexIndex));
-            var nodeStationText = alignment.VertexStationTexts is { } stationTexts && x.VertexIndex >= 0 && x.VertexIndex < stationTexts.Count && !string.IsNullOrWhiteSpace(stationTexts[x.VertexIndex])
-                ? stationTexts[x.VertexIndex]!
-                : FormatStation(nodeStationM);
+            var nodeStationText = GetNodeStationText(x, alignments, profiles);
             var spec = origin.StraightPipeSpecs.Find(x.PipeKind, x.DiameterMm);
             var outerDiameterMm = spec?.OuterDiameterMm;
             if (outerDiameterMm is null && origin.StraightPipeSpecs.FindOuterDiameterByDiameter(x.DiameterMm) is { } fallback)
@@ -305,6 +340,18 @@ public sealed class ModelPipeAlignmentUseCase
                 nodeStationM - x.UpstreamLegMm / 1000d, nodeStationM + x.DownstreamLegMm / 1000d, nodeStationText);
         }).ToList();
         return (plans, fallbacks);
+    }
+
+    private static string GetNodeStationText(BendPlacement placement, IReadOnlyList<PipeAlignment> alignments,
+        Dictionary<int, AlignmentStationProfile> profiles)
+    {
+        var alignment = alignments[placement.AlignmentIndex];
+        if (alignment.VertexStationTexts is { } stationTexts && placement.VertexIndex >= 0
+            && placement.VertexIndex < stationTexts.Count && !string.IsNullOrWhiteSpace(stationTexts[placement.VertexIndex]))
+            return stationTexts[placement.VertexIndex]!;
+        if (!profiles.TryGetValue(placement.AlignmentIndex, out var profile))
+            profiles[placement.AlignmentIndex] = profile = new AlignmentStationProfile(alignment);
+        return FormatStation(profile.StationAt(profile.DistanceAtVertex(placement.VertexIndex)));
     }
 
     private static AdaptiveBendPlacementResult AddOuterDiameterFallbackWarning(AdaptiveBendPlacementResult result, HashSet<(string PipeKind, double DiameterMm, string SourceKind, double OuterDiameterMm)> outerDiameterFallbacks)

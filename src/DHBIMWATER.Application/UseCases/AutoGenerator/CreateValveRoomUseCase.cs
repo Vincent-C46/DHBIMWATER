@@ -63,21 +63,12 @@ public sealed class CreateValveRoomUseCase
 
                     foreach (var pit in request.DrainPits)
                     {
-                        var foundationDepth = Math.Min(pit.Depth, dto.ProfileSpecDto.FoundationThickness);
-                        var warning = _drainPitVoidCommand.CreateDrainPitVoid(foundationSlabId, pit with { Depth = foundationDepth }, mapping);
+                        var hosts = new List<int> { foundationSlabId };
+                        if (pit.Depth > dto.ProfileSpecDto.FoundationThickness && slabIds.TryGetValue("버림콘크리트", out var leanId))
+                            hosts.Add(leanId);
+                        var warning = _drainPitVoidCommand.CreateDrainPitVoid(
+                            hosts, slabLevels[ValveRoomGeometryCalculator.BaseLevelName], pit, mapping);
                         if (warning != null) pitWarnings.Add(warning);
-                        var remainingDepth = pit.Depth - dto.ProfileSpecDto.FoundationThickness;
-                        if (remainingDepth > 0 && slabIds.TryGetValue("버림콘크리트", out var leanId))
-                        {
-                            var leanDepth = Math.Min(remainingDepth, dto.ProfileSpecDto.PlainConcreteThickness);
-                            var leanPit = pit with
-                            {
-                                TopCenter = pit.TopCenter with { Z = ValveRoomGeometryCalculator.BaseElevation(dto) - dto.ProfileSpecDto.FoundationThickness },
-                                Depth = leanDepth
-                            };
-                            warning = _drainPitVoidCommand.CreateDrainPitVoid(leanId, leanPit, mapping);
-                            if (warning != null) pitWarnings.Add(warning);
-                        }
                     }
                 }
                 foreach (var foundation in ValveRoomGeometryCalculator.CalculateFoundations(dto))

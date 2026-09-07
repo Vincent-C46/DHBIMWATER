@@ -41,6 +41,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IPipeCommandRepo, RevitPipeMepCommandRepo>();
         services.AddTransient<IPipeCommandRepo, RevitPipeGenericModelCommandRepo>();
         services.AddTransient<IPipeCommandRepo, RevitPipeSegmentCommandRepo>();
+        services.AddTransient<IPipeMaterialScheduleRepo, RevitPipeMaterialScheduleRepo>();
+        services.AddTransient<IPipeMaterialDraftingRepo, RevitPipeMaterialDraftingRepo>();
         services.AddTransient<IBeamCommandRepo, RevitBeamCommandRepo>();
         services.AddTransient<IColumnCommandRepo, RevitColumnCommandRepo>();
         services.AddTransient<ISlabCommandRepo, RevitSlabCommandRepo>();
@@ -112,6 +114,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IOpeningCommandRepo, MockOpeningCommandRepo>();
         services.AddTransient<IDirectShapeCommandRepo, MockDirectShapeCommandRepo>();
         services.AddTransient<IViewCommandRepo, MockViewCommandRepo>();
+        services.AddTransient<IPipeMaterialScheduleRepo, MockPipeMaterialScheduleRepo>();
+        services.AddTransient<IPipeMaterialDraftingRepo, MockPipeMaterialDraftingRepo>();
 
         services.AddTransient<ISetParameterRepo, MockSetParameterRepo>();
         services.AddTransient<ISharedParameterRepository, MockSharedParameterRepository>();
