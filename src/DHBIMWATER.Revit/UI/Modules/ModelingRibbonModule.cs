@@ -11,7 +11,7 @@ namespace DHBIMWATER.Revit.UI.Modules
             RibbonPanel panel = app.CreateRibbonPanel(ribbonTabName, "Modeling");
 
             // 버튼이름, 리본에 표시될 텍스트, 어셈블리 경로, 실행될 커맨드 클래스 풀네임
-            PushButtonData reservoirBtn = new PushButtonData("ReservoirCommand", "배수지\n모델링", Assembly.GetExecutingAssembly().Location, RevitCommandType<WaterTankCommand>.FullName);
+            //PushButtonData reservoirBtn = new PushButtonData("ReservoirCommand", "배수지\n모델링", Assembly.GetExecutingAssembly().Location, RevitCommandType<WaterTankCommand>.FullName);
             PushButtonData pumpingStationBtn = new PushButtonData("PumpingStationCommand", "펌프장\n모델링", Assembly.GetExecutingAssembly().Location, RevitCommandType<PumpingStationCommand>.FullName);
             PushButtonData pipingBtn = new PushButtonData("PipeAlignmentModelingCommand", "관로\n모델링", Assembly.GetExecutingAssembly().Location, RevitCommandType<PipeAlignmentModelingCommand>.FullName);
 
@@ -30,7 +30,7 @@ namespace DHBIMWATER.Revit.UI.Modules
                 ToolTip = "배치된 관로·가변패밀리의 시점·종점 측점을 표에서 고치고, 바뀐 것만 다시 계산합니다."
             };
 
-            reservoirBtn.LargeImage = RibbonButtonImages.GetIcon("water-tap.png");
+            //reservoirBtn.LargeImage = RibbonButtonImages.GetIcon("water-tap.png");
             pumpingStationBtn.LargeImage = RibbonButtonImages.GetIcon("pump.png");
             pipingBtn.LargeImage = RibbonButtonImages.GetIcon("pipe_2.png");
 
@@ -42,7 +42,7 @@ namespace DHBIMWATER.Revit.UI.Modules
 
             return
             [
-                panel.AddItem(reservoirBtn),
+                //panel.AddItem(reservoirBtn),
                 panel.AddItem(pumpingStationBtn),
                 panel.AddItem(pipingBtn),
                 panel.AddItem(valveRoomBtn),
