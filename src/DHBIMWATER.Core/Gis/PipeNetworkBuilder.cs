@@ -1,4 +1,5 @@
 using DHBIMWATER.Core.Geometry;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Core.Gis;
 
@@ -15,7 +16,7 @@ public static class PipeNetworkBuilder
 
     public static PipeNetworkGraph Build(IReadOnlyList<PipeAlignment> alignments, double snapTolerance = DefaultSnapToleranceM)
     {
-        if (snapTolerance <= 0) throw new ArgumentOutOfRangeException(nameof(snapTolerance), "스냅 허용오차는 0보다 커야 합니다.");
+        if (snapTolerance <= 0) throw new DhbimwaterException(ErrorCodes.PA_InvalidSnapTolerance, "스냅 허용오차는 0보다 커야 합니다.");
 
         var segments = CollectSegments(alignments, snapTolerance);
         // 분할점 수집과 노드 병합은 3D 거리 기준이다. 표고가 다른 입체교차는 허용오차를 벗어나므로 분기로 잡히지 않는다.

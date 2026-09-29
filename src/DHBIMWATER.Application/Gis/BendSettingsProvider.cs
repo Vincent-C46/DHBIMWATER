@@ -27,7 +27,9 @@ public sealed class BendSettingsProvider
 
     public BendSettingsResolution Load()
     {
-        if (_project.Load() is { } project) return new(project, BendSettingsSource.Project);
-        return new(BendSettings.Default, BendSettingsSource.BuiltInDefault);
+        // 강관 행이 없는 저장본(강관 카탈로그 도입 전 프로젝트)은 기본 강관 행을 병합한다. [기본값 복원]을 강요하면
+        // 사용자가 손본 주철관 값이 날아가기 때문이다(docs/211 § E-1). Default는 이미 포함하므로 그대로 돌아온다.
+        if (_project.Load() is { } project) return new(project.WithSteelDefaults(), BendSettingsSource.Project);
+        return new(BendSettings.Default.WithSteelDefaults(), BendSettingsSource.BuiltInDefault);
     }
 }

@@ -17,6 +17,7 @@ namespace DHBIMWATER.Core.Structures
         public string LevelName { get; init; } = string.Empty;
 
         public int ZJustification { get; set; } = 2; // Z맞춤: 상단(0), 중심(1), 원점 (2), 하단(3)
+        public double CrossSectionRotationDeg { get; set; } = 0; // 단면 회전(도). 0이면 Revit 기본값을 그대로 둔다.
         public string Category { get; set; } = "보";
         public string ElementCode { get; set; } = string.Empty;
         public string Zone { get; set; } = string.Empty;

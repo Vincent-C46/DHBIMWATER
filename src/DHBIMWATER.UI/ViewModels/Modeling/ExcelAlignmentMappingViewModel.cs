@@ -1,3 +1,4 @@
+using DHBIMWATER.UI.Utilities;
 using System.Collections.ObjectModel;
 using System.Data;
 using System.Windows.Input;
@@ -106,7 +107,7 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
 
     public int CheckedCount => Sheets.Count(x => x.IsChecked);
     public bool CanConfirm => CheckedCount > 0 && XColumn is not null && YColumn is not null && ZColumn is not null;
-    public string StatusText => $"체크한 시트 {CheckedCount}개" + (CanConfirm ? " · X·Y·Z 매핑 완료" : " · X·Y·Z 열을 모두 지정하세요");
+    public string StatusText => $"시트 {CheckedCount}개" + (CanConfirm ? " · X·Y·Z 지정 완료" : " · X·Y·Z 미지정");
 
     public ICommand OkCommand { get; }
     public ICommand CancelCommand { get; }
@@ -123,13 +124,15 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
     private void RefreshPreview()
     {
         var previousX = XColumn?.Index; var previousY = YColumn?.Index; var previousZ = ZColumn?.Index;
-        var previousStation = StationColumn?.Index; var previousBendKind = BendKindColumn?.Index; var previousVertexDiameter = VertexDiameterColumn?.Index;
+        // 선택 열이 "(사용 안 함)"(-1)이면 이전 값이 없는 것으로 보고 다시 추정한다. 헤더가 4행인 코리더 점 보고서는
+        // 처음(헤더 1행) 추정이 실패해 -1로 굳고, 헤더 행을 4로 바꿔도 Station·곡관유형·호칭지름이 매핑되지 않았다.
+        var previousStation = UsedIndex(StationColumn); var previousBendKind = UsedIndex(BendKindColumn); var previousVertexDiameter = UsedIndex(VertexDiameterColumn);
         ColumnOptions.Clear(); OptionalColumnOptions.Clear();
         if (PreviewSheet is null || HeaderRow < 1) { _previewTable = new DataTable(); OnPropertyChanged(nameof(PreviewView)); XColumn = YColumn = ZColumn = StationColumn = BendKindColumn = VertexDiameterColumn = null; return; }
 
         IReadOnlyList<IReadOnlyList<string?>> rows;
         try { rows = _reader.PreviewRows(FilePath, PreviewSheet.Name, Math.Max(HeaderRow, DataStartRow) + 3); }
-        catch (Exception ex) { _dialog.Warn("엑셀 미리보기", ex.Message); return; }
+        catch (Exception ex) { _dialog.Warn("엑셀 미리보기", UiErrors.Report("PipeAlignment.Excel", ex)); return; }
 
         // 미리보기는 엑셀처럼 열 문자(A, B, C ...)를 그대로 헤더로 쓴다 — 실제 헤더 텍스트는 중복·공백일 수 있어 DataTable 열 이름으로 못 쓴다.
         var table = new DataTable();
@@ -202,13 +205,15 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
     private static readonly string[] YKeywords = ["Y", "NORTH", "NORTHING", "N/S", "남북", "남/북",];
     private static readonly string[] ZKeywords = ["Z", "표고", "고도", "EL", "ELEV", "LEVEL", "높이"];
     private static readonly string[] StationKeywords = ["STA", "STATION", "측점", "측점번호", "측점명", "누가거리", "CHAINAGE", "NO"];
-    private static readonly string[] BendKindKeywords = ["곡관유형"];
+    private static readonly string[] BendKindKeywords = ["곡관유형", "곡관종류", "곡관", "BEND"];
     private static readonly string[] VertexDiameterKeywords = ["호칭지름(DN)", "호칭지름\n(DN)", "호칭지름", "DN", "직경", "관경", "구경", "호구경"];
 
     private ExcelColumnOption OptionalMatch(ExcelColumnOption? option)
         => option is null
             ? OptionalColumnOptions.First()
             : OptionalColumnOptions.FirstOrDefault(x => x.Index == option.Index) ?? OptionalColumnOptions.First();
+
+    private static int? UsedIndex(ExcelColumnOption? option) => option is { Index: >= 0 } ? option.Index : null;
 
     private ExcelColumnOption? FindColumn(int index) => ColumnOptions.FirstOrDefault(x => x.Index == index);
     private ExcelColumnOption FindOptionalColumn(int? index) => index is { } value

@@ -2,6 +2,7 @@ using DHBIMWATER.Application.DTOs.Gis;
 using DHBIMWATER.Application.Gis;
 using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Core.Gis;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Application.UseCases.Gis;
 
@@ -19,7 +20,7 @@ public sealed class AnalyzePipeNetworkUseCase
 
     public PipeNetworkDiagnosisResult Execute(PipeNetworkDiagnosisRequest request)
     {
-        if (request.SnapToleranceMm <= 0) throw new ArgumentOutOfRangeException(nameof(request.SnapToleranceMm));
+        if (request.SnapToleranceMm <= 0) throw new DhbimwaterException(ErrorCodes.PA_InvalidSnapTolerance, "스냅 허용오차는 0보다 커야 합니다.");
 
         var loaded = _loader.Load(request.Files);
         var warnings = loaded.Warnings.ToList();

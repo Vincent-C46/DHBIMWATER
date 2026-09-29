@@ -1,10 +1,11 @@
 using DHBIMWATER.Application.Interfaces;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Mock;
 
 public sealed class MockPipeMaterialScheduleRepo : IPipeMaterialScheduleRepo
 {
-    public PipeMaterialScheduleScan Scan() => new([], 0, 0);
-    public bool ScheduleExists(string scheduleName) => false;
+    public IReadOnlyList<PipeMaterialPart> GetParts() => [];
+    public IReadOnlySet<string> GetExistingViewNames() => new HashSet<string>();
     public void CreateSchedule(string scheduleName, string junctionId) { }
 }

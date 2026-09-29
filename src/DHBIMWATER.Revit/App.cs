@@ -1,4 +1,5 @@
 ﻿using Autodesk.Revit.UI;
+using DHBIMWATER.Revit.Commands;
 using DHBIMWATER.Revit.UI;
 using System.Reflection;
 
@@ -35,12 +36,17 @@ namespace DHBIMWATER.Revit
             // Revit UI 등록
             RibbonBuilder.CreateRibbonPanel(application);
 
+            // 밸브실 창의 유형 목록 자동 갱신용 구독. DocumentChanged는 Revit 세션 수명의 이벤트라
+            // 명령마다 걸고 창을 닫을 때 해제하면 API 컨텍스트가 아닌 곳에서 해제하게 된다(docs/157 § B).
+            application.ControlledApplication.DocumentChanged += ValveRoomRefreshSubscription.OnDocumentChanged;
+
             return Result.Succeeded;
         }
 
         public Result OnShutdown(UIControlledApplication application)
         {
             // 종료 시 정리 작업
+            application.ControlledApplication.DocumentChanged -= ValveRoomRefreshSubscription.OnDocumentChanged;
             return Result.Succeeded;
         }
 

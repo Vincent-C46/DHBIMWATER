@@ -1,4 +1,5 @@
 using DHBIMWATER.Core.Geometry;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Core.Gis;
 
@@ -19,7 +20,7 @@ public static class ReducerTrimPlanner
     {
         ArgumentNullException.ThrowIfNull(alignments);
         ArgumentNullException.ThrowIfNull(specSource);
-        if (snapTolerance <= 0d) throw new ArgumentOutOfRangeException(nameof(snapTolerance));
+        if (snapTolerance <= 0d) throw new DhbimwaterException(ErrorCodes.PA_InvalidSnapTolerance, "스냅 허용오차는 0보다 커야 합니다.");
 
         var plans = new List<IReadOnlyList<VertexTrim>>(alignments.Count);
         var placements = new List<ReducerPlacement>();
@@ -29,6 +30,8 @@ public static class ReducerTrimPlanner
         double? shortStepBodyLengthMm = null;
         var shortSpacingCount = 0;
         double? shortSpacingBodyLengthMm = null;
+        // 곡관과 같은 절점에서 DN이 바뀌면 곡관(큰 DN)만 두고 이경관은 생략한다 — 현행 동작 유지, 경고만 낸다(docs/215 § E).
+        var bendOverlapCount = 0;
 
         for (var a = 0; a < alignments.Count; a++)
         {
@@ -45,7 +48,11 @@ public static class ReducerTrimPlanner
                 if (!AlignmentDiameterProfile.ChangesAtVertex(alignment, v)) continue;
                 var upstreamVertex = steps?.Contains(v) == true ? v - 1 : v;
                 if (bendTrims is not null && ((v < bendTrims.Count && !bendTrims[v].IsEmpty)
-                    || (upstreamVertex < bendTrims.Count && !bendTrims[upstreamVertex].IsEmpty))) continue;
+                    || (upstreamVertex < bendTrims.Count && !bendTrims[upstreamVertex].IsEmpty)))
+                {
+                    bendOverlapCount++;
+                    continue;
+                }
 
                 var upstreamDiameter = AlignmentDiameterProfile.DiameterAtVertex(alignment, v - 1);
                 var downstreamDiameter = AlignmentDiameterProfile.DiameterAtVertex(alignment, v);
@@ -72,8 +79,9 @@ public static class ReducerTrimPlanner
                 placements.Add(new ReducerPlacement(a, v,
                     Move(vertices[upstreamVertex], upstream, reachM), Move(vertices[v], downstream, reachM),
                     upstreamDiameter, downstreamDiameter, alignment.PipeKind, spec.BodyLengthMm, spec.Alignment,
-                    stations.StationAt(midpointDistance) - halfLengthM,
-                    stations.StationAt(midpointDistance) + halfLengthM, downstream));
+                    // 시·종점 위치(3D 거리)를 평면 측점으로 환산한다(docs/215 § B-2).
+                    stations.StationAt(midpointDistance - halfLengthM),
+                    stations.StationAt(midpointDistance + halfLengthM), downstream));
                 if (vertices[upstreamVertex - 1].DistanceTo(vertices[upstreamVertex]) < reachM
                     || vertices[v].DistanceTo(vertices[v + 1]) < reachM)
                 {
@@ -93,6 +101,8 @@ public static class ReducerTrimPlanner
             warnings.Add($"이경관 몸통(S={shortStepBodyLengthMm:0.##}mm)이 기준면 단차보다 짧아 DN 변경 지점 {shortStepCount}곳에 이경관을 배치하지 못했습니다.");
         if (shortSpacingCount > 0)
             warnings.Add($"이경관 몸통(S={shortSpacingBodyLengthMm:0.##}mm)이 인접 정점 간격보다 길어 직관이 생기지 않는 구간이 {shortSpacingCount}곳 있습니다.");
+        if (bendOverlapCount > 0)
+            warnings.Add($"곡관과 같은 절점에서 DN이 바뀌어 이경관을 생략한 곳 {bendOverlapCount}곳 — 곡관은 큰 DN으로 배치했습니다.");
         return new ReducerTrimPlan(plans, placements, warnings);
     }
 

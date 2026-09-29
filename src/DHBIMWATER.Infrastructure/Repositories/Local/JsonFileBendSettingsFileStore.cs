@@ -33,7 +33,10 @@ public sealed class JsonFileBendSettingsFileStore : IBendSettingsFileStore
                 new BendFittingCatalog(dto.Fittings),
                 string.IsNullOrWhiteSpace(dto.ActiveJointType) ? JointTypeCatalog.KpMechanical : dto.ActiveJointType,
                 dto.ActiveBendConnection,
-                form);
+                form,
+                dto.UseRestraintGland,
+                // 강관 곡관 종류 필드가 없는 구 파일은 F12로 읽는다(docs/211 § C-8).
+                dto.ActiveSteelFittingClass ?? SteelFittingClass.F12);
         }
         catch (JsonException ex)
         {
@@ -56,7 +59,9 @@ public sealed class JsonFileBendSettingsFileStore : IBendSettingsFileStore
             ActiveJointType = settings.ActiveJointType,
             ApplicationMode = settings.ApplicationMode,
             ActiveBendConnection = settings.ActiveBendConnection,
-            ActiveBendForm = settings.ActiveBendForm
+            ActiveBendForm = settings.ActiveBendForm,
+            UseRestraintGland = settings.UseRestraintGland,
+            ActiveSteelFittingClass = settings.ActiveSteelFittingClass
         };
         File.WriteAllText(path, JsonSerializer.Serialize(dto, JsonOptions));
     }
@@ -70,5 +75,9 @@ public sealed class JsonFileBendSettingsFileStore : IBendSettingsFileStore
         public JointApplicationMode ApplicationMode { get; set; }
         public BendConnection ActiveBendConnection { get; set; } = BendConnection.Socket;
         public BendForm? ActiveBendForm { get; set; }
+        /// <summary>구 파일에는 없는 값이라 기본 false로 읽힌다(docs/166 § 11-4).</summary>
+        public bool UseRestraintGland { get; set; }
+        /// <summary>강관 곡관 종류(F12/F15/F20). 구 파일에는 없어 null → F12(docs/211 § C-8).</summary>
+        public SteelFittingClass? ActiveSteelFittingClass { get; set; }
     }
 }

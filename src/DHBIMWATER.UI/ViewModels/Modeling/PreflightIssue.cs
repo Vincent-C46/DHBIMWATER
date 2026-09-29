@@ -5,4 +5,4 @@ public sealed record PreflightIssue(PreflightSeverity Severity, string Message, 
 
 public enum PreflightSeverity { Blocking, Warning }
 
-public enum PipeAlignmentTab { Input, OutputMode, SpecMapping, Direction, Diagnosis }
+public enum PipeAlignmentTab { Input, OutputMode, SpecMapping, Direction, Diagnosis, Exclusion }

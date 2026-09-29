@@ -1,4 +1,4 @@
-using DHBIMWATER.Application.DTOs.Revit.Reservoir;
+﻿using DHBIMWATER.Application.DTOs.Revit.Reservoir;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.UI.ViewModels.Modeling;
 using System.Reflection;
@@ -84,8 +84,13 @@ public class WaterTankViewModelTests
         public IEnumerable<string> GetSlabTypeNames() => Array.Empty<string>();
         public IEnumerable<string> GetWallTypeNames() => Array.Empty<string>();
         public IEnumerable<string> GetColumnTypeNames() => new[] { "Column" };
+        public IEnumerable<string> GetColumnFamilyTypeNames() => new[] { "Column" };
         public IEnumerable<string> GetBeamTypeNames() => new[] { "Beam" };
+        public IEnumerable<string> GetConcreteColumnTypeNames() => new[] { "Column" };
+        public IEnumerable<string> GetConcreteBeamTypeNames() => new[] { "Beam" };
+        public IEnumerable<string> GetStructuralFramingFamilyTypeNames() => new[] { "Beam 패밀리 : Beam" };
         public IEnumerable<string> GetAdaptiveComponentTypeNames() => Array.Empty<string>();
+        public int? GetFamilyTypeCategoryId(string familyTypeName) => null;
         public IEnumerable<string> GetAdaptiveInstanceParameterNames(string familyTypeName) => Array.Empty<string>();
         public int GetAdaptiveBendPointCount(string familyTypeName) => -1;
         public IEnumerable<string> GetPipeAccessoryTypeNames() => Array.Empty<string>();
@@ -93,10 +98,15 @@ public class WaterTankViewModelTests
         public IEnumerable<string> GetPipeAccessoryInstanceParameterNames(string familyTypeName) => Array.Empty<string>();
         public IEnumerable<string> GetGenericModelTypeNames() => Array.Empty<string>();
         public IEnumerable<string> GetBeamInstanceParameterNames(string beamTypeName) => Array.Empty<string>();
+        public double GetStructuralFramingSectionWidthMm(string familyTypeName) => 400;
+        public (double WidthX, double DepthY) GetStructuralColumnSectionSizeMm(string familyTypeName) => (400, 400);
         public IEnumerable<string> GetPipingSystemTypeNames() => Array.Empty<string>();
         public IEnumerable<string> GetPipeTypeNames() => Array.Empty<string>();
         public IEnumerable<string> GetLevelNames() => Array.Empty<string>();
         public IEnumerable<string> GetFoundationTypeNames() => Array.Empty<string>();
+        public IEnumerable<string> GetPipeAccessoryNumericInstanceParameterNames(string familyTypeName) => GetPipeAccessoryInstanceParameterNames(familyTypeName);
+        public IReadOnlyList<DHBIMWATER.Application.DTOs.Revit.PipeAccessoryTypeParameterDto> GetPipeAccessoryTypeLengthParameters(string familyTypeName) => [];
+        public void InvalidateFamilyCaches() { }
     }
 
     private sealed class StubDialogService : IDialogService

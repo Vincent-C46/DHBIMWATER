@@ -1,3 +1,4 @@
+using DHBIMWATER.Shared.Errors;
 namespace DHBIMWATER.Core.Piping;
 
 /// <summary>엣지 축(시작점부터의 거리, mm) 위에서 관을 놓을 수 없는 구간 하나.
@@ -40,11 +41,11 @@ public static class PipeSegmentPlan
         double minSegmentMm = MinSegmentMm)
     {
         if (!double.IsFinite(edgeLengthMm) || edgeLengthMm <= 0)
-            throw new ArgumentOutOfRangeException(nameof(edgeLengthMm), "엣지 길이는 0보다 큰 유한한 값이어야 합니다.");
+            throw new DhbimwaterException(ErrorCodes.PL_InvalidEdgeLength, "엣지 길이는 0보다 큰 유한한 값이어야 합니다.");
         if (!double.IsFinite(straightLengthMm) || straightLengthMm <= 0)
-            throw new ArgumentOutOfRangeException(nameof(straightLengthMm), "직관 길이는 0보다 큰 유한한 값이어야 합니다.");
+            throw new DhbimwaterException(ErrorCodes.PL_InvalidStraightLength, "직관 길이는 0보다 큰 유한한 값이어야 합니다.");
         if (!double.IsFinite(minSegmentMm) || minSegmentMm < 0)
-            throw new ArgumentOutOfRangeException(nameof(minSegmentMm), "최소 조각 길이는 0 이상이어야 합니다.");
+            throw new DhbimwaterException(ErrorCodes.PL_InvalidMinPieceLength, "최소 조각 길이는 0 이상이어야 합니다.");
 
         var segments = new List<PipeSegmentPlacement>();
         var warnings = new List<string>();

@@ -1,3 +1,4 @@
+using DHBIMWATER.Shared.Errors;
 namespace DHBIMWATER.Core.Gis;
 
 /// <summary>
@@ -14,6 +15,8 @@ public sealed class JointDeflectionRule : IBendingRule
     /// <summary>덕타일 표준 곡관 각도. 다른 관종은 이 목록을 쓰지 않는다.</summary>
     public static IReadOnlyList<double> StandardAngles { get; } = new[] { 11.25, 22.5, 45d, 90d };
 
+    IReadOnlyList<double> IBendingRule.StandardAngles => StandardAngles;
+
     /// <summary>표에서 유효 허용굴곡을 조회한다. 판정 계산은 하지 않는다.</summary>
     public static double? GetAllowableDeflection(JointDeflectionTable table, string jointType, double dn, JointApplicationMode mode)
         => table.EffectiveAllowableFor(jointType, dn, mode);
@@ -28,7 +31,7 @@ public sealed class JointDeflectionRule : IBendingRule
     public BendResolution Resolve(NodeClassification node, BendSettings settings, double? forcedAngleDeg)
     {
         if (node.Kind != NodeKind.Bend)
-            throw new ArgumentException("곡관 판정은 Bend 절점에서만 정의된다.", nameof(node));
+            throw new DhbimwaterException(ErrorCodes.PA_Internal, "곡관 판정은 Bend 절점에서만 정의된다.");
 
         var actual = node.DeflectionDeg;
         var jointType = settings.ActiveJointType;
@@ -42,7 +45,7 @@ public sealed class JointDeflectionRule : IBendingRule
         if (forcedAngleDeg is null && hasDeflectionSetting && actual <= effective + Epsilon)
             return Empty(node, BendResolutionKind.None, actual, 0d, singleAllowable, actual, jointType, settings.ApplicationMode, effective, true);
 
-        var availableAngles = BendFittingCatalog.AnglesFor(settings.ActiveBendConnection);
+        var availableAngles = BendFittingCatalog.AnglesFor(Material, settings.ActiveBendConnection);
         var acceptable = forcedAngleDeg is null ? availableAngles
             .Select(angle => new { Angle = angle, Residual = Math.Abs(actual - angle) })
             .Where(x => hasDeflectionSetting && EvaluateFitting(actual, x.Angle, effective))

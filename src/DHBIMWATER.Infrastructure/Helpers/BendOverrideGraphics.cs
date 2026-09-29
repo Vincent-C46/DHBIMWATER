@@ -19,7 +19,7 @@ internal static class BendOverrideGraphics
     {
         if (view is null)
         {
-            if (!warnings.Any()) warnings.Add("허용 초과 곡관을 표시할 3D 뷰를 찾지 못해 적색 재지정을 건너뛰었습니다.");
+            if (!warnings.Any()) warnings.Add("허용 초과·다리 겹침 곡관을 표시할 3D 뷰를 찾지 못해 적색 재지정을 건너뛰었습니다.");
             return;
         }
         try

@@ -6,5 +6,5 @@ public interface IReducerDirectShapeRepo
 {
     ReducerPlacementResult Place(IReadOnlyList<ReducerDirectShapePlacementPlan> plans,
         AlignmentPlacementOrigin origin, PipeInfoParameterContext? info = null,
-        IProgress<PipeAlignmentProgress>? progress = null);
+        IProgress<PipeAlignmentProgress>? progress = null, CancellationToken cancellationToken = default);
 }

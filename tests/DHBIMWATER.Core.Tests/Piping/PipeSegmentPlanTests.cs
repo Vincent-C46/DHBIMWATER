@@ -147,5 +147,5 @@ public class PipeSegmentPlanTests
     [InlineData(-1)]
     [InlineData(double.NaN)]
     public void Invalid_edge_length_throws(double edgeLengthMm)
-        => Assert.Throws<ArgumentOutOfRangeException>(() => PipeSegmentPlan.Build(edgeLengthMm, []));
+        => Assert.Throws<DHBIMWATER.Shared.Errors.DhbimwaterException>(() => PipeSegmentPlan.Build(edgeLengthMm, []));
 }

@@ -1,4 +1,5 @@
 using DHBIMWATER.Core.Geometry;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Core.Gis;
 
@@ -81,7 +82,7 @@ public static class PipeNetworkClassifier
     /// </summary>
     public static double DeflectionDegrees(PipeNetworkGraph graph, NetworkNode node)
     {
-        if (node.Degree != 2) throw new ArgumentException("편각은 차수 2 절점에서만 정의된다.", nameof(node));
+        if (node.Degree != 2) throw new DhbimwaterException(ErrorCodes.PA_Internal, "편각은 차수 2 절점에서만 정의된다.");
         var a = graph.DirectionFrom(node.Incidences[0]);
         var b = graph.DirectionFrom(node.Incidences[1]);
         var dot = Math.Clamp(a.X * b.X + a.Y * b.Y + a.Z * b.Z, -1d, 1d);

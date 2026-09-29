@@ -6,7 +6,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Mock;
 /// <summary>Revit 없이 동작하는 스텁. Sandbox/테스트 환경에서만 쓴다.</summary>
 public sealed class MockAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRepo
 {
-    public AdaptiveBendPlacementResult Place(IReadOnlyList<AdaptiveBendPlacementPlan> plans, AlignmentPlacementOrigin origin, PipeInfoParameterContext? info = null, IProgress<PipeAlignmentProgress>? progress = null)
+    public AdaptiveBendPlacementResult Place(IReadOnlyList<AdaptiveBendPlacementPlan> plans, AlignmentPlacementOrigin origin, PipeInfoParameterContext? info = null, IProgress<PipeAlignmentProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingBends, plans.Count, plans.Count));
         return new AdaptiveBendPlacementResult(plans.Count, Array.Empty<string>());

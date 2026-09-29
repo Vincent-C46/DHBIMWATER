@@ -1,5 +1,6 @@
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Core.Piping;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Application.UseCases.Documentation;
 
@@ -7,6 +8,8 @@ namespace DHBIMWATER.Application.UseCases.Documentation;
 /// 배관재료표를 드래프팅뷰에 그려 격점당 1개씩 만든다(docs/133).
 /// <para>일람표(<see cref="CreatePipeMaterialScheduleUseCase"/>)와 트랜잭션을 나눠 둔다 —
 /// 드래프팅뷰 그리기가 실패해도 이미 만든 일람표까지 롤백되면 안 된다.</para>
+/// <para>일람표는 필터 기반 live 뷰라 모델이 바뀌면 값이 저절로 따라오지만, 드래프팅뷰는 선·문자를 박아 넣은
+/// 정적 도면이라 그렇지 않다. 그래서 여기에만 갱신 경로가 있다(docs/173).</para>
 /// </summary>
 public sealed class CreatePipeMaterialDraftingUseCase
 {
@@ -24,35 +27,73 @@ public sealed class CreatePipeMaterialDraftingUseCase
         _repo = repo;
     }
 
-    public PipeMaterialScheduleResult Execute()
+    /// <summary>이미 있어 갱신 대상이 되는 도면 뷰 이름. 확인 대화상자를 띄울지 판단하는 용도다(docs/173).
+    /// <para>읽기 전용이라 트랜잭션을 열지 않는다. 결과를 보관하지 않고 <see cref="Execute"/>가 다시 읽는다 —
+    /// 그 사이 모델이 바뀌어도 실제로 그리는 값은 항상 Execute 시점의 값이어야 하기 때문이다.</para></summary>
+    public IReadOnlyList<string> FindExistingViews()
+    {
+        var parts = _repo.GetParts();
+        var existing = _repo.GetExistingViewNames();
+        return BuildTargets(PipeMaterialScan.Of(parts))
+            .Where(x => PipeMaterialTable.Build(parts, x.JunctionId).Count > 0)   // 빈 표는 대상이 아니다
+            .Select(x => x.ViewName)
+            .Where(existing.Contains)
+            .ToList();
+    }
+
+    /// <param name="updateExisting">true면 이름이 같은 도면 뷰의 내용을 전부 지우고 다시 그린다(docs/173).
+    /// false면 종전대로 건너뛴다. 이 판단은 사용자 확인을 받은 호출자가 내린다.</param>
+    public PipeMaterialScheduleResult Execute(bool updateExisting = false)
     {
         // 읽기는 트랜잭션 밖에서 먼저 한다. 만들 것이 없으면 트랜잭션을 아예 열지 않는다.
         var parts = _repo.GetParts();
-        var scan = new PipeMaterialScheduleScan(
-            PipeMaterialTable.JunctionIds(parts), PipeMaterialTable.UnassignedCount(parts), parts.Count);
+        var scan = PipeMaterialScan.Of(parts);
 
         var targets = BuildTargets(scan);
         if (targets.Count == 0) return new PipeMaterialScheduleResult([], [], scan);
 
         var created = new List<string>();
+        var updated = new List<string>();
         var skipped = new List<string>();
 
         using (_transaction)
         {
             try
             {
-                _transaction.Begin("배관재료표 도면 생성");
+                _transaction.Begin("배관재료표 도면 생성·갱신");
+                // 뷰 이름 존재 확인은 격점마다 전체 뷰를 훑지 않고 한 번 받아 둔다(docs/208 § D-3).
+                var existing = new HashSet<string>(_repo.GetExistingViewNames(), StringComparer.Ordinal);
                 foreach (var (viewName, title, junctionId) in targets)
                 {
-                    // 같은 이름이 있으면 덮어쓰지 않는다. 사용자가 표를 손봤을 수 있다.
-                    if (_repo.ViewExists(viewName)) { skipped.Add(viewName); continue; }
+                    // rows를 먼저 만든다 — 대상 부재가 없으면 만들 것도 갱신할 것도 없다.
                     var rows = PipeMaterialTable.Build(parts, junctionId);
-                    if (rows.Count == 0) continue;   // 대상 부재가 없으면 빈 표를 만들지 않는다.
-                    _repo.CreateTableView(viewName, title, rows);
-                    created.Add(viewName);
+                    if (rows.Count == 0) continue;   // 빈 표는 만들지도, 기존 표를 지우지도 않는다.
+
+                    // 격점 하나가 실패해도 나머지 격점은 살린다(docs/208 § C). Repo가 SubTransaction으로 그 격점만 되돌린다.
+                    try
+                    {
+                        if (existing.Contains(viewName))
+                        {
+                            // 사용자가 갱신을 승인하지 않았으면 손대지 않는다(종전 동작).
+                            if (!updateExisting) { skipped.Add(viewName); continue; }
+                            // 그 이름을 다른 종류의 뷰가 쓰고 있으면 지우지 않고 건너뛴다(docs/173 § B).
+                            if (!_repo.RedrawTableView(viewName, title, rows)) { skipped.Add(viewName); continue; }
+                            updated.Add(viewName);
+                            continue;
+                        }
+
+                        _repo.CreateTableView(viewName, title, rows);
+                        created.Add(viewName);
+                        existing.Add(viewName);
+                    }
+                    catch (DhbimwaterException ex) when (ex.Code == ErrorCodes.NoActiveDocument) { throw; }
+                    catch (Exception ex)
+                    {
+                        skipped.Add($"{viewName} — [{ErrorCodes.MT_DraftingCreateFailed}] {ex.Message}");
+                    }
                 }
                 _transaction.Commit();
-                return new PipeMaterialScheduleResult(created, skipped, scan);
+                return new PipeMaterialScheduleResult(created, skipped, scan) { Updated = updated };
             }
             catch
             {
@@ -66,7 +107,7 @@ public sealed class CreatePipeMaterialDraftingUseCase
     {
         var targets = scan.JunctionIds
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-            .Select(x => ($"{NamePrefix}_{x}", $"배관재료표 (격점 {x})", x))
+            .Select(x => (PipeMaterialViewName.For(NamePrefix, x), $"배관재료표 (격점 {x})", x))
             .ToList();
         if (scan.UnassignedCount > 0)
             targets.Add((UnassignedName, "배관재료표 (격점번호 미지정)", ""));

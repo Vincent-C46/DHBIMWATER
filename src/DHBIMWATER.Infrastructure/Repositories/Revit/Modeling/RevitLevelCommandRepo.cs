@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Controls;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 {
@@ -41,10 +42,10 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
                           .WhereElementIsNotElementType()
                           .Cast<Level>()
                           .FirstOrDefault(lvl => lvl.Name.Equals(levelName, StringComparison.OrdinalIgnoreCase));
-            if (level != null)
-            {
-                level.Elevation = UC.MmToFt(elevation);
-            }
+            // level이 null이면 NRE였다(docs/207 § E). 호출부(EnsureLevels)는 존재를 확인한 뒤 부르므로 동작은 같다.
+            if (level == null)
+                throw new DhbimwaterException(ErrorCodes.VR_LevelNotFound, $"레벨 '{levelName}'을 찾을 수 없습니다.");
+            level.Elevation = UC.MmToFt(elevation);
             return (long)level.Id.Value;
         }
 

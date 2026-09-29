@@ -32,7 +32,7 @@ public class ReducerTrimPlannerTests
     }
 
     [Fact]
-    public void Bend_trim_at_same_vertex_skips_reducer_without_warning()
+    public void Bend_trim_at_same_vertex_skips_reducer_with_warning()
     {
         var bends = new BendTrimPlan(
             new[] { new AlignmentBendPlan(0, new[] { VertexTrim.None, new VertexTrim(0.1d, 0.1d), VertexTrim.None }) },
@@ -41,7 +41,8 @@ public class ReducerTrimPlannerTests
         var plan = Plan(250d, bends);
 
         Assert.Empty(plan.Placements);
-        Assert.Empty(plan.Warnings);
+        // 배치 동작은 그대로(이경관 생략), 경고만 추가됐다(docs/215 § E).
+        Assert.Contains("이경관을 생략한 곳 1곳", Assert.Single(plan.Warnings));
         Assert.All(plan.Trims.Single(), x => Assert.Equal(VertexTrim.None, x));
     }
 
@@ -97,7 +98,7 @@ public class ReducerTrimPlannerTests
     {
         var placement = new ReducerPlacement(0, 1, new Point3D(0, 0, 0), new Point3D(1, 0, 0),
             upstreamDiameter, downstreamDiameter, PipeKindCatalog.Water1, 250d, ReducerAlignment.Eccentric, 0d, 0.25d, new Vector3D(1, 0, 0));
-        var plan = new ReducerDirectShapePlacementPlan(placement, "test.xlsx", "1", 532d, 326d, 11d, 8.8d, 0d);
+        var plan = new ReducerDirectShapePlacementPlan(placement, "test.xlsx", "1", 532d, 326d, 11d, 8.8d, 0d, 0d);
 
         var profiles = plan.EndProfiles();
 

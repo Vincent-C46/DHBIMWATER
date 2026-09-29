@@ -81,6 +81,7 @@ namespace DHBIMWATER.Core.Parameters
 
         Views,                  // OST_Views
         PipeAccessory,          // OST_PipeAccessory
+        PipeFitting,            // OST_PipeFitting
     }
     public record SharedParameterDefinition
     {

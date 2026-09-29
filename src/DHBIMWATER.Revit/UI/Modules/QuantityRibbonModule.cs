@@ -18,8 +18,12 @@ namespace DHBIMWATER.Revit.UI.Modules
             PushButtonData quantityBtn = new PushButtonData(
                 "QuantityCommand", "수량산출", assemblyPath, RevitCommandType<QuantityCommand>.FullName);
             quantityBtn.LargeImage = RibbonButtonImages.GetIcon("Quantity.png");
-            
-            return [panel.AddItem(quantitySettingsBtn), panel.AddItem(quantityBtn)];
+
+            return
+                [
+                panel.AddItem(quantitySettingsBtn),
+                panel.AddItem(quantityBtn)
+                ];
         }
     }
 }

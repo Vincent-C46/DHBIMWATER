@@ -41,7 +41,8 @@ public sealed class BendAuthorityPolicyTests
         var result = Evaluate(Alignment([null, "30˚", null]));
 
         Assert.Single(result.Kept);
-        Assert.Contains(result.Warnings, x => x.Contains("표준각") && x.Contains("자동판정"));
+        // 경고는 89bcd0d에서 정점별 장문 → 건수 집계형("비표준 지정각 자동판정 N건")으로 압축됐다(docs/135 § 2).
+        Assert.Contains(result.Warnings, x => x.Contains("비표준") && x.Contains("자동판정"));
     }
 
     [Fact]

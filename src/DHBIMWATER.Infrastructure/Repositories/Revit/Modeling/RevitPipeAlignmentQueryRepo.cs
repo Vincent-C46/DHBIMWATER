@@ -3,6 +3,7 @@ using DHBIMWATER.Application.DTOs.Gis;
 using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Core.Geometry;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling;
 
@@ -13,7 +14,7 @@ public sealed class RevitPipeAlignmentQueryRepo : IPipeAlignmentQueryRepo
 
     public IReadOnlyList<PipeAlignmentQueryResult> GetByElementIds(IReadOnlyList<int> elementIds)
     {
-        var doc = _doc() ?? throw new InvalidOperationException("활성 Revit 문서를 찾을 수 없습니다.");
+        var doc = _doc() ?? throw new DhbimwaterException(ErrorCodes.NoActiveDocument, "활성 Revit 문서가 없습니다.");
         var results = new List<PipeAlignmentQueryResult>();
         foreach (var id in elementIds)
         {
@@ -25,6 +26,8 @@ public sealed class RevitPipeAlignmentQueryRepo : IPipeAlignmentQueryRepo
             vertices.AddRange(lines.Select(line => ToPoint3D(line.GetEndPoint(1))));
 
             var kind = shape.LookupParameter("DH_Part")?.AsString() ?? string.Empty;
+            // TODO: DH_구경은 폐지되고 DH_호칭지름(텍스트 "DN300")으로 대체됐다(docs/155 § G).
+            // 이 조회 경로는 IPipeAlignmentQueryRepo가 DI 등록만 되고 주입되는 곳이 없어 현재 미사용이다.
             var diameterFt = shape.LookupParameter("DH_구경")?.AsDouble() ?? 0;
             results.Add(new PipeAlignmentQueryResult((int)shape.Id.Value, vertices, kind, UC.FtToMm(diameterFt)));
         }

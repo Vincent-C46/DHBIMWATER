@@ -1,15 +1,17 @@
 namespace DHBIMWATER.Core.Piping;
 
 /// <summary>배관재료표 원자료 한 건. 배치된 인스턴스 1개에서 읽은 값 그대로다(docs/131 § B).</summary>
-public sealed record PipeMaterialPart(string JunctionId, int ItemNumber, string Name, string Spec);
+public sealed record PipeMaterialPart(string JunctionId, int ItemNumber, string Name, string Spec, string Remark = "");
 
-/// <summary>배관재료표 한 행. 같은 (번호·명칭·규격)을 묶어 수량을 센 결과다.</summary>
-public sealed record PipeMaterialRow(int ItemNumber, string Name, string Spec, int Count);
+/// <summary>배관재료표 한 행. 같은 (번호·명칭·규격·비고)를 묶어 수량을 센 결과다.</summary>
+public sealed record PipeMaterialRow(int ItemNumber, string Name, string Spec, int Count, string Remark = "");
 
 /// <summary>
 /// 배관재료표 행 집계(docs/133). 일람표는 Revit이 알아서 묶어 주지만,
 /// 드래프팅뷰는 표를 직접 그리므로 같은 묶음을 여기서 만들어야 한다.
-/// <para>묶는 기준은 docs/131 가정 B와 같다 — 같은 명칭·같은 규격은 같은 부재번호를 갖는다.</para>
+/// <para>묶는 기준은 docs/131 가정 B와 같다 — 같은 명칭·같은 규격은 같은 부재번호를 갖는다.
+/// 여기에 비고까지 더한다(docs/141 § B-7): 일람표는 <c>DH_비고</c>가 필드라 값이 다르면 이미 행이 갈리므로,
+/// 드래프팅뷰가 비고를 무시하고 묶으면 같은 격점을 그린 두 표의 행 수가 어긋난다.</para>
 /// </summary>
 public static class PipeMaterialTable
 {
@@ -22,13 +24,14 @@ public static class PipeMaterialTable
             .Where(x => wantsUnassigned
                 ? string.IsNullOrWhiteSpace(x.JunctionId)
                 : string.Equals(x.JunctionId, junctionId, StringComparison.Ordinal))
-            .GroupBy(x => (x.ItemNumber, x.Name, x.Spec))
-            .Select(g => new PipeMaterialRow(g.Key.ItemNumber, g.Key.Name, g.Key.Spec, g.Count()))
+            .GroupBy(x => (x.ItemNumber, x.Name, x.Spec, x.Remark))
+            .Select(g => new PipeMaterialRow(g.Key.ItemNumber, g.Key.Name, g.Key.Spec, g.Count(), g.Key.Remark))
             // 번호가 1차 정렬이다. 번호가 같은데 명칭·규격이 다른 경우는 채번이 어긋난 것이지만,
-            // 표를 못 그리게 막을 이유는 없으므로 명칭·규격으로 안정 정렬만 해 둔다.
+            // 표를 못 그리게 막을 이유는 없으므로 명칭·규격·비고로 안정 정렬만 해 둔다.
             .OrderBy(x => x.ItemNumber)
             .ThenBy(x => x.Name, StringComparer.Ordinal)
             .ThenBy(x => x.Spec, StringComparer.Ordinal)
+            .ThenBy(x => x.Remark, StringComparer.Ordinal)
             .ToList();
     }
 

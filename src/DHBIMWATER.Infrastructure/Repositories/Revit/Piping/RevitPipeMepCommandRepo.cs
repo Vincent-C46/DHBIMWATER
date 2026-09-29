@@ -4,6 +4,7 @@ using Autodesk.Revit.DB.Structure;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Core.Piping;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
 
@@ -14,23 +15,26 @@ internal sealed class RevitPipeMepCommandRepo : IPipeCommandRepo
     public RevitPipeMepCommandRepo(Func<Document?> document) => _document = document;
     public PipeOutputMode OutputMode => PipeOutputMode.MepPipe;
 
+    // docs/158 § F: 원본 삭제(SourceElementIdsToDelete)는 PipeAccessorySegment 경로 전용이다. 여기서는 무시한다.
+    // docs/161: DH_Zone(밸브실 유형) 기록도 같다 — 이 경로는 network.Zone을 무시한다.
     public PipeCreationResult CreateNetwork(PipeNetworkDefinition network)
     {
-        var document = _document() ?? throw new InvalidOperationException("활성 Revit 문서가 없습니다.");
+        var document = _document() ?? throw new DhbimwaterException(ErrorCodes.NoActiveDocument, "활성 Revit 문서가 없습니다.");
         var systemType = new FilteredElementCollector(document).OfClass(typeof(PipingSystemType)).Cast<PipingSystemType>()
             .FirstOrDefault(x => x.Name == network.PipingSystemTypeName)
-            ?? throw new InvalidOperationException($"배관 시스템 타입 '{network.PipingSystemTypeName}'을 찾을 수 없습니다.");
+            ?? throw new DhbimwaterException(ErrorCodes.PL_PipingSystemTypeNotFound, $"배관 시스템 타입 '{network.PipingSystemTypeName}'을 찾을 수 없습니다.");
         var pipeType = new FilteredElementCollector(document).OfClass(typeof(PipeType)).Cast<PipeType>()
             .FirstOrDefault(x => x.Name == network.PipeTypeName)
-            ?? throw new InvalidOperationException($"PipeType '{network.PipeTypeName}'을 찾을 수 없습니다.");
+            ?? throw new DhbimwaterException(ErrorCodes.PL_PipeTypeNotFound, $"PipeType '{network.PipeTypeName}'을 찾을 수 없습니다.");
         var level = new FilteredElementCollector(document).OfClass(typeof(Level)).Cast<Level>()
             .FirstOrDefault(x => x.Name == network.LevelName)
-            ?? throw new InvalidOperationException($"레벨 '{network.LevelName}'을 찾을 수 없습니다.");
+            ?? throw new DhbimwaterException(ErrorCodes.PL_LevelNotFound, $"레벨 '{network.LevelName}'을 찾을 수 없습니다.");
         var pipes = new Dictionary<Guid, Pipe>();
         foreach (var edge in network.Edges)
         {
             var pipe = Pipe.Create(document, systemType.Id, pipeType.Id, level.Id, ToXyz(edge.Start, edge.Elevation, network.ReferencePoint), ToXyz(edge.End, edge.Elevation, network.ReferencePoint));
-            pipe.get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM)?.Set(UC.MmToFt(network.DiameterMm));
+            // 관경은 네트워크 전역이 아니라 이 엣지의 값이다(docs/152 § F-4).
+            pipe.get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM)?.Set(UC.MmToFt(edge.DiameterMm));
             pipes.Add(edge.Id, pipe);
         }
         foreach (var node in network.Nodes) ConnectNode(document, node, network, pipes);
@@ -69,7 +73,7 @@ internal sealed class RevitPipeMepCommandRepo : IPipeCommandRepo
             var pipeCurve = ((LocationCurve)currentPipe.Location).Curve;
             var point = pipeCurve.Project(rawPoint).XYZPoint;
             var symbol = FindSymbol(document, fitting.FamilyTypeName)
-                ?? throw new InvalidOperationException($"배관부속 패밀리 '{fitting.FamilyTypeName}'를 찾을 수 없습니다. 프로젝트에 로드돼 있는지 확인하세요.");
+                ?? throw new DhbimwaterException(ErrorCodes.PL_FamilyNotFound, $"배관부속 패밀리 '{fitting.FamilyTypeName}'를 찾을 수 없습니다. 프로젝트에 로드돼 있는지 확인하세요.");
             if (!symbol.IsActive) { symbol.Activate(); document.Regenerate(); }
 
             // 1) 분할 전에 인스턴스를 만들고 방향을 맞춘다(자동 연결 방지 — 위 요약 참조).
@@ -80,7 +84,7 @@ internal sealed class RevitPipeMepCommandRepo : IPipeCommandRepo
 
             var instanceConnectors = GetMepConnectors(instance);
             if (instanceConnectors.Count != 2)
-                throw new InvalidOperationException($"배관부속 '{fitting.FamilyTypeName}'의 커넥터 개수가 2개가 아닙니다. Pipe Accessory 패밀리인지 확인하세요.");
+                throw new DhbimwaterException(ErrorCodes.PL_ConnectorCountMismatch, $"배관부속 '{fitting.FamilyTypeName}'의 커넥터 개수가 2개가 아닙니다. Pipe Accessory 패밀리인지 확인하세요.");
             var ordered = instanceConnectors.OrderBy(c => (c.Origin - point).DotProduct(direction)).ToList();
 
             // 2) 연결하면 부속 반길이만큼 양쪽 파이프가 줄어든다. 남는 길이가 모자라면 Revit이 파이프를 뒤집으면서
@@ -91,7 +95,7 @@ internal sealed class RevitPipeMepCommandRepo : IPipeCommandRepo
             var newPipeId = PlumbingUtils.BreakCurve(document, currentPipe.Id, point);
             document.Regenerate();
             var splitPipe = document.GetElement(newPipeId) as Pipe
-                ?? throw new InvalidOperationException("파이프 분할 결과를 찾지 못했습니다.");
+                ?? throw new DhbimwaterException(ErrorCodes.PL_PipeSplitFailed, "파이프 분할 결과를 찾지 못했습니다.");
             var (beforePipe, afterPipe) = OffsetAlong(currentPipe, startXyz, direction) <= OffsetAlong(splitPipe, startXyz, direction)
                 ? (currentPipe, splitPipe)
                 : (splitPipe, currentPipe);
@@ -99,7 +103,7 @@ internal sealed class RevitPipeMepCommandRepo : IPipeCommandRepo
             var beforeConnector = FindOpenConnectorNear(beforePipe, point);
             var afterConnector = FindOpenConnectorNear(afterPipe, point);
             if (beforeConnector is null || afterConnector is null)
-                throw new InvalidOperationException("파이프 분할 지점에서 열린 커넥터를 찾지 못했습니다.");
+                throw new DhbimwaterException(ErrorCodes.PL_OpenConnectorNotFound, "파이프 분할 지점에서 열린 커넥터를 찾지 못했습니다.");
 
             ordered[0].ConnectTo(beforeConnector);
             ordered[1].ConnectTo(afterConnector);
@@ -154,7 +158,7 @@ internal sealed class RevitPipeMepCommandRepo : IPipeCommandRepo
         var offsets = new[] { (pipeCurve.GetEndPoint(0) - point).DotProduct(direction), (pipeCurve.GetEndPoint(1) - point).DotProduct(direction) };
         var available = Math.Min(Math.Abs(offsets.Min()), Math.Abs(offsets.Max()));
         if (available >= halfLength) return;
-        throw new InvalidOperationException(
+        throw new DhbimwaterException(ErrorCodes.PL_NoRoomForAccessory,
             $"부속 '{familyTypeName}'을(를) 놓을 자리가 부족합니다. 배치 지점 양쪽에 부속 길이의 절반" +
             $"({UC.FtToMm(halfLength):N0}mm) 이상이 남아야 하는데 현재 여유는 {UC.FtToMm(available):N0}mm입니다. " +
             "부속을 선 가운데 쪽으로 옮기거나 배관을 더 길게 그리세요.");
@@ -168,6 +172,7 @@ internal sealed class RevitPipeMepCommandRepo : IPipeCommandRepo
         return (((curve.GetEndPoint(0) + curve.GetEndPoint(1)) / 2) - origin).DotProduct(direction);
     }
 
+    // TODO(docs/206 O-01): RevitPipeSegmentCommandRepo.GetMepConnectors와 필터 규칙이 다르다(논리 커넥터 포함). 동작 변경이라 여기서는 두지 않는다.
     private static List<Connector> GetMepConnectors(FamilyInstance instance)
         => instance.MEPModel?.ConnectorManager?.Connectors.Cast<Connector>().ToList() ?? [];
 
@@ -181,7 +186,7 @@ internal sealed class RevitPipeMepCommandRepo : IPipeCommandRepo
         var familyName = familyTypeName[..separator];
         var typeName = familyTypeName[(separator + 3)..];
         return new FilteredElementCollector(document).OfClass(typeof(FamilySymbol)).Cast<FamilySymbol>()
-            .FirstOrDefault(x => x.Family.Name == familyName && x.Name == typeName);
+            .FirstOrDefault(x => x.FamilyName == familyName && x.Name == typeName);   // FamilyName은 요소 조회가 없다(docs/206 § H)
     }
 
     private static void ConnectNode(Document document, PipeNodeDefinition node, PipeNetworkDefinition network, IReadOnlyDictionary<Guid, Pipe> pipes)
@@ -199,7 +204,7 @@ internal sealed class RevitPipeMepCommandRepo : IPipeCommandRepo
                     break;
                 case NodeKind.Tee when connected.Count == 3:
                     var order = PipeTeeResolver.Resolve(node, network.Edges)
-                        ?? throw new InvalidOperationException("직교 T로 판별할 수 없습니다. 주관은 일직선, 분기관은 90°로 그려야 합니다.");
+                        ?? throw new DhbimwaterException(ErrorCodes.PL_TeeNotOrthogonal, "직교 T로 판별할 수 없습니다. 주관은 일직선, 분기관은 90°로 그려야 합니다.");
                     document.Create.NewTeeFitting(connected[order.MainEdge1Id], connected[order.MainEdge2Id], connected[order.BranchEdgeId]);
                     break;
                 case NodeKind.Cross when connected.Count == 4:
@@ -208,11 +213,13 @@ internal sealed class RevitPipeMepCommandRepo : IPipeCommandRepo
                 case NodeKind.Inline when connected.Count == 2:
                     document.Create.NewUnionFitting(connected.Values.ElementAt(0), connected.Values.ElementAt(1));
                     break;
+                // Y형(NodeKind.Wye)은 MEP 경로 대상이 아니다 — Revit API에 경사 분기 생성 함수가 없다.
+                // 패밀리 배치 경로(PipeOutputMode.PipeAccessorySegment)에서만 놓는다(docs/187 § 4-5).
             }
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException($"노드 {node.NodeKind} 부속 연결에 실패했습니다. 선택한 PipeType에 해당 부속이 있는지 확인하세요.", ex);
+            throw new DhbimwaterException(ErrorCodes.PL_NodeConnectFailed, $"노드 {node.NodeKind} 부속 연결에 실패했습니다. 선택한 PipeType에 해당 부속이 있는지 확인하세요.", ex);
         }
     }
 

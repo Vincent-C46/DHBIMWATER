@@ -5,7 +5,11 @@ namespace DHBIMWATER.Application.DTOs.Gis;
 public sealed record ReducerDirectShapePlacementPlan(
     ReducerPlacement Placement, string SourceFile, string RecordNumber,
     double LargeOuterDiameterMm, double SmallOuterDiameterMm,
-    double LargeWallThicknessMm, double SmallWallThicknessMm, double ZOffsetM)
+    double LargeWallThicknessMm, double SmallWallThicknessMm,
+    /// <summary>상류 DN 기준 Global Z 오프셋(m).</summary>
+    double UpstreamZOffsetM,
+    /// <summary>하류 DN 기준 Global Z 오프셋(m).</summary>
+    double DownstreamZOffsetM)
 {
     public ReducerEndProfiles EndProfiles()
     {

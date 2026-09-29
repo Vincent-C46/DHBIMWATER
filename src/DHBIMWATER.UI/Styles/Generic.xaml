@@ -15,6 +15,8 @@
         <ResourceDictionary Source="/DHBIMWATER.UI;component/Styles/TextBlocks.xaml"/>
         <ResourceDictionary Source="/DHBIMWATER.UI;component/Styles/IconButtons.xaml"/>
         <ResourceDictionary Source="/DHBIMWATER.UI;component/Styles/Panels.xaml"/>
+        <ResourceDictionary Source="/DHBIMWATER.UI;component/Styles/RadioButtons.xaml"/>
+        <ResourceDictionary Source="/DHBIMWATER.UI;component/Styles/Expanders.xaml"/>
     </ResourceDictionary.MergedDictionaries>
  
 </ResourceDictionary>

@@ -1,4 +1,4 @@
-using DHBIMWATER.Core.Geometry;
+﻿using DHBIMWATER.Core.Geometry;
 
 namespace DHBIMWATER.Application.DTOs.Revit.ValveRoom;
 
@@ -7,6 +7,10 @@ namespace DHBIMWATER.Application.DTOs.Revit.ValveRoom;
 public record ValveRoomRequestDto
 {
     public string RoomType { get; init; } = string.Empty;
+    /// <summary>프로젝트 정보 "관로구간"에 기록할 사용자 입력(예: 도수1-1). 비어 있어도 기록한다.</summary>
+    public string PipelineSection { get; init; } = string.Empty;
+    /// <summary>프로젝트 정보 "밸브실측점"에 기록할 사용자 입력(예: 1+750.00). 비어 있어도 기록한다.</summary>
+    public string StationPoint { get; init; } = string.Empty;
     public double ReferenceX { get; init; }
     /// <summary>내부공간 좌하단 내부원점의 동쪽 방향 공유좌표(m).</summary>
     public double SharedCoordinateX { get; init; }
@@ -29,6 +33,13 @@ public record ValveRoomRequestDto
     public IReadOnlyList<DrainPitDefinition> DrainPits { get; init; } = Array.Empty<DrainPitDefinition>();
     /// <summary>드레인 피트 Void 패밀리/매개변수 매핑. DrainPits가 비어 있지 않으면 반드시 채워야 한다.</summary>
     public DrainPitVoidFamilyMappingDto? DrainPitVoidMapping { get; init; }
+    /// <summary>상부슬래브 하단 헌치 배치 여부.</summary>
+    public bool HasUpperHaunch { get; init; }
+    /// <summary>기초 상단 헌치 배치 여부.</summary>
+    public bool HasLowerHaunch { get; init; }
+    /// <summary>헌치 구조 프레임 유형. UI가 "패밀리명 : 타입명" 형식으로 채운다(docs/156 § D-1).
+    /// 비어 있으면 이름 기반 자동 탐색(FindHaunchBeamSymbol)을 쓴다.</summary>
+    public string HaunchTypeName { get; init; } = string.Empty;
     /// <summary>RoomType이 "공기밸브실"일 때만 값이 채워진다.</summary>
     public AirValveRoomSpecDto? AirSpec { get; init; }
     /// <summary>RoomType이 "이토밸브실"일 때만 값이 채워진다.</summary>

@@ -1,4 +1,5 @@
 using DHBIMWATER.Core.Geometry;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Core.Gis;
 
@@ -118,7 +119,7 @@ public static class BendArcGeometry
         // V에서 호 쪽을 향하는 실측 이등분선. alignmentDeflectionDeg는 편각 0 예외 이름에만 쓴다.
         var sum = new Vector3D(dirA.X + dirB.X, dirA.Y + dirB.Y, dirA.Z + dirB.Z);
         if (sum.Length <= DegenerateEpsilon)
-            throw new ArgumentException("편각이 0이라 곡관 이등분선을 정의할 수 없다.", nameof(alignmentDeflectionDeg));
+            throw new DhbimwaterException(ErrorCodes.PA_Internal, "편각이 0이라 곡관 이등분선을 정의할 수 없다.");
         var bisector = sum.Normalize();
 
         var tangentMm = BendResolver.TangentLength(radiusMm, alignmentDeflectionDeg);

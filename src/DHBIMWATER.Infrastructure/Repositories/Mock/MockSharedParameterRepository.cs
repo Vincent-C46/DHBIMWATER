@@ -5,7 +5,8 @@ namespace DHBIMWATER.Infrastructure.Repositories.Mock
 {
     public class MockSharedParameterRepository : ISharedParameterRepository
     {
-        public void EnsureParameters(IReadOnlyList<SharedParameterDefinition> definitions)
+        public void EnsureParameters(IReadOnlyList<SharedParameterDefinition> definitions,
+            IReadOnlyList<int>? extraCategoryIds = null)
         {
         }
     }

@@ -16,6 +16,8 @@ namespace DHBIMWATER.Infrastructure.Logging
         public void Error(string message, Exception ex = null)
         {
             var fullMessage = ex == null ? message : $"{message}\nException: {ex}";
+            // 종전에는 문자열만 만들고 파일에 쓰지 않았다(docs/205 § A-3).
+            Write("ERROR", fullMessage);
         }
 
         public void Info(string message)

@@ -37,6 +37,8 @@ public static class ServiceCollectionExtensions
         // Modeling
         services.AddTransient<WaterTankViewModel>();
         services.AddTransient<PumpingStationViewModel>();
+        // 토출조는 PumpingStationView 안에서 모드 토글로 전환되는 별도 ViewModel이다.
+        services.AddTransient<DischargeBasinViewModel>();
         services.AddTransient<ValveRoomViewModel>();
         services.AddTransient<PipeLayoutViewModel>();
         // 이 모델리스 ViewModel만 전용 STA 스레드에서 안전한 WPF 다이얼로그를 사용한다.

@@ -9,7 +9,7 @@ internal sealed class MockAlignmentStraightDirectShapeRepo : IAlignmentStraightD
     public AlignmentStraightPlacementResult PlaceAlong(IReadOnlyList<PipeAlignment> alignments, string straightFamilyTypeName, double intervalM, AlignmentPlacementOrigin origin,
         StraightPipeSpecTable specs, IReadOnlyList<IReadOnlyList<VertexTrim>>? trims = null, string? diameterParameterName = null,
         string? outerDiameterParameterName = null, string? thicknessParameterName = null, PipeInfoParameterContext? info = null,
-        IProgress<PipeAlignmentProgress>? progress = null, IReadOnlyList<IReadOnlySet<int>>? stepVertices = null)
+        IProgress<PipeAlignmentProgress>? progress = null, IReadOnlyList<IReadOnlySet<int>>? stepVertices = null, CancellationToken cancellationToken = default)
     {
         var count = alignments.Select((x, i) => AlignmentIntervalSampler.SampleSegments(
             x, intervalM, trims is not null && i < trims.Count ? trims[i] : null,

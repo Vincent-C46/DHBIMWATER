@@ -51,10 +51,9 @@ public static class BendResolver
     public static bool EvaluateFitting(double actualAngleDeg, double fittingAngleDeg, double effectiveAllowableDeg)
         => JointDeflectionRule.EvaluateFitting(actualAngleDeg, fittingAngleDeg, effectiveAllowableDeg);
 
+    /// <summary>관종별 규칙에 위임한다. 지정각(엑셀 곡관유형)은 모든 규칙이 받는다(docs/211 § D-3).</summary>
     public static BendResolution Resolve(NodeClassification node, BendSettings settings, double? forcedAngleDeg = null)
-        => BendingRuleCatalog.For(MaterialOf(node)) is JointDeflectionRule rule
-            ? rule.Resolve(node, settings, forcedAngleDeg)
-            : BendingRuleCatalog.For(MaterialOf(node)).Resolve(node, settings);
+        => BendingRuleCatalog.For(MaterialOf(node)).Resolve(node, settings, forcedAngleDeg);
 
     public static IReadOnlyList<BendResolution> ResolveAll(IReadOnlyList<NodeClassification> nodes, BendSettings settings, IReadOnlyDictionary<int, double>? forcedAngles = null)
         => nodes.Where(x => x.Kind == NodeKind.Bend).Select(x => Resolve(x, settings, forcedAngles?.GetValueOrDefault(x.NodeId))).ToList();

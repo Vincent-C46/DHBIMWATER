@@ -187,10 +187,36 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
         public int FindBeamSymbol(string typeName) => FindFamilySymbol(BuiltInCategory.OST_StructuralFraming, fs => fs.Name == typeName);
 
+        /// <summary>"패밀리명 : 타입명"으로 구조 프레임 유형을 찾는다. 헌치 콤보가 패밀리명까지 담게 되면서(docs/156 § D-1)
+        /// 타입명 완전일치인 <see cref="FindBeamSymbol"/>로는 매칭되지 않기 때문이다.
+        /// <para>구분자 파싱 규칙은 RevitElementTypeQueryRepo.GetFamilyTypeCategoryId와 같은 LastIndexOf(" : ")다 —
+        /// 타입명 자체에 " : "가 들어갈 수 있다. 구분자가 없으면 예전 타입명 단독 값으로 보고 FindBeamSymbol로 넘긴다.</para></summary>
+        public int FindStructuralFramingSymbolByFamilyType(string familyTypeName)
+        {
+            if (string.IsNullOrWhiteSpace(familyTypeName)) return 0;
+            var separator = familyTypeName.LastIndexOf(" : ", StringComparison.Ordinal);
+            if (separator <= 0 || separator >= familyTypeName.Length - 3) return FindBeamSymbol(familyTypeName);
+            var familyName = familyTypeName.Substring(0, separator);
+            var typeName = familyTypeName.Substring(separator + 3);
+            return FindFamilySymbol(BuiltInCategory.OST_StructuralFraming, fs => fs.FamilyName == familyName && fs.Name == typeName);
+        }
+
         public int FindHaunchBeamSymbol() => FindFamilySymbol(BuiltInCategory.OST_StructuralFraming,
             fs => fs.Name.Contains("헌치") || fs.Name.Contains("haunch") || fs.FamilyName.Contains("헌치") || fs.FamilyName.Contains("haunch"));
 
         public int FindColumnSymbol(string typeName) => FindFamilySymbol(BuiltInCategory.OST_StructuralColumns, fs => fs.Name == typeName);
+
+        /// <summary>기둥 콤보가 패밀리명까지 담게 되면서(docs/159 § B-1) 타입명 완전일치인 <see cref="FindColumnSymbol"/>로는
+        /// 매칭되지 않기 때문이다. 구분자 파싱 규칙은 <see cref="FindStructuralFramingSymbolByFamilyType"/>과 같다.</summary>
+        public int FindColumnSymbolByFamilyType(string familyTypeName)
+        {
+            if (string.IsNullOrWhiteSpace(familyTypeName)) return 0;
+            var separator = familyTypeName.LastIndexOf(" : ", StringComparison.Ordinal);
+            if (separator <= 0 || separator >= familyTypeName.Length - 3) return FindColumnSymbol(familyTypeName);
+            var familyName = familyTypeName.Substring(0, separator);
+            var typeName = familyTypeName.Substring(separator + 3);
+            return FindFamilySymbol(BuiltInCategory.OST_StructuralColumns, fs => fs.FamilyName == familyName && fs.Name == typeName);
+        }
 
         public int FindGenericModelSymbol(string symbolName) => FindFamilySymbol(BuiltInCategory.OST_GenericModel, fs => fs.Name.Contains(symbolName));
 

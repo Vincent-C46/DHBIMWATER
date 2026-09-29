@@ -36,7 +36,8 @@ internal sealed class AlignmentSnapshotStore : IAlignmentSnapshotStore
             var eastingsM = vertices.Select(x => x.X).ToArray();
             var northingsM = vertices.Select(x => x.Y).ToArray();
             var elevationsM = vertices.Select(x => x.Z).ToArray();
-            var stationsM = Enumerable.Range(0, vertices.Count).Select(profile.DistanceAtVertex).ToArray();
+            // 스냅샷 측점은 엑셀 2D Station 기준이다 — 모델 요소의 DH_*측점과 같은 기준(docs/215 § C).
+            var stationsM = Enumerable.Range(0, vertices.Count).Select(profile.StationAtVertex).ToArray();
             var name = $"{Path.GetFileNameWithoutExtension(alignment.SourceFile)}#{alignment.RecordNumber}";
 
             return AlignmentSnapshotInterop.EnsureSnapshot(

@@ -9,15 +9,162 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance vm:ValveRoomViewModel, IsDesignTimeCreatable=False}"
         Title="DHBIMWATER - ValveRoom Builder"
-        Width="1080" SizeToContent="Height" MaxHeight="900"
+        Width="1420" SizeToContent="Height" MaxHeight="900"
         WindowStartupLocation="CenterScreen" Background="#F4F7F9"
-        WindowStyle="None" FontFamily="Segoe UI, Malgun Gothic">
+        WindowStyle="None" FontFamily="Segoe UI, Malgun Gothic"
+        Validation.Error="OnValidationError">
     <Window.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="/DHBIMWATER.UI;component/Styles/Generic.xaml"/>
             </ResourceDictionary.MergedDictionaries>
-            <conv:CornerToBoolConverter x:Key="CornerToBoolConverter"/>
+            <conv:StringEqualsToBoolConverter x:Key="StringEqualsToBoolConverter"/>
+
+            <!-- 빈 값일 때 Tag의 예시 문구를 회색으로 보여주는 텍스트박스. Text가 ""일 때만 안내가 보인다(docs/180). -->
+            <Style x:Key="PlaceholderTextBoxStyle" TargetType="TextBox">
+                <Setter Property="Background" Value="White"/>
+                <Setter Property="BorderBrush" Value="#D5DDE5"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="Height" Value="26"/>
+                <Setter Property="VerticalContentAlignment" Value="Center"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="TextBox">
+                            <Border x:Name="border" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6">
+                                <Grid>
+                                    <ScrollViewer x:Name="PART_ContentHost" Margin="5,0"/>
+                                    <!-- IsHitTestVisible=False: 안내 문구를 눌러도 텍스트박스가 포커스를 받는다. -->
+                                    <TextBlock x:Name="placeholder" Text="{TemplateBinding Tag}" Foreground="#A7B0BA"
+                                               Margin="7,0,0,0" VerticalAlignment="Center"
+                                               IsHitTestVisible="False" Visibility="Collapsed"/>
+                                </Grid>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsFocused" Value="True">
+                                    <Setter TargetName="border" Property="BorderBrush" Value="#4A6FA5"/>
+                                </Trigger>
+                                <DataTrigger Binding="{Binding Text, RelativeSource={RelativeSource Self}}" Value="">
+                                    <Setter TargetName="placeholder" Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- 드레인 피트 코너 선택 버튼. 피트 형상(사각형 + 대각선 X)을 그대로 아이콘화했다. -->
+            <Style x:Key="DrainPitCornerToggleStyle" TargetType="RadioButton">
+                <Setter Property="Width" Value="34"/>
+                <Setter Property="Height" Value="34"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="RadioButton">
+                            <Grid Background="Transparent">
+                                <Rectangle x:Name="Box" Fill="#FFFFFF" Stroke="#95A5A6" StrokeThickness="1.5"/>
+                                <!-- Stretch=Fill 이라 Data는 0~1 정규좌표로 두고 실제 크기는 Margin이 정한다. -->
+                                <Path x:Name="Cross" Stroke="#95A5A6" StrokeThickness="1.5" Stretch="Fill" Margin="5"
+                                      Data="M0,0 L1,1 M1,0 L0,1"/>
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Box" Property="Stroke" Value="#4A6FA5"/>
+                                    <Setter TargetName="Cross" Property="Stroke" Value="#4A6FA5"/>
+                                </Trigger>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="Box" Property="Fill" Value="#E3F2FD"/>
+                                    <Setter TargetName="Box" Property="Stroke" Value="#2196F3"/>
+                                    <Setter TargetName="Box" Property="StrokeThickness" Value="2"/>
+                                    <Setter TargetName="Cross" Property="Stroke" Value="#2196F3"/>
+                                    <Setter TargetName="Cross" Property="StrokeThickness" Value="2"/>
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.4"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- 용도 유형 세그먼트 버튼. RadioButton의 택1 동작과 IsChecked 바인딩은 그대로 두고 외형만 바꾼다(docs/144 § 2).
+                 양 끝 라운드는 버튼별 Tag로 준다. TemplateBinding은 string → CornerRadius 변환을 하지 않으므로
+                 RelativeSource TemplatedParent 바인딩을 써야 한다. -->
+            <Style x:Key="ValveRoomUsageSegmentStyle" TargetType="RadioButton">
+                <Setter Property="MinWidth" Value="86"/>
+                <Setter Property="Height" Value="30"/>
+                <Setter Property="Padding" Value="10,0"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="FontSize" Value="12"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Foreground" Value="#7F8C8D"/>
+                <Setter Property="Tag" Value="0"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="RadioButton">
+                            <Border x:Name="Bd" Background="#FFFFFF" BorderBrush="#95A5A6" BorderThickness="1"
+                                    CornerRadius="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"
+                                    SnapsToDevicePixels="True">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  Margin="{TemplateBinding Padding}"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="BorderBrush" Value="#2196F3"/>
+                                    <Setter Property="Foreground" Value="#2196F3"/>
+                                    <!-- 이웃과 테두리를 1px 겹쳐 붙였으므로 강조된 쪽이 위로 올라와야 선이 끊겨 보이지 않는다.
+                                         TargetName 없는 Setter는 템플릿 부모(RadioButton)에 걸리고, Panel.ZIndex는 부모 StackPanel이 읽는다. -->
+                                    <Setter Property="Panel.ZIndex" Value="1"/>
+                                </Trigger>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="#2196F3"/>
+                                    <Setter TargetName="Bd" Property="BorderBrush" Value="#2196F3"/>
+                                    <Setter Property="Foreground" Value="White"/>
+                                    <Setter Property="Panel.ZIndex" Value="2"/>
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.4"/>
+                                    <Setter Property="Cursor" Value="Arrow"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- 참고도 접기/펼치기 토글. 모양은 CancelButtonStyle(회색 버튼)과 맞추고, 문구는 상태에 따라 바뀐다. -->
+            <Style x:Key="ImagePanelToggleStyle" TargetType="ToggleButton">
+                <Setter Property="Background" Value="{StaticResource Brush.Gray.300}"/>
+                <Setter Property="Foreground" Value="Black"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Padding" Value="15,8"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="Content" Value="참고도 펼치기 ▶"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ToggleButton">
+                            <Border Background="{TemplateBinding Background}" CornerRadius="8" SnapsToDevicePixels="True">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="{StaticResource PrimaryHoverBrush}"/>
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter Property="Opacity" Value="0.8"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+                <Style.Triggers>
+                    <Trigger Property="IsChecked" Value="True">
+                        <Setter Property="Content" Value="참고도 접기 ◀"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
         </ResourceDictionary>
     </Window.Resources>
     <WindowChrome.WindowChrome>
@@ -34,18 +181,52 @@
 
         <Grid Grid.Row="1">
         <Grid.ColumnDefinitions>
+            <!-- 참고도 열 폭은 코드비하인드(ApplyImagePanel)가 화면 폭에 맞춰 정한다 — 펼침 최대 680, 접힘 0. -->
             <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="340"/>
+            <ColumnDefinition x:Name="ImageColumn" Width="680"/>
         </Grid.ColumnDefinitions>
         <Border Grid.Column="0" Background="White" CornerRadius="15" Margin="20,12" Padding="20">
             <Border.Effect><DropShadowEffect BlurRadius="15" ShadowDepth="2" Color="#DDE4EB" Opacity="0.3"/></Border.Effect>
             <DockPanel>
-                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
+                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                <StackPanel Orientation="Horizontal">
                     <TextBlock Text="밸브실 종류" FontWeight="Bold" Foreground="#4A6FA5" VerticalAlignment="Center" Margin="0,0,12,0"/>
                     <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Width="180"
-                              ItemsSource="{Binding ValveRoomTypes}" SelectedItem="{Binding SelectedValveRoomType}"/>
+                              ItemsSource="{Binding ValveRoomStructures}" SelectedItem="{Binding SelectedValveRoomStructure}"/>
+                    <!-- 용도 유형. 타이밸브실은 이토밸브실 형상을 쓰되 중간벽·중간슬래브는 없다(docs/144 § 1). -->
+                    <StackPanel Orientation="Horizontal" Margin="18,0,0,0" VerticalAlignment="Center"
+                                IsEnabled="{Binding IsStructureImplemented}">
+                        <RadioButton Content="이토밸브실" GroupName="ValveRoomUsage" Tag="6,0,0,6"
+                                     Style="{StaticResource ValveRoomUsageSegmentStyle}"
+                                     IsChecked="{Binding SelectedValveRoomType, Mode=TwoWay,
+                                                 Converter={StaticResource StringEqualsToBoolConverter}, ConverterParameter=이토밸브실}"/>
+                        <!-- Margin 왼쪽 -1: 이웃과 테두리 1px을 겹쳐 이어 붙인 것처럼 보이게 한다. -->
+                        <RadioButton Content="공기밸브실" GroupName="ValveRoomUsage" Tag="0" Margin="-1,0,0,0"
+                                     Style="{StaticResource ValveRoomUsageSegmentStyle}"
+                                     IsChecked="{Binding SelectedValveRoomType, Mode=TwoWay,
+                                                 Converter={StaticResource StringEqualsToBoolConverter}, ConverterParameter=공기밸브실}"/>
+                        <RadioButton Content="타이밸브실" GroupName="ValveRoomUsage" Tag="0" Margin="-1,0,0,0"
+                                     Style="{StaticResource ValveRoomUsageSegmentStyle}"
+                                     IsChecked="{Binding SelectedValveRoomType, Mode=TwoWay,
+                                                 Converter={StaticResource StringEqualsToBoolConverter}, ConverterParameter=타이밸브실}"/>
+                        <RadioButton Content="제수밸브실" GroupName="ValveRoomUsage" Tag="0,6,6,0" Margin="-1,0,0,0"
+                                     Style="{StaticResource ValveRoomUsageSegmentStyle}"
+                                     IsChecked="{Binding SelectedValveRoomType, Mode=TwoWay,
+                                                 Converter={StaticResource StringEqualsToBoolConverter}, ConverterParameter=제수밸브실}"/>
+                    </StackPanel>
                 </StackPanel>
-                <TabControl Style="{StaticResource PrimaryTabControlStyle}">
+                <!-- 프로젝트 정보(관로구간·밸브실측점) 입력. 유형과 함께 생성 시 프로젝트 정보에 기록된다(docs/180). -->
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0" VerticalAlignment="Center"
+                            IsEnabled="{Binding IsStructureImplemented}">
+                    <TextBlock Text="관로구간" FontWeight="Bold" Foreground="#4A6FA5" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBox x:Name="PipelineSectionBox" Style="{StaticResource PlaceholderTextBoxStyle}" Width="160" Tag="예) 도수1-1"
+                             Text="{Binding PipelineSection, UpdateSourceTrigger=PropertyChanged}"/>
+                    <TextBlock Text="밸브실측점" FontWeight="Bold" Foreground="#4A6FA5" VerticalAlignment="Center" Margin="18,0,10,0"/>
+                    <TextBox x:Name="StationPointBox" Style="{StaticResource PlaceholderTextBoxStyle}" Width="160" Tag="예) 1+750.00"
+                             Text="{Binding StationPoint, UpdateSourceTrigger=PropertyChanged}"/>
+                </StackPanel>
+                </StackPanel>
+                <TabControl Style="{StaticResource PrimaryTabControlStyle}" IsEnabled="{Binding IsStructureImplemented}">
                     <TabItem Header="형상 · 배치" Style="{StaticResource PrimaryTabItemStyle}">
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel Margin="8">
@@ -60,7 +241,7 @@
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="X"/>
                                             <TextBlock Grid.Column="1" Text="실제 좌표 (동쪽)"/>
-                                            <TextBox Grid.Column="2" Text="{Binding SharedCoordinateX, UpdateSourceTrigger=LostFocus}"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding SharedCoordinateX, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
                                             <TextBlock Grid.Column="3" Text="m" Margin="8,0"/>
                                         </Grid>
                                         <Grid Margin="0,8,0,0">
@@ -72,7 +253,7 @@
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="Y"/>
                                             <TextBlock Grid.Column="1" Text="실제 좌표 (북쪽)"/>
-                                            <TextBox Grid.Column="2" Text="{Binding SharedCoordinateY, UpdateSourceTrigger=LostFocus}"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding SharedCoordinateY, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
                                             <TextBlock Grid.Column="3" Text="m" Margin="8,0"/>
                                         </Grid>
                                         <Grid Margin="0,8,0,0">
@@ -84,7 +265,7 @@
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="EL"/>
                                             <TextBlock Grid.Column="1" Text="기초 상부 표고"/>
-                                            <TextBox Grid.Column="2" Text="{Binding FoundationTopEl, UpdateSourceTrigger=LostFocus}"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding FoundationTopEl, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
                                             <TextBlock Grid.Column="3" Text="m" Margin="8,0"/>
                                         </Grid>
                                         <Grid Margin="0,8,0,0">
@@ -96,7 +277,7 @@
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="θ"/>
                                             <TextBlock Grid.Column="1" Text="도북각 (진북→도북, 시계방향)"/>
-                                            <TextBox Grid.Column="2" Text="{Binding TrueNorthToProjectNorthClockwiseDegrees, UpdateSourceTrigger=LostFocus}"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding TrueNorthToProjectNorthClockwiseDegrees, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
                                             <TextBlock Grid.Column="3" Text="°" Margin="8,0"/>
                                         </Grid>
                                     </StackPanel>
@@ -112,8 +293,8 @@
                                                 <ColumnDefinition Width="35"/>
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="W"/>
-                                            <TextBlock Grid.Column="1" Text="내부 폭 (X)"/>
-                                            <TextBox Grid.Column="2" Text="{Binding InnerWidth, UpdateSourceTrigger=LostFocus}"/>
+                                            <TextBlock Grid.Column="1" Text="내부 폭 (Y)"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding InnerWidth, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
                                             <TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
                                         <Grid Margin="0,8,0,0">
@@ -124,8 +305,8 @@
                                                 <ColumnDefinition Width="35"/>
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="L"/>
-                                            <TextBlock Grid.Column="1" Text="내부 길이 (Y)"/>
-                                            <TextBox Grid.Column="2" Text="{Binding InnerLength, UpdateSourceTrigger=LostFocus}"/>
+                                            <TextBlock Grid.Column="1" Text="내부 길이 (X)"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding InnerLength, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
                                             <TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
                                         <Grid Margin="0,8,0,0" Visibility="{Binding SingleHeightVisibility}">
@@ -137,7 +318,7 @@
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="H"/>
                                             <TextBlock Grid.Column="1" Text="내부 높이(슬래브 하부)"/>
-                                            <TextBox Grid.Column="2" Text="{Binding InnerHeight, UpdateSourceTrigger=LostFocus}"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding InnerHeight, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
                                             <TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
                                     </StackPanel>
@@ -145,38 +326,44 @@
                                 <Border Background="#EEF2F7" CornerRadius="8" Padding="14" Margin="0,0,0,12" Visibility="{Binding MudVisibility}">
                                     <StackPanel>
                                         <TextBlock Text="이토밸브실 내부 구성" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,8"/>
-                                        <CheckBox Content="중간벽체 적용" IsChecked="{Binding HasIntermediateWall}"/>
+                                        <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" Content="중간벽체 적용" IsChecked="{Binding HasIntermediateWall}"/>
                                         <Grid Margin="0,8,0,0" Visibility="{Binding IntermediateWallVisibility}">
                                             <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="45"/>
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="110"/>
                                                 <ColumnDefinition Width="35"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="좌측 외벽 안쪽면→중간벽 좌측면"/>
-                                            <TextBox Grid.Column="1" Text="{Binding IntermediateWallOffset, UpdateSourceTrigger=LostFocus}"/>
-                                            <TextBlock Grid.Column="2" Text="mm" Margin="8,0"/>
+                                            <TextBlock Text="Lw"/>
+                                            <TextBlock Grid.Column="1" Text="좌측 외벽 안쪽면→중간벽 좌측면"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding IntermediateWallOffset, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
+                                            <TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
-                                        <CheckBox Content="중간슬래브 적용" IsChecked="{Binding HasIntermediateSlab}" Margin="0,10,0,0"/>
+                                        <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" Content="중간슬래브 적용" IsChecked="{Binding HasIntermediateSlab}" Margin="0,10,0,0"/>
                                         <StackPanel Visibility="{Binding IntermediateSlabVisibility}">
                                             <Grid Margin="0,8,0,0">
                                                 <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="45"/>
                                                     <ColumnDefinition Width="*"/>
                                                     <ColumnDefinition Width="110"/>
                                                     <ColumnDefinition Width="35"/>
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Text="1F 내부 높이"/>
-                                                <TextBox Grid.Column="1" Text="{Binding Floor1InnerHeight, UpdateSourceTrigger=LostFocus}"/>
-                                                <TextBlock Grid.Column="2" Text="mm" Margin="8,0"/>
+                                                <TextBlock Text="H1"/>
+                                                <TextBlock Grid.Column="1" Text="1F 내부 높이"/>
+                                                <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding Floor1InnerHeight, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
+                                                <TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                             </Grid>
                                             <Grid Margin="0,8,0,0">
                                                 <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="45"/>
                                                     <ColumnDefinition Width="*"/>
                                                     <ColumnDefinition Width="110"/>
                                                     <ColumnDefinition Width="35"/>
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Text="2F 내부 높이"/>
-                                                <TextBox Grid.Column="1" Text="{Binding Floor2InnerHeight, UpdateSourceTrigger=LostFocus}"/>
-                                                <TextBlock Grid.Column="2" Text="mm" Margin="8,0"/>
+                                                <TextBlock Text="H2"/>
+                                                <TextBlock Grid.Column="1" Text="2F 내부 높이"/>
+                                                <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding Floor2InnerHeight, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
+                                                <TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                             </Grid>
                                         </StackPanel>
                                     </StackPanel>
@@ -191,28 +378,32 @@
                                                 <ColumnDefinition Width="35"/>
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="X축 방향 보 개수"/>
-                                            <TextBox Grid.Column="1" Text="{Binding BeamCountX, UpdateSourceTrigger=LostFocus}"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="1" Text="{Binding BeamCountX, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
                                             <TextBlock Grid.Column="2" Text="개" Margin="8,0"/>
                                         </Grid>
                                         <Grid Margin="0,8,0,0">
                                             <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="45"/>
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="110"/>
                                                 <ColumnDefinition Width="35"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="X축: 외벽 내측→첫 보 중심 거리"/>
-                                            <TextBox Grid.Column="1" Text="{Binding BeamOffsetX, UpdateSourceTrigger=LostFocus}"/>
-                                            <TextBlock Grid.Column="2" Text="mm" Margin="8,0"/>
+                                            <TextBlock Text="Ox"/>
+                                            <TextBlock Grid.Column="1" Text="X축: 외벽 내측→첫 보 중심 거리"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding BeamOffsetX, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
+                                            <TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
                                         <Grid Margin="0,8,0,0">
                                             <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="45"/>
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="110"/>
                                                 <ColumnDefinition Width="35"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="X축 보 중심 간격"/>
-                                            <TextBox Grid.Column="1" Text="{Binding BeamSpacingX, UpdateSourceTrigger=LostFocus}"/>
-                                            <TextBlock Grid.Column="2" Text="mm" Margin="8,0"/>
+                                            <TextBlock Text="Sx"/>
+                                            <TextBlock Grid.Column="1" Text="X축 보 중심 간격"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding BeamSpacingX, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
+                                            <TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
                                         <Grid Margin="0,12,0,0">
                                             <Grid.ColumnDefinitions>
@@ -221,74 +412,85 @@
                                                 <ColumnDefinition Width="35"/>
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="Y축 방향 보 개수"/>
-                                            <TextBox Grid.Column="1" Text="{Binding BeamCountY, UpdateSourceTrigger=LostFocus}"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="1" Text="{Binding BeamCountY, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
                                             <TextBlock Grid.Column="2" Text="개" Margin="8,0"/>
                                         </Grid>
                                         <Grid Margin="0,8,0,0">
                                             <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="45"/>
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="110"/>
                                                 <ColumnDefinition Width="35"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Y축: 외벽 내측→첫 보 중심 거리"/>
-                                            <TextBox Grid.Column="1" Text="{Binding BeamOffsetY, UpdateSourceTrigger=LostFocus}"/>
-                                            <TextBlock Grid.Column="2" Text="mm" Margin="8,0"/>
+                                            <TextBlock Text="Oy"/>
+                                            <TextBlock Grid.Column="1" Text="Y축: 외벽 내측→첫 보 중심 거리"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding BeamOffsetY, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
+                                            <TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
                                         <Grid Margin="0,8,0,0">
                                             <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="45"/>
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="110"/>
                                                 <ColumnDefinition Width="35"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Y축 보 중심 간격"/>
-                                            <TextBox Grid.Column="1" Text="{Binding BeamSpacingY, UpdateSourceTrigger=LostFocus}"/>
-                                            <TextBlock Grid.Column="2" Text="mm" Margin="8,0"/>
+                                            <TextBlock Text="Sy"/>
+                                            <TextBlock Grid.Column="1" Text="Y축 보 중심 간격"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding BeamSpacingY, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
+                                            <TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
                                         <TextBlock Text="※ X·Y 방향 보가 직교하는 중심점마다 기둥을 자동 배치합니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,10,0,0"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Background="#EEF2F7" CornerRadius="8" Padding="14" Margin="0,12,0,0" Visibility="{Binding DrainPitVisibility}">
                                     <StackPanel>
-                                        <DockPanel Margin="0,0,0,8"><TextBlock Text="드레인 피트" FontWeight="SemiBold" Foreground="#4A6FA5" DockPanel.Dock="Left"/><CheckBox Content="드레인 피트 생성" IsChecked="{Binding HasDrainPit, Mode=TwoWay}" HorizontalAlignment="Right" VerticalAlignment="Center"/></DockPanel>
+                                        <DockPanel Margin="0,0,0,8"><TextBlock Text="드레인 피트" FontWeight="SemiBold" Foreground="#4A6FA5" DockPanel.Dock="Left"/><CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" Content="드레인 피트 생성" IsChecked="{Binding HasDrainPit, Mode=TwoWay}" HorizontalAlignment="Right" VerticalAlignment="Center"/></DockPanel>
                                         <StackPanel IsEnabled="{Binding HasDrainPit}">
-                                            <Border Padding="8" BorderBrush="#C7D3E0" BorderThickness="1" CornerRadius="4">
+                                            <Border Padding="10" BorderBrush="#C7D3E0" BorderThickness="1" CornerRadius="4">
                                                 <StackPanel>
-                                                    <TextBlock Text="드레인 피트 코너 위치" FontSize="11" Foreground="#7F8C8D" Margin="0,0,0,4"/>
-                                                    <Grid Width="160" Height="100">
-                                                        <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-                                                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-                                                        <Border Grid.RowSpan="2" Grid.ColumnSpan="2" BorderBrush="#4A6FA5" BorderThickness="2" Margin="10"/>
-                                                        <CheckBox Grid.Row="0" Grid.Column="0" HorizontalAlignment="Left" VerticalAlignment="Top" IsChecked="{Binding DrainPit.Corner, Mode=TwoWay, Converter={StaticResource CornerToBoolConverter}, ConverterParameter=좌상단}"/>
-                                                        <CheckBox Grid.Row="0" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Top" IsChecked="{Binding DrainPit.Corner, Mode=TwoWay, Converter={StaticResource CornerToBoolConverter}, ConverterParameter=우상단}"/>
-                                                        <CheckBox Grid.Row="1" Grid.Column="0" HorizontalAlignment="Left" VerticalAlignment="Bottom" IsChecked="{Binding DrainPit.Corner, Mode=TwoWay, Converter={StaticResource CornerToBoolConverter}, ConverterParameter=좌하단}"/>
-                                                        <CheckBox Grid.Row="1" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" IsChecked="{Binding DrainPit.Corner, Mode=TwoWay, Converter={StaticResource CornerToBoolConverter}, ConverterParameter=우하단}"/>
+                                                    <TextBlock Text="드레인 피트 코너 위치" FontSize="11" Foreground="#7F8C8D" Margin="0,0,0,6"/>
+                                                    <!-- 바깥 사각형 = 밸브실 내부공간 외곽. Margin=2 가 외곽선 두께와 같아 코너 버튼이 외곽선 안쪽 면에 딱 붙는다. -->
+                                                    <Grid Width="190" Height="120" HorizontalAlignment="Left">
+                                                        <Border BorderBrush="#4A6FA5" BorderThickness="2" Background="#F8FAFC"/>
+                                                        <RadioButton Style="{StaticResource DrainPitCornerToggleStyle}" GroupName="DrainPitCorner"
+                                                                     HorizontalAlignment="Left" VerticalAlignment="Top" Margin="2" ToolTip="좌상단"
+                                                                     IsChecked="{Binding DrainPit.Corner, Mode=TwoWay, Converter={StaticResource StringEqualsToBoolConverter}, ConverterParameter=좌상단}"/>
+                                                        <RadioButton Style="{StaticResource DrainPitCornerToggleStyle}" GroupName="DrainPitCorner"
+                                                                     HorizontalAlignment="Right" VerticalAlignment="Top" Margin="2" ToolTip="우상단"
+                                                                     IsChecked="{Binding DrainPit.Corner, Mode=TwoWay, Converter={StaticResource StringEqualsToBoolConverter}, ConverterParameter=우상단}"/>
+                                                        <RadioButton Style="{StaticResource DrainPitCornerToggleStyle}" GroupName="DrainPitCorner"
+                                                                     HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="2" ToolTip="좌하단"
+                                                                     IsChecked="{Binding DrainPit.Corner, Mode=TwoWay, Converter={StaticResource StringEqualsToBoolConverter}, ConverterParameter=좌하단}"/>
+                                                        <RadioButton Style="{StaticResource DrainPitCornerToggleStyle}" GroupName="DrainPitCorner"
+                                                                     HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="2" ToolTip="우하단"
+                                                                     IsChecked="{Binding DrainPit.Corner, Mode=TwoWay, Converter={StaticResource StringEqualsToBoolConverter}, ConverterParameter=우하단}"/>
                                                     </Grid>
                                                 </StackPanel>
                                             </Border>
                                             <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/><ColumnDefinition Width="70"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
-                                                <TextBlock Text="드레인 피트 Void 패밀리" VerticalAlignment="Center"/>
-                                                <ComboBox Grid.Column="1" ItemsSource="{Binding DrainPitVoidFamilyNames}" SelectedItem="{Binding SelectedDrainPitVoidFamily, Mode=TwoWay}"/>
+                                                <TextBlock Text="드레인 피트 패밀리" VerticalAlignment="Center"/>
+                                                <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Grid.Column="1" ItemsSource="{Binding DrainPitVoidFamilyNames}" SelectedItem="{Binding SelectedDrainPitVoidFamily, Mode=TwoWay}"/>
                                             </Grid>
                                             <Grid Margin="0,6,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/><ColumnDefinition Width="70"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
                                                 <TextBlock Text="Length 매개변수" VerticalAlignment="Center"/>
-                                                <ComboBox Grid.Column="1" ItemsSource="{Binding DrainPitVoidParameterNames}" SelectedItem="{Binding SelectedDrainPitLengthParam, Mode=TwoWay}"/>
-                                                <TextBox Grid.Column="2" Margin="6,0,0,0" Text="{Binding DrainPit.LengthX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                                <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Grid.Column="1" ItemsSource="{Binding DrainPitVoidParameterNames}" SelectedItem="{Binding SelectedDrainPitLengthParam, Mode=TwoWay}"/>
+                                                <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Margin="6,0,0,0" Text="{Binding DrainPit.LengthX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
                                                 <TextBlock Grid.Column="3" Text="mm" Margin="8,0" VerticalAlignment="Center"/>
                                             </Grid>
                                             <Grid Margin="0,6,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/><ColumnDefinition Width="70"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
                                                 <TextBlock Text="Width 매개변수" VerticalAlignment="Center"/>
-                                                <ComboBox Grid.Column="1" ItemsSource="{Binding DrainPitVoidParameterNames}" SelectedItem="{Binding SelectedDrainPitWidthParam, Mode=TwoWay}"/>
-                                                <TextBox Grid.Column="2" Margin="6,0,0,0" Text="{Binding DrainPit.WidthY, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                                <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Grid.Column="1" ItemsSource="{Binding DrainPitVoidParameterNames}" SelectedItem="{Binding SelectedDrainPitWidthParam, Mode=TwoWay}"/>
+                                                <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Margin="6,0,0,0" Text="{Binding DrainPit.WidthY, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
                                                 <TextBlock Grid.Column="3" Text="mm" Margin="8,0" VerticalAlignment="Center"/>
                                             </Grid>
                                             <Grid Margin="0,6,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/><ColumnDefinition Width="70"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
                                                 <TextBlock Text="Depth 매개변수" VerticalAlignment="Center"/>
-                                                <ComboBox Grid.Column="1" ItemsSource="{Binding DrainPitVoidParameterNames}" SelectedItem="{Binding SelectedDrainPitDepthParam, Mode=TwoWay}"/>
-                                                <TextBox Grid.Column="2" Margin="6,0,0,0" Text="{Binding DrainPit.Depth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                                <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Grid.Column="1" ItemsSource="{Binding DrainPitVoidParameterNames}" SelectedItem="{Binding SelectedDrainPitDepthParam, Mode=TwoWay}"/>
+                                                <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Margin="6,0,0,0" Text="{Binding DrainPit.Depth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
                                                 <TextBlock Grid.Column="3" Text="mm" Margin="8,0" VerticalAlignment="Center"/>
                                             </Grid>
                                         </StackPanel>
-                                        <TextBlock Text="드레인 피트는 밸브실당 1개입니다. 텍스트 상자 값이 mm 단위 실치수이며, Depth가 기초 상면 기준 굴착 깊이입니다. 콤보 상자는 그 값을 기록할 Void 패밀리의 인스턴스 매개변수로, 기본값은 자동 추정되고 직접 고르면 그 선택이 유지됩니다. Void는 기초 상단 EL에 자동 배치되며, Depth가 기초 두께를 넘으면 버림콘크리트까지 함께 절단합니다. 일반모델 Void 패밀리는 '로드할 때 보이드로 절단'이 켜져 있어야 합니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                        <TextBlock Text="드레인 피트는 밸브실당 1개입니다. 텍스트 상자 값이 mm 단위 실치수이며, Depth가 기초 상면 기준 굴착 깊이입니다. 콤보 상자는 그 값을 기록할 Void 패밀리의 인스턴스 매개변수로, 기본값은 자동 추정되고 직접 고르면 그 선택이 유지됩니다. Void는 기초 상단 EL에 자동 배치되며, Depth가 기초 두께를 넘으면 버림콘크리트까지 함께 절단합니다. '로드할 때 보이드로 절단'이 켜진 Void 패밀리를 고르면 기초를 절단하고, 꺼진 실물 피트 패밀리를 고르면 절단 없이 배치만 합니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"/>
                                     </StackPanel>
                                 </Border>
                             </StackPanel>
@@ -300,51 +502,65 @@
                                 <Border Background="#EEF2F7" CornerRadius="8" Padding="14" Margin="0,0,0,12" Visibility="{Binding FrameVisibility}">
                                     <StackPanel>
                                         <TextBlock Text="구조 프레임 유형" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,8"/>
-                                        <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                        <!-- 기둥·보·헌치 모두 "패밀리명 : 타입명"이라 드롭다운이 잘리지 않도록 260으로 맞춘다(docs/159 § D). -->
+                                        <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="260"/></Grid.ColumnDefinitions>
                                             <TextBlock Text="기둥 유형" VerticalAlignment="Center"/>
-                                            <ComboBox Grid.Column="1" ItemsSource="{Binding ColumnTypeNames}" SelectedItem="{Binding SelectedColumnTypeName}"/>
+                                            <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Grid.Column="1" ItemsSource="{Binding ColumnTypeNames}" SelectedItem="{Binding SelectedColumnTypeName}"/>
                                         </Grid>
-                                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="260"/></Grid.ColumnDefinitions>
                                             <TextBlock Text="보 유형" VerticalAlignment="Center"/>
-                                            <ComboBox Grid.Column="1" ItemsSource="{Binding BeamTypeNames}" SelectedItem="{Binding SelectedBeamTypeName}"/>
+                                            <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Grid.Column="1" ItemsSource="{Binding BeamTypeNames}" SelectedItem="{Binding SelectedBeamTypeName}"/>
                                         </Grid>
+                                    </StackPanel>
+                                </Border>
+                                <!-- 헌치는 모든 밸브실 유형에 적용되므로 FrameVisibility(제수 전용)를 걸지 않는다(docs/153 § D-2). -->
+                                <Border Background="#EEF2F7" CornerRadius="8" Padding="14" Margin="0,0,0,12">
+                                    <StackPanel>
+                                        <TextBlock Text="헌치" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,8"/>
+                                        <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" Content="상부 헌치 배치 (상부슬래브 하단)" IsChecked="{Binding HasUpperHaunch, Mode=TwoWay}" Margin="0,0,0,6"/>
+                                        <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" Content="하부 헌치 배치 (기초 상단)" IsChecked="{Binding HasLowerHaunch, Mode=TwoWay}" Margin="0,0,0,8"/>
+                                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="260"/></Grid.ColumnDefinitions>
+                                            <TextBlock Text="헌치 유형" VerticalAlignment="Center"/>
+                                            <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Grid.Column="1" ItemsSource="{Binding HaunchTypeNames}" SelectedItem="{Binding SelectedHaunchTypeName, Mode=TwoWay}"/>
+                                        </Grid>
+                                        <TextBlock Text="헌치는 외벽 4면 내측과 이토실 중간벽 양측을 따라, 기초 상단과 상부슬래브 하단에 배치됩니다. 목록은 '패밀리명 : 타입명'으로 표시되며, DH_헌치 패밀리가 로드돼 있으면 자동으로 선택됩니다. 유형이 (자동 탐색)이면 이름에 '헌치'가 든 구조 프레임 유형을 자동으로 찾습니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Background="#EEF2F7" CornerRadius="8" Padding="14">
                                     <StackPanel>
                                         <TextBlock Text="구조 두께" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,8"/>
                                         <Grid Visibility="{Binding PlainConcreteVisibility}"><Grid.ColumnDefinitions><ColumnDefinition Width="45"/><ColumnDefinition Width="*"/><ColumnDefinition Width="110"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
-                                            <TextBlock Text="Tb"/><TextBlock Grid.Column="1" Text="버림 두께"/><TextBox Grid.Column="2" Text="{Binding PlainConcreteThickness, UpdateSourceTrigger=LostFocus}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
+                                            <TextBlock Text="Tb"/><TextBlock Grid.Column="1" Text="버림 두께"/><TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding PlainConcreteThickness, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
                                         <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="45"/><ColumnDefinition Width="*"/><ColumnDefinition Width="110"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
-                                            <TextBlock Text="Tf"/><TextBlock Grid.Column="1" Text="기초 두께"/><TextBox Grid.Column="2" Text="{Binding FoundationThickness, UpdateSourceTrigger=LostFocus}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
+                                            <TextBlock Text="Tf"/><TextBlock Grid.Column="1" Text="기초 두께"/><TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding FoundationThickness, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
                                         <StackPanel Margin="0,8,0,0" Visibility="{Binding AirValveVisibility}">
                                             <TextBlock Text="본관 관통 Void" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,6"/>
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="45"/><ColumnDefinition Width="*"/><ColumnDefinition Width="110"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
-                                                <TextBlock Text="D"/><TextBlock Grid.Column="1" Text="본관 직경"/><TextBox Grid.Column="2" Text="{Binding MainPipeDiameter, UpdateSourceTrigger=LostFocus}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
+                                                <TextBlock Text="D"/><TextBlock Grid.Column="1" Text="본관 직경"/><TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding MainPipeDiameter, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                             </Grid>
                                             <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="45"/><ColumnDefinition Width="*"/><ColumnDefinition Width="110"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
-                                                <TextBlock Text="H"/><TextBlock Grid.Column="1" Text="기초 상부~본관 중심 깊이"/><TextBox Grid.Column="2" Text="{Binding FoundationTopToPipeCenterDepth, UpdateSourceTrigger=LostFocus}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
+                                                <TextBlock Text="Hp"/><TextBlock Grid.Column="1" Text="기초 상부~본관 중심 깊이"/><TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding FoundationTopToPipeCenterDepth, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                             </Grid>
                                             <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="45"/><ColumnDefinition Width="*"/><ColumnDefinition Width="145"/></Grid.ColumnDefinitions>
-                                                <TextBlock Text="축"/><TextBlock Grid.Column="1" Text="관통 방향"/><ComboBox Grid.Column="2" ItemsSource="{Binding VoidAxes}" SelectedItem="{Binding SelectedVoidAxis}"/>
+                                                <TextBlock Text="축"/><TextBlock Grid.Column="1" Text="관통 방향"/><ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Grid.Column="2" ItemsSource="{Binding VoidAxes}" SelectedItem="{Binding SelectedVoidAxis}"/>
                                             </Grid>
                                         </StackPanel>
                                         <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="45"/><ColumnDefinition Width="*"/><ColumnDefinition Width="110"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
-                                            <TextBlock Text="Lt"/><TextBlock Grid.Column="1" Text="기초 Toe 길이 (4변 공통)"/><TextBox Grid.Column="2" Text="{Binding FoundationToe, UpdateSourceTrigger=LostFocus}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
+                                            <TextBlock Text="Lt"/><TextBlock Grid.Column="1" Text="기초 Toe 길이 (4변 공통)"/><TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding FoundationToe, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
                                         <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="45"/><ColumnDefinition Width="*"/><ColumnDefinition Width="110"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
-                                            <TextBlock Text="To"/><TextBlock Grid.Column="1" Text="외벽 두께"/><TextBox Grid.Column="2" Text="{Binding OuterWallThickness, UpdateSourceTrigger=LostFocus}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
+                                            <TextBlock Text="To"/><TextBlock Grid.Column="1" Text="외벽 두께"/><TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding OuterWallThickness, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
                                         <Grid Margin="0,8,0,0" Visibility="{Binding IntermediateWallVisibility}"><Grid.ColumnDefinitions><ColumnDefinition Width="45"/><ColumnDefinition Width="*"/><ColumnDefinition Width="110"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
-                                            <TextBlock Text="Tw"/><TextBlock Grid.Column="1" Text="중간벽 두께"/><TextBox Grid.Column="2" Text="{Binding IntermediateWallThickness, UpdateSourceTrigger=LostFocus}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
+                                            <TextBlock Text="Tw"/><TextBlock Grid.Column="1" Text="중간벽 두께"/><TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding IntermediateWallThickness, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
                                         <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="45"/><ColumnDefinition Width="*"/><ColumnDefinition Width="110"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
-                                            <TextBlock Text="Ts"/><TextBlock Grid.Column="1" Text="상부 슬래브 두께"/><TextBox Grid.Column="2" Text="{Binding UpperSlabThickness, UpdateSourceTrigger=LostFocus}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
+                                            <TextBlock Text="Ts"/><TextBlock Grid.Column="1" Text="상부 슬래브 두께"/><TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding UpperSlabThickness, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
                                         <Grid Margin="0,8,0,0" Visibility="{Binding IntermediateSlabVisibility}"><Grid.ColumnDefinitions><ColumnDefinition Width="45"/><ColumnDefinition Width="*"/><ColumnDefinition Width="110"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
-                                            <TextBlock Text="Tm"/><TextBlock Grid.Column="1" Text="중간 슬래브 두께"/><TextBox Grid.Column="2" Text="{Binding IntermediateSlabThickness, UpdateSourceTrigger=LostFocus}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
+                                            <TextBlock Text="Tm"/><TextBlock Grid.Column="1" Text="중간 슬래브 두께"/><TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding IntermediateSlabThickness, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
                                     </StackPanel>
                                 </Border>
@@ -356,26 +572,38 @@
         </Border>
 
         <!-- 밸브실 종류별 참고도. 이미지 리소스가 없으면 빈 칸으로 표시된다. -->
-        <Border Grid.Column="1" Background="White" CornerRadius="15" Margin="0,12,20,12" Padding="14">
+        <Border x:Name="ImagePanel" Grid.Column="1" Background="White" CornerRadius="15" Margin="0,12,20,12" Padding="14">
             <Border.Effect><DropShadowEffect BlurRadius="15" ShadowDepth="2" Color="#DDE4EB" Opacity="0.3"/></Border.Effect>
-            <StackPanel>
+            <!-- 고정 높이 대신 * 행: 기본은 열 폭에 맞춰 이미지 비율(2190×930)대로 커지고,
+                 창이 화면 높이에 걸려 줄어들면 두 이미지가 같이 줄어든다. -->
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
                 <TextBlock Text="평면도" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,8"/>
-                <Border Background="#EEF2F7" CornerRadius="8" Height="140" Margin="0,0,0,16">
-                    <Image Source="{Binding PlanImagePath}" Stretch="Uniform" Margin="6"/>
+                <Border Grid.Row="1" Background="#EEF2F7" CornerRadius="8" MinHeight="80" Margin="0,0,0,16">
+                    <Image Source="{Binding PlanImagePath}" Stretch="Uniform" Margin="6" RenderOptions.BitmapScalingMode="HighQuality"/>
                 </Border>
-                <TextBlock Text="단면도" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,8"/>
-                <Border Background="#EEF2F7" CornerRadius="8" Height="140">
-                    <Image Source="{Binding SectionImagePath}" Stretch="Uniform" Margin="6"/>
+                <TextBlock Grid.Row="2" Text="단면도" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,8"/>
+                <Border Grid.Row="3" Background="#EEF2F7" CornerRadius="8" MinHeight="80">
+                    <Image Source="{Binding SectionImagePath}" Stretch="Uniform" Margin="6" RenderOptions.BitmapScalingMode="HighQuality"/>
                 </Border>
-            </StackPanel>
+            </Grid>
         </Border>
         </Grid>
 
         <Grid Grid.Row="2" Margin="20,0,20,16">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Border Background="#EEF2F7" CornerRadius="8" Padding="10"><TextBlock Text="{Binding Summary}" Foreground="#2C3E50" TextWrapping="Wrap"/></Border>
+            <!-- 기본은 펼침(IsChecked=True). 접으면 참고도 열이 사라지고 창 폭도 그만큼 줄어든다. -->
+            <ToggleButton x:Name="ImagePanelToggle" Grid.Row="1" HorizontalAlignment="Left" Margin="0,12,0,0"
+                          Style="{StaticResource ImagePanelToggleStyle}" IsChecked="True"
+                          Checked="OnImagePanelToggleChanged" Unchecked="OnImagePanelToggleChanged"/>
             <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-                <Button Content="기본값" Command="{Binding ResetCommand}" Margin="0,0,8,0"/>
+                <Button Style="{StaticResource CancelButtonStyle}" Content="기본값" Command="{Binding ResetCommand}" Margin="0,0,8,0"/>
                 <Button Content="모델 생성" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CreateCommand}"/>
             </StackPanel>
         </Grid>

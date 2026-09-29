@@ -27,6 +27,18 @@ public class AlignmentAttributeParserTests
     public void ParseDiameter_ReturnsUnresolvedForBlank(string? raw)
         => Assert.Equal(new DiameterParseResult(false, 0, null), AlignmentAttributeParser.ParseDiameter(raw));
 
+    /// <summary>docs/211 § J — 강관 등급 표기 정규화.</summary>
+    [Theory]
+    [InlineData("STWW 290", "STWW 290")]
+    [InlineData("stww400a", "STWW 400 A")]
+    [InlineData("STWW 400 B", "STWW 400 B")]
+    public void ResolveKind_NormalizesSteelGrades(string raw, string expected)
+    {
+        var resolved = AlignmentAttributeParser.ResolveKind(raw, null, null);
+        Assert.True(resolved.IsNormalized);
+        Assert.Equal(expected, resolved.Kind);
+    }
+
     [Fact] public void GuessDiameterField_UsesActualFieldOrder() => Assert.Equal("구경", AlignmentAttributeParser.GuessDiameterField(new[] { "구경", "Diameter" }));
     [Fact] public void GuessDiameterField_ReturnsFirstMatchedField() => Assert.Equal("PIP_DIA", AlignmentAttributeParser.GuessDiameterField(new[] { "PIPE_ID", "PIP_DIA", "MTRL" }));
     [Fact] public void GuessDiameterField_ReturnsNullWithoutCandidate() => Assert.Null(AlignmentAttributeParser.GuessDiameterField(new[] { "PIPE_ID", "MTRL" }));

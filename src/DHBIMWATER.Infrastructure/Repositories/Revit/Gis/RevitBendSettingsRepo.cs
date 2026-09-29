@@ -4,6 +4,7 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.ExtensibleStorage;
 using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Core.Gis;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Gis;
 
@@ -34,7 +35,7 @@ public sealed class RevitBendSettingsRepo : IBendSettingsRepo
 
     public BendSettings? Load()
     {
-        var doc = _doc() ?? throw new InvalidOperationException("활성 Revit 문서를 찾을 수 없습니다.");
+        var doc = _doc() ?? throw new DhbimwaterException(ErrorCodes.NoActiveDocument, "활성 Revit 문서가 없습니다.");
         var schema = Schema.Lookup(BendSettingsSchemaGuidV2);
         if (schema is null) return null;
 
@@ -48,14 +49,14 @@ public sealed class RevitBendSettingsRepo : IBendSettingsRepo
         var joints = Deserialize<JointDeflectionSpec>(entity.Get<string>(schema.GetField(JointDeflectionField)));
         var fittings = Deserialize<BendFittingEntry>(entity.Get<string>(schema.GetField(FittingField)));
         var activeJointType = entity.Get<string>(schema.GetField(ActiveJointTypeField));
-        var (form, connection) = ParseModes(entity.Get<string>(schema.GetField(ApplicationModeField)));
+        var (form, connection, restraintGland, steelClass) = ParseModes(entity.Get<string>(schema.GetField(ApplicationModeField)));
         return new BendSettings(new StraightPipeSpecTable(straight), new JointDeflectionTable(joints),
-            new BendFittingCatalog(fittings), string.IsNullOrWhiteSpace(activeJointType) ? JointTypeCatalog.KpMechanical : activeJointType, connection, form);
+            new BendFittingCatalog(fittings), string.IsNullOrWhiteSpace(activeJointType) ? JointTypeCatalog.KpMechanical : activeJointType, connection, form, restraintGland, steelClass);
     }
 
     public void Save(BendSettings settings)
     {
-        var doc = _doc() ?? throw new InvalidOperationException("활성 Revit 문서를 찾을 수 없습니다.");
+        var doc = _doc() ?? throw new DhbimwaterException(ErrorCodes.NoActiveDocument, "활성 Revit 문서가 없습니다.");
         var schema = GetOrCreateSchema();
         var storage = FindStorage(doc) ?? CreateStorage(doc);
 
@@ -65,7 +66,9 @@ public sealed class RevitBendSettingsRepo : IBendSettingsRepo
         entity.Set(schema.GetField(FittingField), JsonSerializer.Serialize(settings.Fittings.Entries, JsonOptions));
         entity.Set(schema.GetField(ActiveJointTypeField), settings.ActiveJointType);
         // 기존 Schema에 필드를 추가할 수 없으므로 같은 문자열 필드에 함께 저장한다. 구 값("SingleJoint")도 ParseModes가 그대로 읽는다.
-        entity.Set(schema.GetField(ApplicationModeField), $"{settings.ApplicationMode}|{settings.ActiveBendConnection}|{settings.ActiveBendForm}");
+        // 5번째 토큰 = 강관 곡관 종류(docs/211 § C-8). 4토큰 구 저장본은 ParseModes가 F12로 읽는다.
+        entity.Set(schema.GetField(ApplicationModeField),
+            $"{settings.ApplicationMode}|{settings.ActiveBendConnection}|{settings.ActiveBendForm}|{settings.UseRestraintGland}|{settings.ActiveSteelFittingClass}");
         storage.SetEntity(entity);
     }
 
@@ -73,7 +76,7 @@ public sealed class RevitBendSettingsRepo : IBendSettingsRepo
         => string.IsNullOrWhiteSpace(json) ? new List<T>() : JsonSerializer.Deserialize<List<T>>(json, JsonOptions) ?? new List<T>();
 
     /// <summary>구 저장본(형식 필드 없음)은 ApplicationMode로 형식을 역매핑한다: 양쪽 Joint→A형, 그 외→B형(2026-09-03).</summary>
-    private static (BendForm Form, BendConnection Connection) ParseModes(string? text)
+    private static (BendForm Form, BendConnection Connection, bool UseRestraintGland, SteelFittingClass SteelFittingClass) ParseModes(string? text)
     {
         var parts = (text ?? string.Empty).Split('|');
         var mode = Enum.TryParse<JointApplicationMode>(parts[0], out var parsedMode) ? parsedMode : JointApplicationMode.SingleJoint;
@@ -83,7 +86,13 @@ public sealed class RevitBendSettingsRepo : IBendSettingsRepo
         var form = parts.Length > 2 && Enum.TryParse<BendForm>(parts[2], out var parsedForm)
             ? parsedForm
             : (mode == JointApplicationMode.BothJoints ? BendForm.AType : BendForm.BType);
-        return (form, connection);
+        // 4번째 토큰이 없는 구 저장본은 이탈방지압륜 미적용으로 읽는다 — 기존 모델의 KP접합수를 건드리지 않기 위해서다.
+        var restraintGland = parts.Length > 3 && bool.TryParse(parts[3], out var parsedGland) && parsedGland;
+        // 5번째 토큰이 없는 구 저장본은 강관 곡관 종류 F12로 읽는다(docs/211 § C-8).
+        var steelClass = parts.Length > 4 && Enum.TryParse<SteelFittingClass>(parts[4], out var parsedClass) && parsedClass != SteelFittingClass.None
+            ? parsedClass
+            : SteelFittingClass.F12;
+        return (form, connection, restraintGland, steelClass);
     }
 
     private static DataStorage? FindStorage(Document doc)

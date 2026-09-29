@@ -1,3 +1,4 @@
+using DHBIMWATER.Shared.Errors;
 using DHBIMWATER.Core.Geometry;
 
 namespace DHBIMWATER.Core.Piping;
@@ -14,7 +15,7 @@ public sealed class PipeFlowOrientation
     public bool IsForward(Guid edgeId)
         => _forwards.TryGetValue(edgeId, out var forward)
             ? forward
-            : throw new KeyNotFoundException($"흐름 방향이 없는 엣지입니다: {edgeId}.");
+            : throw new DhbimwaterException(ErrorCodes.PL_EdgeWithoutFlow, $"흐름 방향이 없는 엣지입니다: {edgeId}.");   // 코드 연결(docs/240 § B)
 
     public static PipeFlowOrientation Build(PipeNetworkDefinition network)
     {

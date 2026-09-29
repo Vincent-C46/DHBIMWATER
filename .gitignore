@@ -65,8 +65,8 @@ Desktop.ini
 AGENTS.md
 CLAUDE.md
 PROGRESS.md
-docs/ai/
-docs/05_수량산출로직.md
+docs/
+graft/
 .claude/
 .understand-anything/
 .omc/
@@ -77,4 +77,4 @@ docs/05_수량산출로직.md
 *.html
 *.pdf
 *.xlsx
-/docs/01_철근상세도_작성+철근유형_입력_범례작성_rev260408.dyn
+*.dyn

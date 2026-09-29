@@ -2,7 +2,7 @@ using DHBIMWATER.Core.Parameters;
 
 namespace DHBIMWATER.Core.Gis;
 
-/// <summary>DHBoost 배치 태그 계약. 이름·타입 변경 금지.</summary>
+/// <summary>연동 애드인 배치 태그 계약. 이름·타입 변경 금지.</summary>
 public static class PlacementStationParameters
 {
     public const string SourceFile = "SourceFile";

@@ -1,4 +1,5 @@
 using DHBIMWATER.Core.Geometry;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Core.Gis;
 
@@ -36,7 +37,7 @@ public static class AlignmentIntervalSampler
         {
             var distance = i * interval;              // 누산 대신 인덱스 곱 — 장거리 선형에서 오차 누적 방지
             if (distance > total + Tolerance) break;
-            var part = parts.First(x => distance <= x.EndDistance + 1e-9);
+            var part = PartAt(parts, distance);
             var local = Math.Clamp((distance - part.StartDistance) / part.Length, 0d, 1d);
             result.Add(new AlignmentSamplePoint(
                 new Point3D(part.Start.X + (part.End.X - part.Start.X) * local, part.Start.Y + (part.End.Y - part.Start.Y) * local, part.Start.Z + (part.End.Z - part.Start.Z) * local),
@@ -186,7 +187,7 @@ public static class AlignmentIntervalSampler
 
     private static Point3D PointAt(IReadOnlyList<Part> parts, double distance)
     {
-        var part = parts.First(x => distance <= x.EndDistance + 1e-9);
+        var part = PartAt(parts, distance);
         var local = Math.Clamp((distance - part.StartDistance) / part.Length, 0d, 1d);
         return new Point3D(part.Start.X + (part.End.X - part.Start.X) * local, part.Start.Y + (part.End.Y - part.Start.Y) * local, part.Start.Z + (part.End.Z - part.Start.Z) * local);
     }
@@ -233,8 +234,20 @@ public static class AlignmentIntervalSampler
 
     private static void ValidateInterval(double interval)
     {
-        if (interval <= 0) throw new ArgumentOutOfRangeException(nameof(interval), "간격은 0보다 커야 합니다.");
+        if (interval <= 0) throw new DhbimwaterException(ErrorCodes.PA_InvalidInterval, "간격은 0보다 커야 합니다.");
     }
 
     private sealed record Part(Point3D Start, Point3D End, double StartDistance, double EndDistance, double Length);
+
+    /// <summary>parts는 EndDistance 오름차순(BuildParts) — 선형 탐색이면 세그먼트×정점이었다(docs/209 § F). 종전 First(...)와 같은 조건.</summary>
+    private static Part PartAt(IReadOnlyList<Part> parts, double distance)
+    {
+        int low = 0, high = parts.Count - 1;
+        while (low < high)
+        {
+            var mid = (low + high) / 2;
+            if (distance <= parts[mid].EndDistance + 1e-9) high = mid; else low = mid + 1;
+        }
+        return parts[low];
+    }
 }

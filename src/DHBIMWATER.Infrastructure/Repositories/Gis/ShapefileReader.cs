@@ -2,6 +2,7 @@ using DHBIMWATER.Application.DTOs.Gis;
 using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Core.Gis;
 using System.IO;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Gis;
 
@@ -11,9 +12,9 @@ public sealed class ShapefileReader : IShapefileReader, IAlignmentSourceReader
 
     public ShapefileReadResult Read(string shpPath)
     {
-        if (!File.Exists(shpPath)) throw new FileNotFoundException("SHP 파일을 찾을 수 없습니다.", shpPath);
+        if (!File.Exists(shpPath)) throw new DhbimwaterException(ErrorCodes.PA_ShpFileMissing, $"SHP 파일을 찾을 수 없습니다: {shpPath}");
         var dbfPath = Path.ChangeExtension(shpPath, ".dbf");
-        if (!File.Exists(dbfPath)) throw new FileNotFoundException("SHP 형제 .dbf 파일이 필요합니다.", dbfPath);
+        if (!File.Exists(dbfPath)) throw new DhbimwaterException(ErrorCodes.PA_ShpFileMissing, $"SHP 형제 .dbf 파일이 필요합니다: {dbfPath}");
         var warnings = new List<string>();
         var cpgPath = Path.ChangeExtension(shpPath, ".cpg");
         var prjPath = Path.ChangeExtension(shpPath, ".prj");

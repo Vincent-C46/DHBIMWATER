@@ -4,6 +4,8 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:controls="clr-namespace:DHBIMWATER.UI.Controls"
+        xmlns:conv="clr-namespace:DHBIMWATER.UI.Converters"
+        xmlns:views="clr-namespace:DHBIMWATER.UI.Views.Modeling"
         xmlns:vm="clr-namespace:DHBIMWATER.UI.ViewModels.Modeling"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance vm:PumpingStationViewModel, IsDesignTimeCreatable=False}"
@@ -22,6 +24,46 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="/DHBIMWATER.UI;component/Styles/Generic.xaml"/>
             </ResourceDictionary.MergedDictionaries>
+
+            <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+            <conv:StringEqualsToBoolConverter x:Key="StringEqualsToBoolConverter"/>
+
+            <!-- 최상단 모드 토글(펌프장 / 토출조). ValveRoomView의 유형 선택과 같은 세그먼트 모양. -->
+            <Style x:Key="ModeToggleStyle" TargetType="RadioButton">
+                <Setter Property="MinWidth" Value="130"/>
+                <Setter Property="Height" Value="34"/>
+                <Setter Property="Padding" Value="22,0"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="FontSize" Value="13"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Foreground" Value="#7F8C8D"/>
+                <Setter Property="Tag" Value="0"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="RadioButton">
+                            <Border x:Name="Bd" Background="#FFFFFF" BorderBrush="#95A5A6" BorderThickness="1"
+                                    CornerRadius="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"
+                                    SnapsToDevicePixels="True">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  Margin="{TemplateBinding Padding}"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="BorderBrush" Value="#2196F3"/>
+                                    <Setter Property="Foreground" Value="#2196F3"/>
+                                    <Setter Property="Panel.ZIndex" Value="1"/>
+                                </Trigger>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="#2196F3"/>
+                                    <Setter TargetName="Bd" Property="BorderBrush" Value="#2196F3"/>
+                                    <Setter Property="Foreground" Value="White"/>
+                                    <Setter Property="Panel.ZIndex" Value="2"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
         </ResourceDictionary>
     </Window.Resources>
 
@@ -32,13 +74,41 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <!-- 모드 토글 (펌프장 / 토출조) -->
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <controls:TitleBar Grid.Row="0"/>
 
-        <Grid Grid.Row="1" Margin="30,10,30,10" Width="Auto">
+        <!-- 최상단 모드 토글. 본문 카드 바깥에 고정되며, 모드를 바꾸면 본문과 하단 버튼이 통째로 교체된다. -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="40,12,40,0">
+            <RadioButton Content="펌프장" GroupName="BuilderMode" Tag="8,0,0,8"
+                         Style="{StaticResource ModeToggleStyle}"
+                         IsChecked="{Binding SelectedMode, Mode=TwoWay,
+                                     Converter={StaticResource StringEqualsToBoolConverter}, ConverterParameter=펌프장}"/>
+            <RadioButton Content="토출조" GroupName="BuilderMode" Tag="0,8,8,0" Margin="-1,0,0,0"
+                         Style="{StaticResource ModeToggleStyle}"
+                         IsChecked="{Binding SelectedMode, Mode=TwoWay,
+                                     Converter={StaticResource StringEqualsToBoolConverter}, ConverterParameter=토출조}"/>
+            <TextBlock VerticalAlignment="Center" Margin="14,0,0,0" FontSize="12" Foreground="#7F8C8D">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Text" Value="펌프장 제원을 입력하고 작성합니다."/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsBasinMode}" Value="True">
+                                <Setter Property="Text" Value="토출조 제원을 입력하고 생성합니다. 펌프장 연동 값은 읽기전용입니다."/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </StackPanel>
+
+        <!-- 펌프장 모드 본문 (기존 탭 구조 그대로) -->
+        <Grid Grid.Row="2" Margin="30,10,30,10" Width="Auto"
+              Visibility="{Binding IsPumpMode, Converter={StaticResource BooleanToVisibilityConverter}}">
             <Border Grid.Column="1"  Background="White" CornerRadius="15" Margin="10,0,0,0">
                 <Border.Effect>
                     <DropShadowEffect BlurRadius="15" ShadowDepth="2" Color="#DDE4EB" Opacity="0.3"/>
@@ -57,12 +127,13 @@
                             <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,10,0">
                                 <StackPanel>
                                     <StackPanel Orientation="Horizontal">
-                                        <Button Content="Excel 가져오기"
+                                        <!-- Height는 뺀다. PrimaryButtonStyle이 Padding="15,8"이라 20px로 고정하면 글자가 잘린다. (docs/183 §4.3) -->
+                                        <Button Style="{StaticResource PrimaryButtonStyle}" Content="Excel 가져오기"
                                      Command="{Binding ImportExcelCommand}"
-                                     Width="130" Height="20"
+                                     Width="130"
                                      HorizontalAlignment="Left"
                                      Margin="0,0,0,10"/>
-                                        <TextBox Text="{Binding ExcelFilePath, Mode=OneWay}" IsReadOnly="True" Margin="10,0,0,10" VerticalAlignment="Center"
+                                        <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding ExcelFilePath, Mode=OneWay}" IsReadOnly="True" Margin="10,0,0,10" VerticalAlignment="Center"
                                              Width="170" BorderBrush="Transparent"
                                              Foreground="Gray"/>
                                     </StackPanel>
@@ -76,7 +147,7 @@
                                     </StackPanel>
 
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                        <CheckBox IsChecked="{Binding HasCheckValve}" Margin="0,0,10,0" Content=" 추가역지밸브 적용" />
+                                        <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" IsChecked="{Binding HasCheckValve}" Margin="0,0,10,0" Content=" 추가역지밸브 적용" />
                                     </StackPanel>
 
                                     <Separator Margin="0,0,0,10"/>
@@ -140,7 +211,7 @@
                                     </StackPanel>
                                     <Separator Margin="0,0,0,10"/>
                                     <TextBlock Text="부재별 콘크리트 재료" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,6"/>
-                                    <DataGrid ItemsSource="{Binding ConcreteMaterials}" AutoGenerateColumns="False" CanUserAddRows="False"
+                                    <DataGrid Style="{StaticResource PrimaryDataGridStyle}" ItemsSource="{Binding ConcreteMaterials}" AutoGenerateColumns="False" CanUserAddRows="False"
                                               HeadersVisibility="Column" Width="570" MinHeight="165" Margin="0,0,0,10">
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="부재" Binding="{Binding MemberName, Mode=OneWay}" IsReadOnly="True" Width="80"/>
@@ -245,7 +316,7 @@
                                                       SelectedItem="{Binding SelectedTheta}"/>
                                     </StackPanel>
 
-                                    <Expander x:Name="DownExpander" Grid.Row="1"
+                                    <Expander Style="{StaticResource PrimaryExpanderStyle}" x:Name="DownExpander" Grid.Row="1"
                                                IsExpanded="{Binding IsExpanded}"
                                                ExpandDirection="Down">
                                         <Expander.Header>
@@ -359,10 +430,10 @@
                                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                                                         <TextBlock Text="" Style="{StaticResource LabelTextBlockStyle}" Width="30" VerticalAlignment="Center"/>
                                                         <TextBlock Text="펌프 오프닝 타입" Style="{StaticResource LabelTextBlockStyle}" Width="150" VerticalAlignment="Center"/>
-                                                        <RadioButton Content="사각형" 
+                                                        <RadioButton Style="{StaticResource PrimaryRadioButtonStyle}" Content="사각형" 
                                                                  IsChecked="{Binding IsRectangularOpening, Mode=TwoWay}"
                                                                  Margin="10,0" VerticalAlignment="Center"/>
-                                                        <RadioButton Content="원형" 
+                                                        <RadioButton Style="{StaticResource PrimaryRadioButtonStyle}" Content="원형" 
                                                                  IsChecked="{Binding IsCircularOpening, Mode=TwoWay}"
                                                                  Margin="10,0" VerticalAlignment="Center"/>
                                                     </StackPanel>
@@ -476,10 +547,10 @@
                                             <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                                                 <TextBlock Text="" Style="{StaticResource LabelTextBlockStyle}" Width="30" VerticalAlignment="Center"/>
                                                 <TextBlock Text="펌프 오프닝 타입" Style="{StaticResource LabelTextBlockStyle}" Width="150" VerticalAlignment="Center"/>
-                                                <RadioButton Content="사각형"
+                                                <RadioButton Style="{StaticResource PrimaryRadioButtonStyle}" Content="사각형"
                  IsChecked="{Binding IsRectangularOpening, Mode=TwoWay}"
                  Margin="10,0" VerticalAlignment="Center"/>
-                                                <RadioButton Content="원형"
+                                                <RadioButton Style="{StaticResource PrimaryRadioButtonStyle}" Content="원형"
                  IsChecked="{Binding IsCircularOpening, Mode=TwoWay}"
                  Margin="10,0" VerticalAlignment="Center"/>
                                             </StackPanel>
@@ -788,7 +859,7 @@ Tag="HH1" Text="{Binding HH1}" Width="100" Margin="10,0" VerticalAlignment="Cent
                                                          Width="100" Margin="10,0" VerticalAlignment="Center" Height="25"/>
                                         <TextBlock Text="mm" Style="{StaticResource LabelTextBlockStyle}" VerticalAlignment="Center" Width="30"/>
                                     </StackPanel>
-                                    <Expander x:Name="PlanDownExpander" Grid.Row="1"
+                                    <Expander Style="{StaticResource PrimaryExpanderStyle}" x:Name="PlanDownExpander" Grid.Row="1"
                                                   IsExpanded="{Binding IsExpanded}"
                                                   ExpandDirection="Down">
                                         <Expander.Header>
@@ -908,13 +979,32 @@ Tag="HH1" Text="{Binding HH1}" Width="100" Margin="10,0" VerticalAlignment="Cent
                 </TabControl>
             </Border>
         </Grid>
-        <Grid Grid.Row="2" Height="Auto">
-            <Button Content="Create"
+        <!-- 토출조 모드 본문 (신규 UserControl) -->
+        <ContentControl Grid.Row="2" Margin="30,10,30,10"
+                        Content="{Binding DischargeBasin}"
+                        Visibility="{Binding IsBasinMode, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <ContentControl.ContentTemplate>
+                <DataTemplate>
+                    <views:DischargeBasinView/>
+                </DataTemplate>
+            </ContentControl.ContentTemplate>
+        </ContentControl>
+
+        <Grid Grid.Row="3" Height="Auto">
+            <Button Content="펌프장 작성"
                     Style="{StaticResource PrimaryButtonStyle}"
                     Width="150" Height="40"
                     HorizontalAlignment="Right"
                     Margin="0,0,20,20"
+                    Visibility="{Binding IsPumpMode, Converter={StaticResource BooleanToVisibilityConverter}}"
                     Command="{Binding CreatePumpingStationCommand}"/>
+            <Button Content="토출조 생성"
+                    Style="{StaticResource PrimaryButtonStyle}"
+                    Width="150" Height="40"
+                    HorizontalAlignment="Right"
+                    Margin="0,0,20,20"
+                    Visibility="{Binding IsBasinMode, Converter={StaticResource BooleanToVisibilityConverter}}"
+                    Command="{Binding DischargeBasin.CreateDischargeBasinCommand}"/>
         </Grid>
     </Grid>
 </Window>

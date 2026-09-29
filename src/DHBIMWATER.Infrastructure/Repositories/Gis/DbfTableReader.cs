@@ -1,6 +1,7 @@
 using System.Text;
 using System.IO;
 using DHBIMWATER.Application.DTOs.Gis;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Gis;
 
@@ -26,7 +27,7 @@ internal static class DbfTableReader
             if (first == 0x0D) break;
             var descriptor = new byte[32]; descriptor[0] = first;
             var remainder = reader.ReadBytes(31);
-            if (remainder.Length != 31) throw new EndOfStreamException("DBF 필드 디스크립터가 불완전합니다.");
+            if (remainder.Length != 31) throw new DhbimwaterException(ErrorCodes.PA_DbfFormat, "DBF 필드 디스크립터가 불완전합니다.");
             Buffer.BlockCopy(remainder, 0, descriptor, 1, 31);
             // 필드명도 레코드 값과 같은 코드페이지다. 국가 수치지도 DBF는 "구분"·"등고수치"처럼 한글 필드명을 쓴다.
             // ASCII로 읽으면 비ASCII 바이트가 전부 '?'가 되어 필드 콤보·샘플 표시가 "????"로 깨지고,
@@ -37,6 +38,9 @@ internal static class DbfTableReader
             var name = encoding.GetString(descriptor, 0, nameLength).TrimEnd(' ');
             fields.Add(new ShapefileFieldInfo(name, (char)descriptor[11], descriptor[16], descriptor[17]));
         }
+        // 필드 길이 합 + 삭제 플래그 1바이트가 레코드 길이를 넘는 손상 파일은 GetString에서 범위 예외가 났다(docs/209 § G).
+        if (1 + fields.Sum(f => f.Length) > recordLength)
+            throw new DhbimwaterException(ErrorCodes.PA_DbfFormat, "DBF 필드 길이 합이 레코드 길이를 넘습니다(손상된 파일).");
         stream.Position = headerLength;
         var rows = new List<IReadOnlyDictionary<string, string>>();
         for (var row = 0; row < recordCount && stream.Position + recordLength <= stream.Length; row++)

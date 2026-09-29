@@ -59,7 +59,7 @@ public class PipeFlowOrientationTests
     }
 
     private static PipeEdgeDefinition Edge((double X, double Y) start, (double X, double Y) end)
-        => new(Guid.NewGuid(), new Point2D(start.X, start.Y), new Point2D(end.X, end.Y), 0);
+        => new(Guid.NewGuid(), new Point2D(start.X, start.Y), new Point2D(end.X, end.Y), 0, PipeEdge.DefaultDiameterMm);
 
     private static PipeNetworkDefinition Network(params PipeEdgeDefinition[] edges)
         => new([], edges, [], 0, 100, PipeOutputMode.PipeAccessorySegment, new Point2D(0, 0));

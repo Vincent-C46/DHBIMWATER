@@ -2,7 +2,8 @@ using System.Threading;
 
 namespace DHBIMWATER.Revit.Commands;
 
-internal enum ValveRoomRequestId { None, CreateModel, PickDrainPitLocation }
+// PickDrainPitLocation은 화면 미연결이라 제거했다(docs/238 § F).
+internal enum ValveRoomRequestId { None, CreateModel }
 
 internal sealed class ValveRoomRequest
 {

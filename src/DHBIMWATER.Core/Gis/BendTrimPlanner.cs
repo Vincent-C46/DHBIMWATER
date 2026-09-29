@@ -1,4 +1,5 @@
 using DHBIMWATER.Core.Geometry;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Core.Gis;
 
@@ -32,7 +33,8 @@ public sealed record BendPlacement(
     string JointType = "",
     JointApplicationMode ApplicationMode = JointApplicationMode.SingleJoint,
     BendForm Form = BendForm.BType,
-    double WeightKg = 0d);
+    double WeightKg = 0d,
+    bool HasLegOverlap = false);
 
 /// <param name="Trims">인덱스 = 폴리선 정점 인덱스. 차감이 없는 정점은 <see cref="VertexTrim.None"/>다.</param>
 public sealed record AlignmentBendPlan(int AlignmentIndex, IReadOnlyList<VertexTrim> Trims);
@@ -66,7 +68,7 @@ public static class BendTrimPlanner
         double snapTolerance,
         IReadOnlyList<IReadOnlySet<int>>? stepVertices = null)
     {
-        if (snapTolerance <= 0) throw new ArgumentOutOfRangeException(nameof(snapTolerance), "스냅 허용오차는 0보다 커야 합니다.");
+        if (snapTolerance <= 0) throw new DhbimwaterException(ErrorCodes.PA_InvalidSnapTolerance, "스냅 허용오차는 0보다 커야 합니다.");
 
         // 허용 초과(Unresolved)도 최근접 곡관을 배치한다. 치수 미입력만 배치하지 않는다.
         var placeable = resolutions
@@ -117,16 +119,23 @@ public static class BendTrimPlanner
                     continue;
                 }
 
-                var upstream = AlignmentVertexDirection.SkippingNear(vertices, v, -1, snapTolerance);
-                var downstream = AlignmentVertexDirection.SkippingNear(vertices, v, +1, snapTolerance);
+                var shortLeg = bend.LayingLengthMm;
+                var longLeg = bend.LongLegLengthMm;
+                // docs/217 § A — 다리 끝 P1·P5는 폴리선을 3D 호길이로 따라간 점이다(직관 샘플러 BuildExclusions·PointAt과 같은 기준).
+                // 종전엔 첫 이웃 정점 방향(SkippingNear)으로 직선을 뻗어, 다리 안에 꺾인 짧은 구간이 있으면 직관 시작점과 수십 mm 어긋났다.
+                var legStart = WalkAlong(vertices, v, -1, shortLeg * MmToCoordinate, out var upstreamReachesEnd);
+                var legEnd = WalkAlong(vertices, v, +1, longLeg * MmToCoordinate, out var downstreamReachesEnd);
+                var upstream = DirectionOrNull(vertices[v], legStart);
+                var downstream = DirectionOrNull(vertices[v], legEnd);
                 if (upstream is null || downstream is null)
                 {
                     warnings.Add($"{Path.GetFileName(alignments[a].SourceFile)} 레코드 {alignments[a].RecordNumber} {AlignmentVertexLabel.Format(alignments[a], v)}: 스냅 허용오차 밖의 이웃 정점을 찾지 못해 곡관 자리를 비웠습니다.");
                     continue;
                 }
+                var legReachesEnd = upstreamReachesEnd || downstreamReachesEnd;
+                if (legReachesEnd)
+                    warnings.Add($"{Path.GetFileName(alignments[a].SourceFile)} 레코드 {alignments[a].RecordNumber} {AlignmentVertexLabel.Format(alignments[a], v)}: 곡관 다리가 선형 끝을 넘어갑니다 — 선형 끝점까지만 두고 3D 뷰에서 적색 표시합니다.");
 
-                var shortLeg = bend.LayingLengthMm;
-                var longLeg = bend.LongLegLengthMm;
                 var upstreamDiameter = AlignmentDiameterProfile.DiameterAtVertex(alignments[a], v - 1);
                 var downstreamDiameter = AlignmentDiameterProfile.DiameterAtVertex(alignments[a], v);
                 var bendDiameter = Math.Max(upstreamDiameter, downstreamDiameter);
@@ -141,6 +150,8 @@ public static class BendTrimPlanner
                         vertices[v], upstream, downstream,
                         bend.StandardAngleDeg, polylineDeflectionDeg,
                         bend.CenterlineRadiusMm, shortLeg, longLeg);
+                    // 현(V→P1/P5) 길이와 호길이 차이만큼의 오차를 없애려고 양 끝은 선형 위 점을 그대로 쓴다(docs/217 § A-3).
+                    points = points with { Start = legStart, End = legEnd };
                 }
                 catch (ArgumentException)
                 {
@@ -165,7 +176,7 @@ public static class BendTrimPlanner
                     bend.WallThicknessMm, bend.IsAcceptable, rotXy, rotXz,
                     polylineDeflectionDeg, bend.EffectiveAllowableDeg, bend.ResidualDeg,
                     bend.CenterlineRadiusMm, bend.LayingLengthMm, bend.JointType, bend.ApplicationMode,
-                    bend.Form, bend.WeightKg));
+                    bend.Form, bend.WeightKg, legReachesEnd));
             }
 
             plans.Add(new AlignmentBendPlan(a, trims));
@@ -180,6 +191,15 @@ public static class BendTrimPlanner
            && vertexIndex < kinds.Count
            && !string.IsNullOrWhiteSpace(kinds[vertexIndex]);
 
+    /// <summary>정점 라벨 뒤에 그 정점의 곡관유형 원문을 덧붙인다. 값이 없으면 라벨만 돌려준다.</summary>
+    private static string FormatWithBendKind(PipeAlignment alignment, int vertexIndex)
+    {
+        var label = AlignmentVertexLabel.Format(alignment, vertexIndex);
+        return HasBendKind(alignment, vertexIndex)
+            ? $"{label} 곡관유형 {alignment.VertexBendKinds![vertexIndex]!.Trim()}"
+            : label;
+    }
+
     private static IEnumerable<string> BuildDuplicateWarnings(
         IReadOnlyList<PipeAlignment> alignments,
         IReadOnlyList<(int AlignmentIndex, int VertexIndex)> skipped)
@@ -187,10 +207,45 @@ public static class BendTrimPlanner
         foreach (var group in skipped.GroupBy(x => x.AlignmentIndex))
         {
             var alignment = alignments[group.Key];
-            var examples = string.Join(", ", group.Take(5).Select(x => AlignmentVertexLabel.Format(alignment, x.VertexIndex)));
+            // docs/149 §B: 버려진 정점의 곡관유형 원문을 함께 찍어야 엑셀 대조 없이 원인을 특정할 수 있다.
+            var examples = string.Join(", ", group.Take(5).Select(x => FormatWithBendKind(alignment, x.VertexIndex)));
             var suffix = group.Count() > 5 ? $", 외 {group.Count() - 5}건" : string.Empty;
             yield return $"{Path.GetFileName(alignment.SourceFile)} 레코드 {alignment.RecordNumber}: 좌표가 스냅 허용오차 안으로 겹친 정점 {group.Count()}곳은 곡관을 1개만 배치했습니다 — {examples}{suffix}.";
         }
+    }
+
+    /// <summary>
+    /// 정점 <paramref name="index"/>에서 <paramref name="step"/> 방향으로 폴리선을 3D 호길이 <paramref name="distance"/>만큼 따라간 점.
+    /// 길이 1e-9 이하 조각은 샘플러 BuildParts처럼 건너뛴다. 선형 끝에 닿으면 끝 정점을 돌려주고 <paramref name="reachesEnd"/>를 켠다.
+    /// </summary>
+    private static Point3D WalkAlong(IReadOnlyList<Point3D> vertices, int index, int step, double distance, out bool reachesEnd)
+    {
+        reachesEnd = false;
+        var remaining = distance;
+        var current = vertices[index];
+        for (var i = index + step; i >= 0 && i < vertices.Count; i += step)
+        {
+            var next = vertices[i];
+            var length = current.DistanceTo(next);
+            if (length > 1e-9)
+            {
+                if (length >= remaining)
+                {
+                    var t = remaining / length;
+                    return new Point3D(current.X + (next.X - current.X) * t, current.Y + (next.Y - current.Y) * t, current.Z + (next.Z - current.Z) * t);
+                }
+                remaining -= length;
+            }
+            current = next;
+        }
+        reachesEnd = true;
+        return current;
+    }
+
+    private static Vector3D? DirectionOrNull(Point3D from, Point3D to)
+    {
+        var vector = new Vector3D(to.X - from.X, to.Y - from.Y, to.Z - from.Z);
+        return vector.Length <= 1e-9 ? null : vector.Normalize();
     }
 
     private static double AngleDegrees(Vector3D first, Vector3D second)

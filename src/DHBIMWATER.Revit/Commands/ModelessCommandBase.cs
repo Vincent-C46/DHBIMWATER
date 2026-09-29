@@ -27,7 +27,8 @@ public abstract class ModelessCommandBase : IExternalCommand
         catch (Exception ex)
         {
             ServiceContainer.Dispose();
-            message = ex.Message;
+            ErrorPresenter.Log(GetType().Name, ex);
+            message = ErrorPresenter.Format(ex);
             return Result.Failed;
         }
     }

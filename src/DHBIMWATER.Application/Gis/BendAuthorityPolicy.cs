@@ -11,7 +11,8 @@ public sealed record BendAuthorityResult(
 /// <summary>엑셀 곡관유형 열의 권위 범위를 자동 곡관 판정에 적용한다.</summary>
 public static class BendAuthorityPolicy
 {
-    private sealed record VertexSource(bool IsAuthoritative, string? Raw);
+    /// <summary>절점 병합으로 여러 정점이 한 절점에 모이므로, 경고에 측점을 찍으려면 출처 정점이 필요하다.</summary>
+    private sealed record VertexSource(bool IsAuthoritative, string? Raw, int AlignmentIndex, int VertexIndex);
 
     public static BendAuthorityResult Evaluate(
         IReadOnlyList<PipeAlignment> alignments,
@@ -28,8 +29,14 @@ public static class BendAuthorityPolicy
         var unreadableCount = 0;
         var nonStandardCount = 0;
 
+        var conflicts = new List<(int NodeId, List<(double Angle, int AlignmentIndex, int VertexIndex)> Picks)>();
+
         foreach (var (nodeId, nodeSources) in sources)
         {
+            // docs/149 §A: 병합된 절점에 표준각 지정이 여러 개 오면 마지막 것이 이긴다.
+            // 채택 규칙은 그대로 두고, 무엇이 버려졌는지만 경고로 남기기 위해 지정을 모아둔다.
+            var picks = new List<(double Angle, int AlignmentIndex, int VertexIndex)>();
+
             foreach (var source in nodeSources.Where(x => x.IsAuthoritative && !string.IsNullOrWhiteSpace(x.Raw)))
             {
                 // 각도로 못 읽는 표기(예: "45°곡관", "MJ45")는 지정이 없는 것과 다르다.
@@ -40,9 +47,12 @@ public static class BendAuthorityPolicy
                     unreadableCount++;
                     continue;
                 }
-                if (JointDeflectionRule.StandardAngles.Any(x => Math.Abs(x - angle) <= 1e-6))
+                // 표준각은 관종마다 다르다(강관은 5⅝° 포함, docs/211 § D-4). 정점이 속한 선형의 등급으로 관종을 본다.
+                var material = PipeKindCatalog.MaterialOf(alignments[source.AlignmentIndex].PipeKind) ?? PipeMaterial.DuctileIron;
+                if (BendingRuleCatalog.For(material).StandardAngles.Any(x => Math.Abs(x - angle) <= 1e-6))
                 {
                     forced[nodeId] = angle;
+                    picks.Add((angle, source.AlignmentIndex, source.VertexIndex));
                     continue;
                 }
 
@@ -50,6 +60,9 @@ public static class BendAuthorityPolicy
                 automaticFallback.Add(nodeId);
                 nonStandardCount++;
             }
+
+            // 같은 각도가 중복된 경우는 결과가 같으므로 경고하지 않는다.
+            if (picks.Select(x => x.Angle).Distinct().Count() > 1) conflicts.Add((nodeId, picks));
         }
 
         var all = BendResolver.ResolveAll(nodes, settings, forced);
@@ -67,6 +80,7 @@ public static class BendAuthorityPolicy
                                      && !automaticFallback.Contains(x.NodeId)
                                      && x.Kind != BendResolutionKind.None).ToList();
 
+        warnings.AddRange(BuildConflictWarnings(alignments, conflicts));
         if (nonStandardCount > 0) warnings.Add($"비표준 지정각 자동판정 {nonStandardCount}건");
         warnings.AddRange(BuildUnreadableWarnings(unreadableCount));
         warnings.AddRange(BuildForcedMismatchWarnings(all, forced));
@@ -89,10 +103,29 @@ public static class BendAuthorityPolicy
                           && alignment.VertexBendKinds is { } kinds && v < kinds.Count
                     ? kinds[v]
                     : null;
-                list.Add(new VertexSource(alignment.VertexBendKinds is not null, raw));
+                list.Add(new VertexSource(alignment.VertexBendKinds is not null, raw, a, v));
             }
         }
         return result;
+    }
+
+    /// <summary>
+    /// docs/149 §A. 스냅 허용오차 안에서 한 절점으로 합쳐진 정점들이 서로 다른 곡관유형을 지정했을 때,
+    /// 어떤 지정이 버려졌는지 절점마다 1건씩 알린다. 채택 결과(마지막 지정각)는 바꾸지 않는다.
+    /// </summary>
+    private static IEnumerable<string> BuildConflictWarnings(
+        IReadOnlyList<PipeAlignment> alignments,
+        IReadOnlyList<(int NodeId, List<(double Angle, int AlignmentIndex, int VertexIndex)> Picks)> conflicts)
+    {
+        foreach (var conflict in conflicts.OrderBy(x => x.Picks[0].AlignmentIndex).ThenBy(x => x.Picks[0].VertexIndex))
+        {
+            var labels = string.Join(", ", conflict.Picks
+                .Select(x => AlignmentVertexLabel.Format(alignments[x.AlignmentIndex], x.VertexIndex)));
+            var angles = string.Join(", ", conflict.Picks.Select(x => $"{x.Angle:0.##}˚"));
+            var applied = $"{conflict.Picks[^1].Angle:0.##}˚";
+            yield return $"{labels}: 좌표가 스냅 허용오차 안이라 한 절점으로 합쳐졌습니다. "
+                         + $"지정된 곡관유형 {angles} 중 {applied} 하나만 적용합니다.";
+        }
     }
 
     private static IEnumerable<string> BuildUnreadableWarnings(int unreadableCount)

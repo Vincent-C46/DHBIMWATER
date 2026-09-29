@@ -12,11 +12,11 @@ namespace DHBIMWATER.Infrastructure.Repositories.Mock
 {
     public class MockOpeningCommandRepo : IOpeningCommandRepo
     {
-        public void CreateSlabOpening(RectangularSlabOpeningDefinition openingDef)
+        public int CreateSlabOpening(RectangularSlabOpeningDefinition openingDef)
         {
             var mockDialogService = new MockDialogService();
             mockDialogService.Info("Opening Creation", $"{openingDef.Name} 작성완료");
-            return;
+            return 0;
         }
 
         public void CreateSlabOpening(CircularSlabOpeningDefinition openingDef)

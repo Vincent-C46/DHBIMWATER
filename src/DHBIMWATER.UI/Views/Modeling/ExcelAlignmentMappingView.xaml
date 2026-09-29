@@ -24,7 +24,7 @@
                     <TextBlock Style="{StaticResource SubHeadingTextBlockStyle}" Text="엑셀 데이터 매핑" Margin="0,2,0,2"/>
                     <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="{Binding FileName}" Margin="0,0,0,14"/>
 
-                    <GroupBox Header="시트 선택 — 체크한 시트마다 관로 항목 1개씩 추가" Style="{StaticResource PrimaryGroupBox}" Margin="0,0,0,14" IsEnabled="{Binding IsSheetSelectionEnabled, Mode=OneWay}">
+                    <GroupBox Header="시트 선택 (시트별 관로 1개)" Style="{StaticResource PrimaryGroupBox}" Margin="0,0,0,14" IsEnabled="{Binding IsSheetSelectionEnabled, Mode=OneWay}">
                         <ItemsControl ItemsSource="{Binding Sheets}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
@@ -49,7 +49,7 @@
                             <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding DataStartRow, UpdateSourceTrigger=PropertyChanged}"/>
                         </StackPanel>
                         <StackPanel>
-                            <TextBlock Style="{StaticResource LabelTextBlockStyle}" Text="미리보기 시트 (검증용 1개)"/>
+                            <TextBlock Style="{StaticResource LabelTextBlockStyle}" Text="미리보기 시트"/>
                             <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding CheckedSheets, Mode=OneWay}" SelectedItem="{Binding PreviewSheet, Mode=TwoWay}" DisplayMemberPath="Name" MinWidth="180"/>
                         </StackPanel>
                     </StackPanel>
@@ -60,7 +60,7 @@
                     <GroupBox Header="열 지정" Style="{StaticResource PrimaryGroupBox}" Margin="0,0,0,10">
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="70"/>
+                                <ColumnDefinition Width="90"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
@@ -87,8 +87,8 @@
                             <ComboBox Grid.Row="3" Grid.Column="1" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,0,0,8" ItemsSource="{Binding OptionalColumnOptions}" SelectedItem="{Binding StationColumn}"/>
 
                             <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
-                                <RadioButton Content="Station 방식" IsChecked="{Binding IsStationMode, Mode=TwoWay}" GroupName="StationParseMode" Margin="0,0,14,0"/>
-                                <RadioButton Content="NumberChain 방식" IsChecked="{Binding IsNumberChainMode, Mode=TwoWay}" GroupName="StationParseMode"/>
+                                <RadioButton Style="{StaticResource PrimaryRadioButtonStyle}" Content="Station 방식" IsChecked="{Binding IsStationMode, Mode=TwoWay}" GroupName="StationParseMode" Margin="0,0,14,0"/>
+                                <RadioButton Style="{StaticResource PrimaryRadioButtonStyle}" Content="NumberChain 방식" IsChecked="{Binding IsNumberChainMode, Mode=TwoWay}" GroupName="StationParseMode"/>
                                 <StackPanel Orientation="Horizontal" Margin="14,0,0,0" Visibility="{Binding IsNumberChainMode, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <TextBlock Style="{StaticResource LabelTextBlockStyle}" Text="간격(m)" VerticalAlignment="Center" Margin="0,0,6,0"/>
                                     <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Width="70" Text="{Binding NumberChainIntervalM, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>

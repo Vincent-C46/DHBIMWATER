@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Collections.ObjectModel;
@@ -194,6 +194,19 @@ public sealed class PipeAlignmentModelingViewModelTests
         Assert.Equal("모델 생성에 실패했습니다.", vm.ResultSummary);
     }
 
+    /// <summary>취소(PA-304)는 실패로 보이지 않는다 — 롤백돼 변경이 없다는 것만 알린다(docs/236 § B).</summary>
+    [Fact]
+    public void ApplyFailure_WhenCancelled_ShowsCancelledWithoutChanges()
+    {
+        var vm = CreatePreviewTestViewModel();
+
+        vm.ApplyFailure("[PA-304] 사용자가 배치를 취소했습니다. 이번 실행의 변경은 모두 되돌렸습니다.");
+
+        Assert.Equal("취소됨", vm.PhaseText);
+        Assert.Equal("취소됨 — 변경 없음", vm.ResultSummary);
+        Assert.False(vm.IsBusy);
+    }
+
     [Fact]
     public void DiameterMappingRow_DefaultPipeKindIsNotUserModified()
     {
@@ -231,6 +244,118 @@ public sealed class PipeAlignmentModelingViewModelTests
     [Fact]
     public void GuessDiameterField_NormalizesExcelHeaderWhitespace()
         => Assert.Equal("호칭지름\n(DN)", AlignmentAttributeParser.GuessDiameterField(["호칭지름\n(DN)"]));
+
+    /// <summary>docs/209 § C — 배치 간격 하한(0.1m) Blocking · 1m 미만 Warning · 정상값 없음.</summary>
+    [Theory]
+    [InlineData(0.05, "Blocking")]
+    [InlineData(0.5, "Warning")]
+    [InlineData(4.0, null)]
+    public void RefreshPreflightIssues_IntervalLowerBound(double intervalM, string? expectedSeverity)
+    {
+        var vm = CreateForMappingTest(EmptyShpItem());
+        vm.IntervalM = intervalM;   // setter가 RefreshPreflightIssues를 부른다.
+
+        var intervalIssues = vm.PreflightIssues.Where(x => x.Message.Contains("배치 간격")).ToList();
+        if (expectedSeverity is null) Assert.Empty(intervalIssues);
+        else Assert.Equal(expectedSeverity, Assert.Single(intervalIssues).Severity.ToString());
+    }
+
+    /// <summary>docs/209 § G — 사전점검 문구가 AnalyzePipeNetworkUseCase의 실제 경고("직관 자리 없는 구간 N건")와 맞아야 한다.</summary>
+    [Fact]
+    public void RefreshPreflightIssues_MatchesLayingLengthWarning()
+    {
+        var vm = CreateForMappingTest(EmptyShpItem());
+        vm.IntervalM = 4;
+        var diagnosis = new PipeNetworkDiagnosisResult(0, 0, new Dictionary<string, int>(), 0, 0, 0, 0, 0,
+            new Dictionary<double, int>(), [], ["직관 자리 없는 구간 3건"]);
+        typeof(PipeAlignmentModelingViewModel).GetMethod("RefreshPreflightIssues", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(vm, [diagnosis]);
+
+        Assert.Contains(vm.PreflightIssues, x => x.Message.Contains("직관이 들어갈 자리가 없는 구간"));
+    }
+
+    /// <summary>docs/212 § A-3 — 강관 토글에서 직경 셀 "강관_D300"은 STWW 290 강관 기본 등급으로 잡힌다.</summary>
+    [Fact]
+    public void RebuildDiameterMappings_SteelToggle_ResolvesAliasInDiameterCell()
+    {
+        var vm = CreateForMappingTest(ShpItemWithDiameter("강관_D300"));
+        SetField(vm, "_selectedMaterial", PipeMaterial.Steel);
+        InvokeRebuild(vm);
+
+        var row = Assert.Single(vm.DiameterMappings);
+        Assert.Equal(PipeKindCatalog.Steel290, row.PipeKind);
+        Assert.True(row.IsSteelDefault);
+        Assert.Contains("강관 기본 등급", row.Status);
+    }
+
+    /// <summary>docs/212 § A-4·§ C — 주철관 토글에서 관종 필드가 "강관"이면 "(관종 필드 사용)" 행이 되고, 상태에 기본 등급 적용을 알린다.</summary>
+    [Fact]
+    public void RebuildDiameterMappings_DuctileToggle_ForeignKindFieldShowsFallbackStatus()
+    {
+        var vm = CreateForMappingTest(ShpItemWithDiameter("D300", kind: "강관"));
+        InvokeRebuild(vm);
+
+        var row = Assert.Single(vm.DiameterMappings);
+        Assert.Equal(PipeAlignmentModelingViewModel.UseKindFieldOption, row.PipeKind);
+        Assert.Null(row.FieldGrade);
+        Assert.Contains("등급이 아님", row.Status);
+    }
+
+    /// <summary>docs/212 § C — 표에 없는 (등급, DN)은 Blocking이라 생성이 막힌다. 관종 필드에서 해석된 등급은 행에 직접 잡힌다(docs/211 토글 설계).</summary>
+    [Fact]
+    public void RefreshPreflightIssues_SpecUnmatchedIsBlocking()
+    {
+        var vm = CreateForMappingTest(ShpItemWithDiameter("D500", kind: "상수 4종관"));
+        InvokeRebuild(vm);
+        var row = Assert.Single(vm.DiameterMappings);
+        Assert.Equal("상수 4종관", row.PipeKind);
+        Assert.Equal("상수 4종관", row.FieldGrade);
+
+        // 상수 4종관은 DN600 이상만 수록 — DN500은 미매칭.
+        var issue = Assert.Single(vm.PreflightIssues, x => x.Message.StartsWith("규격 미매칭", StringComparison.Ordinal));
+        Assert.Equal(PreflightSeverity.Blocking, issue.Severity);
+        Assert.True(vm.HasBlockingPreflightIssues);
+    }
+
+    /// <summary>docs/212 § D-1·D-7 — 토글 관종에 따라 접합 툴팁과 DN 콤보 목록이 갈린다.</summary>
+    [Fact]
+    public void MaterialToggle_DrivesTooltipAndDiameterOptions()
+    {
+        var vm = CreateForMappingTest(ShpItemWithDiameter("D300"));
+        InvokeRebuild(vm);
+        Assert.Contains("주철관", vm.BendConnectionToolTip);
+        Assert.DoesNotContain(vm.DiameterMappings[0].DiameterOptions, x => x.DiameterMm == 3000);
+
+        SetField(vm, "_selectedMaterial", PipeMaterial.Steel);
+        InvokeRebuild(vm);
+        Assert.Contains("강관", vm.BendConnectionToolTip);
+        Assert.Contains(vm.DiameterMappings[0].DiameterOptions, x => x.DiameterMm == 3000);
+    }
+
+    private static PipeAlignmentSourceFileItem ShpItemWithDiameter(string diameterRaw, string? kind = null)
+    {
+        var attributes = new Dictionary<string, string> { ["DIA"] = diameterRaw };
+        if (kind is not null) attributes["KIND"] = kind;
+        var feature = new PipeAlignment([new Point3D(0, 0, 0), new Point3D(1, 0, 0)], string.Empty, 0, "a.shp", "1", attributes);
+        return new PipeAlignmentSourceFileItem
+        {
+            Path = "a.shp",
+            ReadResult = new ShapefileReadResult([feature], [], ShapefileExtent.Empty, null, null, string.Empty, 1, 2, 1, [], null),
+            DiameterField = "DIA", KindField = kind is null ? null : "KIND"
+        };
+    }
+
+    private static void InvokeRebuild(PipeAlignmentModelingViewModel vm)
+        => typeof(PipeAlignmentModelingViewModel).GetMethod("RebuildDiameterMappings", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, null);
+
+    private static void SetField(PipeAlignmentModelingViewModel vm, string field, object value)
+        => typeof(PipeAlignmentModelingViewModel).GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(vm, value);
+
+    private static PipeAlignmentSourceFileItem EmptyShpItem() => new()
+    {
+        Path = "a.shp",
+        ReadResult = new ShapefileReadResult([], [], ShapefileExtent.Empty, null, null, string.Empty, 0, 0, 0, [], null),
+    };
 
     private static PipeAlignmentModelingViewModel CreateWithoutServices()
     {

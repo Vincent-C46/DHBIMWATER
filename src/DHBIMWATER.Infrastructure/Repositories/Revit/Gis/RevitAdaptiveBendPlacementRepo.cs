@@ -7,6 +7,7 @@ using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Infrastructure.Helpers;
 using DHBIMWATER.Shared.Diagnostics;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Gis;
 
@@ -25,11 +26,11 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
     public RevitAdaptiveBendPlacementRepo(Func<Document?> doc, IProjectLocationCoordinateTransformRepo coordinateTransform)
     { _doc = doc; _coordinateTransform = coordinateTransform; }
 
-    public AdaptiveBendPlacementResult Place(IReadOnlyList<AdaptiveBendPlacementPlan> plans, AlignmentPlacementOrigin origin, PipeInfoParameterContext? info = null, IProgress<PipeAlignmentProgress>? progress = null)
+    public AdaptiveBendPlacementResult Place(IReadOnlyList<AdaptiveBendPlacementPlan> plans, AlignmentPlacementOrigin origin, PipeInfoParameterContext? info = null, IProgress<PipeAlignmentProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         if (plans.Count == 0) return new AdaptiveBendPlacementResult(0, Array.Empty<string>());
         progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingBends, 0, plans.Count));
-        var doc = _doc() ?? throw new InvalidOperationException("활성 Revit 문서가 없습니다.");
+        var doc = _doc() ?? throw new DhbimwaterException(ErrorCodes.NoActiveDocument, "활성 Revit 문서가 없습니다.");
         var symbols = new Dictionary<(string Family, string Type), FamilySymbol>();
         // 비활성 Symbol 활성화 시 필요한 Regenerate가 곡관 생성 배치 중간에 끼지 않도록 유형별로 먼저 확정한다.
         using (PlacementProfiler.Step("07a 곡관 Symbol 확정"))
@@ -50,6 +51,7 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
 
         foreach (var plan in plans)
         {
+            cancellationToken.ThrowIfCancellationRequested();   // docs/209 § A — 사용자 취소
             var symbol = symbols[(plan.FamilyName, plan.TypeName)];
             FamilyInstance instance;
             IList<ElementId> pointIds;
@@ -61,9 +63,9 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
             using (PlacementProfiler.StepBucketed("07b2 곡관 GetPointIds", count))
                 pointIds = AdaptiveComponentInstanceUtils.GetInstancePlacementPointElementRefIds(instance);
             if (pointIds.Count != 5)
-                throw new InvalidOperationException($"곡관 패밀리 '{plan.FamilyName}:{plan.TypeName}'의 Adaptive Point가 5개가 아닙니다({pointIds.Count}개).");
+                throw new DhbimwaterException(ErrorCodes.PA_AdaptivePointCount, $"곡관 패밀리 '{plan.FamilyName}:{plan.TypeName}'의 Adaptive Point가 5개가 아닙니다({pointIds.Count}개).");
             if (plan.RotXYDeg.Count != 5 || plan.RotXZDeg.Count != 5)
-                throw new InvalidOperationException($"절점 {plan.NodeId}의 회전값은 XY/XZ 각각 5개여야 합니다.");
+                throw new DhbimwaterException(ErrorCodes.PA_RotationCountMismatch, $"절점 {plan.NodeId}의 회전값은 XY/XZ 각각 5개여야 합니다.");
             (Parameter Xy, Parameter Xz)[] rotationParameters;
             using (PlacementProfiler.Step("07c 곡관 회전 파라미터 조회"))
                 rotationParameters = ResolveRotationParameters(instance, plan);
@@ -84,7 +86,7 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
                         outOfRange.ParamName == "point" ||
                         outOfRange.Message.Contains("design limits", StringComparison.OrdinalIgnoreCase))
                     {
-                        throw new InvalidOperationException(
+                        throw new DhbimwaterException(ErrorCodes.PA_TooFarFromOrigin,
                             $"곡관 배치 실패({plan.FamilyName}:{plan.TypeName}, 절점 {plan.NodeId}): " +
                             "내부원점으로부터 너무 멀리 떨어진 곳에 모델링을 시도했습니다.", outOfRange);
                     }
@@ -94,28 +96,32 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
                 using var infoScope = PlacementProfiler.Step("07e 곡관 DH_ 파라미터 기록");
                 writer.Text(instance, PipeAlignmentParameters.Addin, PipeAlignmentParameters.AddinValue);
                 writer.Text(instance, PipeAlignmentParameters.Part, PipeAlignmentParameters.BendPartValue);
-                writer.Text(instance, PipeAlignmentParameters.AlignmentId, $"{Path.GetFileNameWithoutExtension(plan.SourceFile)}#{plan.RecordNumber}");
                 writer.Text(instance, PipeAlignmentParameters.NominalDiameter, PipeAlignmentParameters.DiameterText(plan.DiameterMm));
-                writer.Text(instance, PipeAlignmentParameters.Material, MaterialLabelOf(plan.PipeKind));
-                writer.Text(instance, PipeAlignmentParameters.Grade, plan.PipeKind);
-                writer.LengthMm(instance, PipeAlignmentParameters.OuterDiameter, plan.OuterDiameterMm);
-                writer.LengthMm(instance, PipeAlignmentParameters.WallThickness, plan.WallThicknessEMm);
-                writer.Text(instance, PipeAlignmentParameters.JointType, info.JointType);
+                writer.Text(instance, PipeAlignmentParameters.Material, MaterialCodeOf(plan.PipeKind));
+                // 강관 곡관의 등급은 F12/F15/F20(곡관 종류)이다 — 직관 등급 STWW는 곡관 제원과 무관하다(2026-09-22 사용자 확정).
+                var isSteel = PipeKindCatalog.MaterialOf(plan.PipeKind) == PipeMaterial.Steel;
+                writer.Text(instance, PipeAlignmentParameters.Grade, isSteel ? info.SteelFittingClass.ToString() : plan.PipeKind);
+                writer.YesNo(instance, PipeAlignmentParameters.NightWork, info.IsNightWork);   // docs/141 § C-4
                 writer.Text(instance, PipeAlignmentParameters.ElevationDatum, PipeAlignmentParameters.Label(info.ZDatum));
-                writer.Text(instance, PipeAlignmentParameters.SourceFile, Path.GetFileName(plan.SourceFile));
-                writer.Text(instance, PipeAlignmentParameters.RecordNumber, plan.RecordNumber);
                 writer.Integer(instance, PipeAlignmentParameters.NodeId, plan.NodeId);
                 writer.AngleDeg(instance, PipeAlignmentParameters.ActualDeflection, plan.DeflectionDeg);
                 writer.AngleDeg(instance, PipeAlignmentParameters.StandardAngle, plan.StandardAngleDeg);
                 writer.AngleDeg(instance, PipeAlignmentParameters.AllowableDeflection, plan.EffectiveAllowableDeg);
                 writer.AngleDeg(instance, PipeAlignmentParameters.ResidualDeflection, plan.ResidualDeg);
                 writer.YesNo(instance, PipeAlignmentParameters.IsAcceptable, plan.IsAcceptable);
-                writer.Text(instance, PipeAlignmentParameters.JointApplication, PipeAlignmentParameters.Label(info.ApplicationMode));
-                writer.LengthMm(instance, PipeAlignmentParameters.CenterlineRadius, plan.CenterlineRadiusMm);
-                writer.Text(instance, PipeAlignmentParameters.BendFormName, PipeAlignmentParameters.Label(plan.Form));
-                writer.LengthMm(instance, PipeAlignmentParameters.LayingLength, plan.LayingLengthMm);
+                // 강관 곡관에는 A/B형·소켓이 없다 — 형식은 비우고 접합 개소는 직관과 같은 요소당 1(`1S`=용접 1개소)로 적는다(docs/211 § 0-1 A3·A4).
+                var socketEnds = isSteel ? 1 : info.ApplicationMode == JointApplicationMode.BothJoints ? 2 : 1;
+                // 접합 개소는 새로 재는 값이 아니라 접합 적용(편측/양측) 설정을 옮겨 적는 것이다 — 곡관 하나는 양 끝이 붙어도
+                // 편측이면 1개소로 센다(docs/166 § 3-1). 부설은 요소당 1이며 접합수와 무관한 별도 계수다.
+                // 편측·양측은 개수의 문제일 뿐 종류·규격은 같으므로 슬롯 1벌이다. 규격은 요소 관경과 같아 비운다(docs/186 § 5).
+                writer.JointSlots(instance, PipeKindCatalog.MaterialOf(plan.PipeKind), info.BendConnection,
+                    new[] { (Spec: string.Empty, Count: socketEnds) },
+                    info.UseRestraintGland);
+                writer.Integer(instance, PipeAlignmentParameters.LayingCount, 1);
+                // 접합 구성은 소켓 단부 수로 적는다 — A형(양쪽 소켓) `2S`, B형(한쪽 소켓) `1S`. 위 슬롯 개소와 같은 축이다(docs/199 § 2).
+                writer.JointComposition(instance, info.BendConnection, endCount: 2, socketEnds: socketEnds);
+                // 곡관은 곡관표의 한 개 무게(소켓 포함)를 그대로 적는다(docs/178 § A-2). 단위중량은 직관에만 있다.
                 writer.Number(instance, PipeAlignmentParameters.Weight, plan.WeightKg);
-                writer.Text(instance, PipeAlignmentParameters.NodeStation, plan.NodeStationText);
                 writer.Text(instance, PlacementStationParameters.SourceFile, plan.SourceFile);
                 writer.Text(instance, PlacementStationParameters.Alignment, plan.RecordNumber);
                 writer.Text(instance, PlacementStationParameters.Profile, string.Empty);
@@ -152,7 +158,7 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
                 using (PlacementProfiler.Step("07g 곡관 Regenerate")) doc.Regenerate();
                 pendingRegeneration = 0;
             }
-            if (!plan.IsAcceptable)
+            if (!plan.IsAcceptable || plan.HasLegOverlap)   // docs/217 § B — 다리 겹침도 적색
                 exceededOverrides.Add((instance.Id, plan.NodeId));
             count++;
             // 진행률은 Regenerate 주기와 분리해 곡관 1개마다 보고한다.
@@ -181,6 +187,8 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
         warnings.AddRange(overrideWarnings);
         if (writer.Missing.Count > 0)
             warnings.Add($"프로젝트 매개변수 {string.Join(", ", writer.Missing.OrderBy(x => x))}를 곡관 인스턴스에 기록하지 못했습니다(바인딩 실패 또는 읽기전용).");
+        if (info is { Enabled: true } && writer.UnmappedJointWarning is { } jointCountWarning)
+            warnings.Add(jointCountWarning);
         var outerDiameters = plans.Where(x => x.OuterDiameterMm is not null)
             .GroupBy(x => (x.PipeKind, x.DiameterMm))
             .ToDictionary(x => x.Key, x => x.First().OuterDiameterMm!.Value);
@@ -211,9 +219,9 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
             .OfClass(typeof(FamilySymbol))
             .Cast<FamilySymbol>()
             .FirstOrDefault(x => x.Family.Name == familyName && x.Name == typeName)
-            ?? throw new InvalidOperationException($"곡관 패밀리를 찾을 수 없습니다: {familyName} - {typeName}");
+            ?? throw new DhbimwaterException(ErrorCodes.PA_BendFamilyNotFound, $"곡관 패밀리를 찾을 수 없습니다: {familyName} - {typeName}");
         if (!AdaptiveComponentFamilyUtils.IsAdaptiveComponentFamily(symbol.Family))
-            throw new InvalidOperationException($"'{familyName}:{typeName}'은 가변(Adaptive Component) 패밀리가 아닙니다.");
+            throw new DhbimwaterException(ErrorCodes.PA_NotAdaptiveFamily, $"'{familyName}:{typeName}'은 가변(Adaptive Component) 패밀리가 아닙니다.");
         if (!symbol.IsActive)
         {
             symbol.Activate();
@@ -243,19 +251,19 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
     private static Parameter RequireAngleParameter(FamilyInstance instance, AdaptiveBendPlacementPlan plan, string name)
     {
         var param = instance.LookupParameter(name)
-            ?? throw new InvalidOperationException($"곡관 패밀리 '{plan.FamilyName}:{plan.TypeName}'에 인스턴스 각도 파라미터 '{name}'이 없습니다.");
+            ?? throw new DhbimwaterException(ErrorCodes.PA_AngleParameterUnwritable, $"곡관 패밀리 '{plan.FamilyName}:{plan.TypeName}'에 인스턴스 각도 파라미터 '{name}'이 없습니다.");
         if (param.IsReadOnly)
-            throw new InvalidOperationException($"곡관 패밀리 '{plan.FamilyName}:{plan.TypeName}'의 '{name}' 파라미터가 읽기전용입니다.");
+            throw new DhbimwaterException(ErrorCodes.PA_AngleParameterUnwritable, $"곡관 패밀리 '{plan.FamilyName}:{plan.TypeName}'의 '{name}' 파라미터가 읽기전용입니다.");
         if (param.StorageType != StorageType.Double || !param.Definition.GetDataType().Equals(SpecTypeId.Angle))
-            throw new InvalidOperationException($"곡관 패밀리 '{plan.FamilyName}:{plan.TypeName}'의 '{name}'은 쓰기 가능한 각도(Angle) 인스턴스 파라미터여야 합니다.");
+            throw new DhbimwaterException(ErrorCodes.PA_AngleParameterUnwritable, $"곡관 패밀리 '{plan.FamilyName}:{plan.TypeName}'의 '{name}'은 쓰기 가능한 각도(Angle) 인스턴스 파라미터여야 합니다.");
         return param;
     }
 
     private static void SetRequiredAngleParameter(Parameter param, AdaptiveBendPlacementPlan plan, string name, double degrees)
     {
         if (!param.Set(UC.DegToRad(degrees)))
-            throw new InvalidOperationException($"곡관 패밀리 '{plan.FamilyName}:{plan.TypeName}'의 '{name}'에 회전값 {degrees:0.###}°를 기록하지 못했습니다.");
+            throw new DhbimwaterException(ErrorCodes.PA_RotationWriteFailed, $"곡관 패밀리 '{plan.FamilyName}:{plan.TypeName}'의 '{name}'에 회전값 {degrees:0.###}°를 기록하지 못했습니다.");
     }
 
-    private static string MaterialLabelOf(string pipeKind) => PipeKindCatalog.MaterialOf(pipeKind) is { } material ? PipeAlignmentParameters.Label(material) : string.Empty;
+    private static string MaterialCodeOf(string pipeKind) => PipeKindCatalog.MaterialOf(pipeKind) is { } material ? PipeAlignmentParameters.Code(material) : string.Empty;
 }

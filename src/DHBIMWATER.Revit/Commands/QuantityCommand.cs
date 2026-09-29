@@ -36,7 +36,7 @@ namespace DHBIMWATER.Revit.Commands
                 Type commandType = assembly.GetType(CommandTypeName, throwOnError: true)!;
                 if (Activator.CreateInstance(commandType) is not IExternalCommand command)
                 {
-                    message = $"내장된 DHBoost 명령을 만들 수 없습니다: {CommandTypeName}";
+                    message = $"내장된 연동 명령을 만들 수 없습니다: {CommandTypeName}";
                     return Result.Failed;
                 }
 

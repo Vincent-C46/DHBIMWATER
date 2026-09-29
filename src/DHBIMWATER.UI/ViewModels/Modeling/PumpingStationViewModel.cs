@@ -1,5 +1,6 @@
 ﻿using DHBIMWATER.Application.DTOs.Revit.PumpingStation;
 using DHBIMWATER.Application.Interfaces;
+using DHBIMWATER.Application.Services;
 using DHBIMWATER.Application.UseCases.AutoGenerator;
 using DHBIMWATER.UI.Base;
 using DHBIMWATER.UI.Commands;
@@ -17,6 +18,8 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         #region Fields
         private IDialogService _dialogService;
         private readonly CreatePumpingStationUseCase _createPumpingStationUseCase;
+        // 최상단 모드 토글: "펌프장" | "토출조"
+        private string _selectedMode = ModePumpingStation;
         private readonly IUsageLogger _usageLogger;
         private readonly IExcelReader _excelReader;
         private readonly IFileDialogService _fileDialogService;
@@ -340,6 +343,7 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                     ApplyManufacturerSpec();
                     ApplyValveExtension();
                     OnPropertyChanged(nameof(D));
+                    PushToDischargeBasin();
                 }
             }
         }
@@ -365,6 +369,7 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                 {
                     _n = value;
                     OnPropertyChanged(nameof(N));
+                    PushToDischargeBasin();
                 }
             }
         }
@@ -391,6 +396,7 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                     _hwl = value;
                     UpdateWLDependents();
                     OnPropertyChanged(nameof(HWL));
+                    PushToDischargeBasin();
                 }
             }
         }
@@ -561,6 +567,7 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                     _h3 = value;
                     UpdateH3Dependents();
                     OnPropertyChanged(nameof(H3));
+                    PushToDischargeBasin();
                 }
             }
         }
@@ -586,6 +593,7 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                 {
                     _h7 = value;
                     OnPropertyChanged(nameof(H7));
+                    PushToDischargeBasin();
                 }
             }
         }
@@ -706,6 +714,7 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                     //RecalculateDerivedValues();
                     UpdateB8Dependents();
                     OnPropertyChanged(nameof(B8));
+                    PushToDischargeBasin();
                 }
             }
         }
@@ -822,6 +831,7 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                 {
                     _t5 = value;
                     OnPropertyChanged(nameof(T5));
+                    PushToDischargeBasin();
                 }
             }
         }
@@ -942,19 +952,61 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         public Action? CloseAction { get; set; }
         #endregion
 
+        #region 모드 전환 (펌프장 / 토출조)
+        public const string ModePumpingStation = "펌프장";
+        public const string ModeDischargeBasin = "토출조";
+
+        /// <summary>토출조 모드의 ViewModel. 같은 창 안에서 최상단 토글로 전환된다.</summary>
+        public DischargeBasinViewModel DischargeBasin { get; }
+
+        /// <summary>"펌프장" | "토출조"</summary>
+        public string SelectedMode
+        {
+            get => _selectedMode;
+            set
+            {
+                if (_selectedMode == value) return;
+                _selectedMode = value;
+                OnPropertyChanged(nameof(SelectedMode));
+                OnPropertyChanged(nameof(IsPumpMode));
+                OnPropertyChanged(nameof(IsBasinMode));
+            }
+        }
+
+        public bool IsPumpMode => _selectedMode == ModePumpingStation;
+        public bool IsBasinMode => _selectedMode == ModeDischargeBasin;
+
+        /// <summary>
+        /// 펌프장 제원 변경분을 토출조 화면에 밀어넣는다. 토출조 쪽에서는 읽기전용이다.
+        /// B8 + T5 = 펌프 중심 간격 (PumpingStationGeometryCalculator 의 totalWidth 산식 근거).
+        /// </summary>
+        private void PushToDischargeBasin()
+            => DischargeBasin?.UpdatePumpReference(D, N, HWL, H3, H7, B8 + T5);
+        #endregion
+
         #region Constructor
-        public PumpingStationViewModel(CreatePumpingStationUseCase useCase, IDialogService dialogService, IElementTypeQueryRepo elementTypeQueryRepo, IUsageLogger usageLogger, IExcelReader excelReader, IFileDialogService fileDialogService)
+        public PumpingStationViewModel(CreatePumpingStationUseCase useCase, IDialogService dialogService, IElementTypeQueryRepo elementTypeQueryRepo, IUsageLogger usageLogger, IExcelReader excelReader, IFileDialogService fileDialogService, DischargeBasinViewModel dischargeBasinViewModel)
         {
             _createPumpingStationUseCase = useCase;
             _dialogService = dialogService;
             _usageLogger = usageLogger;
             _excelReader = excelReader;
             _fileDialogService = fileDialogService;
+            DischargeBasin = dischargeBasinViewModel;
+            // 토출조 배치 기준 — 펌프장 최우측 벽 외면 X, 1번 펌프 중심 Y.
+            // 종단제원(B1~B7·T3·T4)은 setter 가 많아 밀어 넣지 않고 필요할 때 당겨 가게 한다.
+            DischargeBasin.StationPlacementProvider = () => (
+                PumpingStationGeometryCalculator.TotalLength(
+                    SelectedPumpingStationType, B1, B2, B3, B4, B5, B6, B7, T3, T4),
+                B8 / 2);
 
             CreatePumpingStationCommand = new RelayCommand(CreatePumpingStation);
             ImportExcelCommand = new RelayCommand(ImportFromExcel);
 
             InitializeDerivedValues();
+
+            // 토출조 화면의 펌프장 연동값 초기화
+            PushToDischargeBasin();
         }
         #endregion
 
@@ -1043,7 +1095,8 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
 
             _ = _usageLogger.LogAsync();
             _createPumpingStationUseCase.Execute(creationRequestDto);
-            CloseAction?.Invoke();
+            // 작성 후 창을 닫지 않는다 — 토출조 생성 버튼과 동일하게 창을 유지한다(사용자 요청, 2026-09-15).
+            // 창은 Owner=Revit 메인창인 모달(ShowDialog)이라 닫지 않아도 Revit 위에 그대로 남는다. 닫기는 TitleBar의 닫기 버튼.
         }
         // 프로퍼티 업데이트
         // 생성시 초기화 메서드

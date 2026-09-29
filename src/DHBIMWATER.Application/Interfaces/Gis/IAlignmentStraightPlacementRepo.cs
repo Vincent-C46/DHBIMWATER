@@ -18,5 +18,5 @@ public interface IAlignmentStraightPlacementRepo
         StraightPipeSpecTable specs, IReadOnlyList<IReadOnlyList<VertexTrim>>? trims = null,
         string? diameterParameterName = null, string? outerDiameterParameterName = null, string? thicknessParameterName = null,
         PipeInfoParameterContext? info = null, IProgress<PipeAlignmentProgress>? progress = null,
-        IReadOnlyList<IReadOnlySet<int>>? stepVertices = null);
+        IReadOnlyList<IReadOnlySet<int>>? stepVertices = null, CancellationToken cancellationToken = default);
 }

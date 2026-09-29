@@ -5,8 +5,13 @@ namespace DHBIMWATER.Core.Gis;
 /// <summary>적용 규격이 정의하는 이형관 형식 구분. Joint Type과는 별개다.</summary>
 public enum BendForm { AType, BType }
 
-/// <summary>이형관 접합 방식. 핸드북에서 소켓곡관과 플랜지곡관은 R·t가 다른 별도 표다(e·s는 같다).</summary>
+/// <summary>이형관 접합 방식. 핸드북에서 소켓곡관과 플랜지곡관은 R·t가 다른 별도 표다(e·s는 같다).
+/// 강관에서 <see cref="Socket"/>은 <b>용접</b>을 뜻한다(접합수 매핑 <c>PipeAlignmentParameters.JointCountParameterFor</c>와 같은 규약).</summary>
 public enum BendConnection { Socket, Flanged }
+
+/// <summary>KS D 3578 강관 이형관의 종류(F12/F15/F20). 관두께 T와 무게만 다르고 외경·R·L은 같다.
+/// 주철관 행은 <see cref="None"/>이다. 직관 등급(STWW)과 대응시키지 않는다 — 사용자가 고른다(docs/211 § 0 확정 2).</summary>
+public enum SteelFittingClass { None, F12, F15, F20 }
 
 /// <param name="DiameterMm">호칭지름 DN. 조회는 Exact Match다.</param>
 /// <param name="Form">
@@ -21,6 +26,8 @@ public enum BendConnection { Socket, Flanged }
 /// 기본값이 있으므로 관종 축 도입 이전에 저장된 JSON도 그대로 역직렬화된다.
 /// </param>
 /// <param name="Connection">소켓/플랜지. 기본값이 있어 이 축 도입 이전 JSON도 소켓으로 읽힌다.</param>
+/// <param name="FittingClass">강관 이형관 종류(F12/F15/F20). 주철관 행은 None. 기본값이 있어 이 축 도입 이전 JSON도 그대로 읽힌다(docs/211 § C-2).</param>
+/// <param name="WeightKg">접합 종류와 무관한 한 개 무게(kg) — 강관 곡관용. 주철관 행은 0이며 KP/타이튼 무게 열을 쓴다.</param>
 public sealed record BendFittingEntry(
     double DiameterMm,
     double AngleDeg,
@@ -31,11 +38,14 @@ public sealed record BendFittingEntry(
     double WeightKpMechanicalKg = 0d,
     double WeightTytonKg = 0d,
     PipeMaterial Material = PipeMaterial.DuctileIron,
-    BendConnection Connection = BendConnection.Socket)
+    BendConnection Connection = BendConnection.Socket,
+    SteelFittingClass FittingClass = SteelFittingClass.None,
+    double WeightKg = 0d)
 {
-    /// <summary>s — B형(한쪽 소켓)만 200mm, A형(양쪽 소켓)은 0. 접합 종류와 무관하다(2026-09-04 확정).</summary>
+    /// <summary>s — B형(한쪽 소켓)만 200mm, A형(양쪽 소켓)은 0. 접합 종류와 무관하다(2026-09-04 확정).
+    /// 강관은 소켓이 없어 형식과 무관하게 0이다(docs/211 § C-2).</summary>
     [JsonIgnore]
-    public double ExtraLegLengthMm => Form == BendForm.BType ? 200d : 0d;
+    public double ExtraLegLengthMm => Material == PipeMaterial.Steel ? 0d : Form == BendForm.BType ? 200d : 0d;
 }
 
 public sealed class BendFittingCatalog
@@ -50,16 +60,21 @@ public sealed class BendFittingCatalog
     /// ① 08-18자 임시표(R = 계수 × DN) ② 08-19자 A형·B형 이중행 ③ 접합종류 축 이전(플랜지 행 없음).
     /// </summary>
     public bool NeedsRestore => Entries.SequenceEqual(LegacyPlaceholder.Entries)
-        || Entries.GroupBy(x => (x.Material, x.Connection, x.DiameterMm, x.AngleDeg)).Any(x => x.Count() > 1)
+        || Entries.GroupBy(x => (x.Material, x.Connection, x.FittingClass, x.DiameterMm, x.AngleDeg)).Any(x => x.Count() > 1)
         || !Entries.Any(x => x.Connection == BendConnection.Flanged);
 
-    /// <summary>DN·각도·접합종류로 조회한다. 형식(A/B)은 행 자체가 갖고 있으므로 조회 키가 아니다.</summary>
+    /// <summary>DN·각도·관종·접합종류(·강관 종류)로 조회한다. 형식(A/B)은 행 자체가 갖고 있으므로 조회 키가 아니다.</summary>
     public BendFittingEntry? Find(double diameterMm, double angleDeg, PipeMaterial material = PipeMaterial.DuctileIron,
-        BendConnection connection = BendConnection.Socket) => Entries.FirstOrDefault(x =>
+        BendConnection connection = BendConnection.Socket, SteelFittingClass fittingClass = SteelFittingClass.None) => Entries.FirstOrDefault(x =>
         x.Material == material
         && x.Connection == connection
+        && x.FittingClass == fittingClass
         && Math.Abs(x.DiameterMm - diameterMm) <= Epsilon
         && Math.Abs(x.AngleDeg - angleDeg) <= Epsilon);
+
+    /// <summary>강관 행이 하나도 없으면 기본 강관 행을 뒤에 붙인 사본을, 있으면 자신을 돌려준다(docs/211 § E-1).</summary>
+    public BendFittingCatalog WithSteelDefaults()
+        => Entries.Any(x => x.Material == PipeMaterial.Steel) ? this : new BendFittingCatalog(Entries.Concat(SteelDefaultEntries).ToList());
 
     // ══════════════════════════════════════════════════════════════════════════
     // 주철관 핸드북(2020년판) 소켓곡관 규격 — 출처: docs/주철관핸드북(2020년판)_이형관.pdf
@@ -145,9 +160,11 @@ public sealed class BendFittingCatalog
         (45d, Flanged45), (90d, Flanged90)
     };
 
-    /// <summary>접합종류별 수록 각도. 플랜지곡관은 핸드북에 90°·45°만 있다(11¼·22½ 플랜지 표는 존재하지 않음).</summary>
-    public static IReadOnlyList<double> AnglesFor(BendConnection connection) =>
-        connection == BendConnection.Flanged ? new[] { 45d, 90d } : JointDeflectionRule.StandardAngles;
+    /// <summary>관종·접합종류별 수록 각도. 주철관 플랜지곡관은 핸드북에 90°·45°만 있다(11¼·22½ 플랜지 표는 존재하지 않음).
+    /// 강관은 접합과 무관하게 <see cref="SteelBendRule.StandardAngles"/>(5⅝° 포함)다 — 표에 없는 (DN, 각도)는 조회에서 빠진다.</summary>
+    public static IReadOnlyList<double> AnglesFor(PipeMaterial material, BendConnection connection) =>
+        material == PipeMaterial.Steel ? SteelBendRule.StandardAngles
+        : connection == BendConnection.Flanged ? new[] { 45d, 90d } : JointDeflectionRule.StandardAngles;
 
     /// <summary>11¼° 소켓곡관 무게 — (DN, KP메커니컬 A형, KP메커니컬 B형, 타이튼 A형, 타이튼 B형) kg.</summary>
     private static readonly (double Dn, double KpA, double KpB, double TytonA, double TytonB)[] Weight1125 =
@@ -210,7 +227,7 @@ public sealed class BendFittingCatalog
 
     private static IEnumerable<BendFittingEntry> BuildHandbook()
     {
-        foreach (var dn in StraightPipeSpecTable.NominalDiameters)
+        foreach (var dn in StraightPipeSpecTable.DuctileIronNominalDiameters)
             foreach (var table in AngleTables)
             {
                 var row = table.Rows.First(x => Math.Abs(x.Dn - dn) <= Epsilon);
@@ -227,7 +244,7 @@ public sealed class BendFittingCatalog
                     Connection: BendConnection.Socket);
             }
 
-        foreach (var dn in StraightPipeSpecTable.NominalDiameters)
+        foreach (var dn in StraightPipeSpecTable.DuctileIronNominalDiameters)
             foreach (var table in FlangedAngleTables)
             {
                 var row = table.Rows.First(x => Math.Abs(x.Dn - dn) <= Epsilon);
@@ -242,7 +259,161 @@ public sealed class BendFittingCatalog
             }
     }
 
-    public static BendFittingCatalog Default { get; } = new(BuildHandbook().ToList());
+    // ══════════════════════════════════════════════════════════════════════════
+    // 강관 곡관 규격 — 출처: KS D 3578 부도 1~5 (docs/강관핸드북_곡관및이형관.pdf, 원본 docs/강관핸드북-1.pdf p.157~161)
+    //   docs/211_data_강관곡관_KSD3578.csv를 그대로 옮겼다(스크립트 생성).
+    //
+    // 열 대응 (docs/211 § C-5, 2026-09-22 가변점 검토)
+    //   R → CenterlineRadiusMm, L(두 중심선 교점=절점 → 관 끝) → LayingLengthMm, T → WallThicknessMm(종류별), 무게 → WeightKg(종류별)
+    //   l₃는 L − R·tan(θ/2)로 유도되고 l₁·l₂는 미터 절단 제작 치수라 단일 호 5점 패밀리에는 쓰지 않는다.
+    //   전 행에서 L ≥ R·tan(θ/2)이고, 무게 = 관실길이 × 0.02466·T·(D−T)로 검산했다(불일치 0건).
+    //
+    // 판단 근거 (2026-09-22 사용자 확정)
+    //   · 종류 F12/F15/F20은 관두께·무게만 다르고 외경·R·L은 같다. 직관 등급(STWW)과 대응시키지 않고 사용자가 고른다.
+    //   · 5⅝°는 핸드북에 DN1000 이상만 있다. 그 미만 DN에는 만들지 않는다.
+    //   · 플랜지 곡관 표가 발췌본에 없어 용접곡관 치수·무게(플랜지 제외)를 플랜지 접합에도 그대로 쓴다(docs/211 § 0-1 A1).
+    //   · 강관 곡관에는 A/B형·소켓이 없다 — Form은 BType으로 채우되 ExtraLegLengthMm은 0이다.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>강관 곡관 관두께 T — 종류(F12/F15/F20)별 DN 단일값(각도 무관). 출처 KS D 3578 부표 2·부도 1~5.</summary>
+    private static readonly (double Dn, double F12, double F15, double F20)[] SteelWallThickness =
+    {
+        (80, 4.2, 4.2, 4.5), (100, 4.5, 4.5, 4.9), (125, 4.5, 4.5, 5.1), (150, 5, 5, 5.5), (200, 5.8, 5.8, 6.4),
+        (250, 6.6, 6.6, 6.4), (300, 6.9, 6.9, 6.4), (350, 6, 6, 6), (400, 6, 6, 6), (450, 6, 6, 6),
+        (500, 6, 6, 6), (600, 6, 6, 6), (700, 6, 6, 7), (800, 7, 7, 8), (900, 7, 8, 8),
+        (1000, 8, 9, 9), (1100, 8, 10, 10), (1200, 9, 11, 11), (1350, 10, 12, 12), (1500, 11, 14, 14),
+        (1600, 12, 15, 15), (1650, 12, 15, 15), (1800, 13, 16, 16), (1900, 14, 17, 17), (2000, 15, 18, 18),
+        (2100, 16, 19, 19), (2200, 16, 20, 20), (2300, 17, 21, 21), (2400, 18, 22, 22), (2500, 18, 23, 23),
+        (2600, 19, 24, 24), (2700, 20, 25, 25), (2800, 21, 26, 26), (2900, 21, 27, 27), (3000, 22, 29, 29)
+    };
+
+    /// <summary>부도 1 90° 곡관 — (DN, R, L, 무게 F12, F15, F20 kg).</summary>
+    private static readonly (double Dn, double RadiusMm, double LayingMm, double WeightF12Kg, double WeightF15Kg, double WeightF20Kg)[] SteelBend90 =
+    {
+        (80, 230, 400, 6.24, 6.24, 6.66), (100, 230, 400, 8.66, 8.66, 9.37), (125, 230, 400, 10.6, 10.6, 12),
+        (150, 250, 450, 15.9, 15.9, 17.4), (200, 310, 500, 26.4, 26.4, 29.1), (250, 360, 550, 40.7, 40.7, 39.5),
+        (300, 410, 600, 55.1, 55.1, 51.2), (350, 460, 600, 52.7, 52.7, 52.7), (400, 510, 650, 65.1, 65.1, 65.1),
+        (450, 530, 700, 79.6, 79.6, 79.6), (500, 560, 700, 87.7, 87.7, 87.7), (600, 660, 850, 129, 129, 129),
+        (700, 790, 950, 165, 165, 194), (800, 790, 950, 221, 221, 253), (900, 860, 1050, 277, 316, 316),
+        (1000, 910, 1100, 367, 411, 411), (1100, 910, 1100, 404, 503, 503), (1200, 970, 1150, 516, 630, 630),
+        (1350, 1020, 1200, 672, 804, 804), (1500, 1070, 1250, 853, 1080, 1080), (1600, 1200, 1350, 1060, 1330, 1330),
+        (1650, 1250, 1400, 1140, 1420, 1420), (1800, 1300, 1450, 1390, 1710, 1710), (1900, 1350, 1500, 1640, 1980, 1980),
+        (2000, 1400, 1550, 1900, 2280, 2280), (2100, 1450, 1600, 2200, 2610, 2610), (2200, 1500, 1650, 2380, 2960, 2960),
+        (2300, 1550, 1700, 2720, 3350, 3350), (2400, 1600, 1750, 3080, 3770, 3770), (2500, 1650, 1800, 3300, 4220, 4220),
+        (2600, 1700, 1850, 3730, 4700, 4700), (2700, 1750, 1900, 4180, 5220, 5220), (2800, 1800, 1950, 4670, 5770, 5770),
+        (2900, 1850, 2000, 4960, 6360, 6360), (3000, 1900, 2050, 5510, 7240, 7240)
+    };
+
+    /// <summary>부도 2 45° 곡관 — (DN, R, L, 무게 F12, F15, F20 kg).</summary>
+    private static readonly (double Dn, double RadiusMm, double LayingMm, double WeightF12Kg, double WeightF15Kg, double WeightF20Kg)[] SteelBend45 =
+    {
+        (80, 370, 350, 6.05, 6.05, 6.46), (100, 370, 350, 8.39, 8.39, 9.08), (125, 370, 350, 10.3, 10.3, 11.6),
+        (150, 430, 450, 17.5, 17.5, 19.2), (200, 490, 450, 26.6, 26.6, 29.3), (250, 550, 450, 37.4, 37.4, 36.3),
+        (300, 610, 450, 46.6, 46.6, 43.4), (350, 680, 500, 50.6, 50.6, 50.6), (400, 740, 500, 57.8, 57.8, 57.8),
+        (450, 800, 500, 65, 65, 65), (500, 860, 500, 72.2, 72.2, 72.2), (600, 980, 750, 131, 131, 131),
+        (700, 1170, 750, 152, 152, 178), (800, 1170, 1000, 273, 273, 312), (900, 1290, 1000, 307, 350, 350),
+        (1000, 1350, 1000, 389, 436, 436), (1100, 1350, 1000, 428, 534, 534), (1200, 1410, 1000, 526, 641, 641),
+        (1350, 1470, 1000, 656, 785, 785), (1500, 1530, 1000, 799, 1020, 1020), (1600, 1680, 1000, 928, 1160, 1160),
+        (1650, 1680, 1000, 959, 1200, 1200), (1800, 1680, 1000, 1130, 1390, 1390), (1900, 1800, 1000, 1290, 1560, 1560),
+        (2000, 1800, 1000, 1450, 1740, 1740), (2100, 1920, 1050, 1700, 2020, 2020), (2200, 1920, 1050, 1780, 2230, 2230),
+        (2300, 2040, 1100, 2080, 2560, 2560), (2400, 2040, 1100, 2290, 2800, 2800), (2500, 2160, 1150, 2500, 3180, 3180),
+        (2600, 2160, 1150, 2740, 3450, 3450), (2700, 2160, 1150, 2990, 3740, 3740), (2800, 2280, 1200, 3400, 4200, 4200),
+        (2900, 2280, 1200, 3520, 4520, 4520), (3000, 2400, 1250, 3980, 5230, 5230)
+    };
+
+    /// <summary>부도 3 22½° 곡관 — (DN, R, L, 무게 F12, F15, F20 kg).</summary>
+    private static readonly (double Dn, double RadiusMm, double LayingMm, double WeightF12Kg, double WeightF15Kg, double WeightF20Kg)[] SteelBend225 =
+    {
+        (80, 380, 200, 3.52, 3.52, 3.76), (100, 380, 200, 4.88, 4.88, 5.28), (125, 380, 200, 6, 6, 6.76),
+        (150, 380, 200, 7.92, 7.92, 8.68), (200, 510, 250, 15.1, 15.1, 16.5), (250, 510, 250, 21.2, 21.2, 20.6),
+        (300, 640, 250, 26.5, 26.5, 24.6), (350, 640, 500, 51.7, 51.7, 51.7), (400, 770, 500, 59.2, 59.2, 59.2),
+        (450, 770, 500, 66.8, 66.8, 66.8), (500, 890, 500, 74.3, 74.3, 74.3), (600, 1020, 750, 134, 134, 134),
+        (700, 1150, 750, 156, 156, 183), (800, 1150, 1000, 278, 278, 318), (900, 1280, 1000, 314, 358, 358),
+        (1000, 1410, 1000, 398, 446, 446), (1100, 1410, 1000, 438, 546, 546), (1200, 1410, 1000, 538, 656, 656),
+        (1350, 1530, 1000, 672, 804, 804), (1500, 1530, 1000, 820, 1040, 1040), (1600, 1750, 1000, 954, 1190, 1190),
+        (1650, 1750, 1000, 986, 1230, 1230), (1800, 1750, 1000, 1160, 1430, 1430), (1900, 1750, 1000, 1320, 1600, 1600),
+        (2000, 1750, 1000, 1490, 1790, 1790), (2100, 1950, 1000, 1670, 1980, 1980), (2200, 1950, 1000, 1750, 2190, 2190),
+        (2300, 1950, 1000, 1950, 2400, 2400), (2400, 1950, 1000, 2150, 2620, 2620), (2500, 1950, 1000, 2240, 2860, 2860),
+        (2600, 2150, 1000, 2460, 3100, 3100), (2700, 2150, 1000, 2690, 3350, 3350), (2800, 2150, 1000, 2920, 3610, 3610),
+        (2900, 2150, 1000, 3030, 3890, 3890), (3000, 2150, 1000, 3280, 4320, 4320)
+    };
+
+    /// <summary>부도 4 11¼° 곡관 — (DN, R, L, 무게 F12, F15, F20 kg).</summary>
+    private static readonly (double Dn, double RadiusMm, double LayingMm, double WeightF12Kg, double WeightF15Kg, double WeightF20Kg)[] SteelBend1125 =
+    {
+        (80, 770, 200, 3.52, 3.52, 3.76), (100, 770, 200, 4.88, 4.88, 5.28), (125, 770, 200, 6, 6, 6.76),
+        (150, 770, 200, 7.92, 7.92, 8.68), (200, 1030, 250, 15.1, 15.1, 16.5), (250, 1030, 250, 21.2, 21.2, 20.6),
+        (300, 1290, 250, 26.5, 26.5, 24.6), (350, 1290, 500, 51.7, 51.7, 51.7), (400, 1550, 500, 59.2, 59.2, 59.2),
+        (450, 1550, 500, 66.8, 66.8, 66.8), (500, 1810, 500, 74.3, 74.3, 74.3), (600, 2060, 750, 134, 134, 134),
+        (700, 2320, 750, 156, 156, 183), (800, 2320, 1000, 278, 278, 318), (900, 2580, 1000, 314, 358, 358),
+        (1000, 2840, 1000, 398, 446, 446), (1100, 2840, 1000, 438, 546, 546), (1200, 2840, 1000, 538, 656, 656),
+        (1350, 3100, 1000, 672, 804, 804), (1500, 3100, 1000, 820, 1040, 1040), (1600, 3530, 1000, 954, 1190, 1190),
+        (1650, 3530, 1000, 986, 1230, 1230), (1800, 3530, 1000, 1160, 1430, 1430), (1900, 3530, 1000, 1320, 1600, 1600),
+        (2000, 3530, 1000, 1490, 1790, 1790), (2100, 3950, 1000, 1670, 1980, 1980), (2200, 3950, 1000, 1750, 2190, 2190),
+        (2300, 3950, 1000, 1950, 2400, 2400), (2400, 3950, 1000, 2150, 2620, 2620), (2500, 3950, 1000, 2240, 2860, 2860),
+        (2600, 4400, 1000, 2460, 3100, 3100), (2700, 4400, 1000, 2690, 3350, 3350), (2800, 4400, 1000, 2920, 3610, 3610),
+        (2900, 4400, 1000, 3030, 3890, 3890), (3000, 4400, 1000, 3280, 4320, 4320)
+    };
+
+    /// <summary>부도 5 5⅝° (DN1000 이상만 수록) 곡관 — (DN, R, L, 무게 F12, F15, F20 kg).
+    /// DN2400 F15/F20 2 610kg은 다른 각도 표(2 620)와 다르지만 원문 그대로다(docs/211 § 0-1 A5).</summary>
+    private static readonly (double Dn, double RadiusMm, double LayingMm, double WeightF12Kg, double WeightF15Kg, double WeightF20Kg)[] SteelBend5625 =
+    {
+        (1000, 5690, 1000, 398, 446, 446), (1100, 5690, 1000, 438, 546, 546), (1200, 5690, 1000, 538, 656, 656),
+        (1350, 6210, 1000, 672, 804, 804), (1500, 6210, 1000, 820, 1040, 1040), (1600, 7080, 1000, 954, 1190, 1190),
+        (1650, 7080, 1000, 986, 1230, 1230), (1800, 7080, 1000, 1160, 1430, 1430), (1900, 7080, 1000, 1320, 1600, 1600),
+        (2000, 7080, 1000, 1490, 1790, 1790), (2100, 7920, 1000, 1670, 1980, 1980), (2200, 7920, 1000, 1750, 2190, 2190),
+        (2300, 7920, 1000, 1950, 2400, 2400), (2400, 7920, 1000, 2150, 2610, 2610), (2500, 7920, 1000, 2240, 2860, 2860),
+        (2600, 8820, 1000, 2460, 3100, 3100), (2700, 8820, 1000, 2690, 3350, 3350), (2800, 8820, 1000, 2920, 3610, 3610),
+        (2900, 8820, 1000, 3030, 3890, 3890), (3000, 8820, 1000, 3280, 4320, 4320)
+    };
+
+    private static readonly (double AngleDeg, (double Dn, double RadiusMm, double LayingMm, double WeightF12Kg, double WeightF15Kg, double WeightF20Kg)[] Rows)[] SteelAngleTables =
+    {
+        (5.625, SteelBend5625), (11.25, SteelBend1125), (22.5, SteelBend225), (45d, SteelBend45), (90d, SteelBend90)
+    };
+
+    private static readonly SteelFittingClass[] SteelClasses = { SteelFittingClass.F12, SteelFittingClass.F15, SteelFittingClass.F20 };
+
+    /// <summary>강관 곡관 종류별 관두께(F12/F15/F20). 표에 없는 DN이면 null.</summary>
+    public static double? SteelWallThicknessOf(double diameterMm, SteelFittingClass fittingClass)
+    {
+        var row = SteelWallThickness.FirstOrDefault(x => Math.Abs(x.Dn - diameterMm) <= Epsilon);
+        if (row == default) return null;
+        return fittingClass switch
+        {
+            SteelFittingClass.F12 => row.F12,
+            SteelFittingClass.F15 => row.F15,
+            SteelFittingClass.F20 => row.F20,
+            _ => null
+        };
+    }
+
+    /// <summary>강관 기본 곡관 행 — 각도 5 × DN × 종류 3 × 접합 2 = 960행(docs/211 § C-5).</summary>
+    private static IEnumerable<BendFittingEntry> BuildSteelHandbook()
+    {
+        foreach (var table in SteelAngleTables)
+            foreach (var row in table.Rows)
+                foreach (var fittingClass in SteelClasses)
+                {
+                    var thickness = SteelWallThicknessOf(row.Dn, fittingClass) ?? 0d;
+                    var weight = fittingClass switch
+                    {
+                        SteelFittingClass.F12 => row.WeightF12Kg,
+                        SteelFittingClass.F15 => row.WeightF15Kg,
+                        _ => row.WeightF20Kg
+                    };
+                    foreach (var connection in new[] { BendConnection.Socket, BendConnection.Flanged })
+                        yield return new BendFittingEntry(
+                            row.Dn, table.AngleDeg, BendForm.BType, row.LayingMm, row.RadiusMm, thickness,
+                            Material: PipeMaterial.Steel, Connection: connection, FittingClass: fittingClass, WeightKg: weight);
+                }
+    }
+
+    /// <summary>강관 기본 곡관 행. 기존 프로젝트 저장본에 강관 행이 없을 때 병합용으로도 쓴다(<see cref="WithSteelDefaults"/>).</summary>
+    public static IReadOnlyList<BendFittingEntry> SteelDefaultEntries { get; } = BuildSteelHandbook().ToList();
+
+    public static BendFittingCatalog Default { get; } = new(BuildHandbook().Concat(SteelDefaultEntries).ToList());
 
     // ── 구 임시값 감지 전용 (2026-08-18~19 사이에 저장된 프로젝트가 대상) ────────────
     // 아래 블록은 배치에 쓰이지 않는다. 저장된 규격이 그 시기의 임시값 그대로인지 판별해
@@ -257,7 +428,7 @@ public sealed class BendFittingCatalog
     private const double PlaceholderLayingClearanceMm = 50d;
 
     private static IEnumerable<BendFittingEntry> BuildPlaceholders() =>
-        from dn in StraightPipeSpecTable.NominalDiameters
+        from dn in StraightPipeSpecTable.DuctileIronNominalDiameters
         from form in PlaceholderForms
         from angle in JointDeflectionRule.StandardAngles
         let radius = Math.Round(form.RadiusFactor * dn, 1)
@@ -281,7 +452,16 @@ public sealed record BendSettings(
     /// <summary>배치에 쓸 곡관 접합 종류. 모델링 창에서 고르며 기본은 소켓이다.</summary>
     BendConnection ActiveBendConnection = BendConnection.Socket,
     /// <summary>배치에 쓸 곡관 형식. A형(양쪽 소켓)은 s=0·양쪽 Joint, B형(한쪽 소켓)은 s=200·한쪽 Joint를 결정하며 접합 종류와 무관하다(2026-09-04 확정).</summary>
-    BendForm ActiveBendForm = BendForm.BType)
+    BendForm ActiveBendForm = BendForm.BType,
+    /// <summary>주철관 소켓 접합에 <b>이탈방지압륜</b>을 쓰는지(docs/166 § 11-4).
+    /// <para>산출서에서 `이탈방지압륜 접합 및 부설`은 `KP접합 및 부설`과 별개 공종이라 개소를 다른 열에 적어야 한다.
+    /// 켜면 주철관 소켓 부재의 접합 개소가 <c>DH_이탈방지압륜접합수</c>로, 끄면 <c>DH_KP접합수</c>로 간다.</para>
+    /// <para>형상·허용굴곡에는 <b>영향이 없다</b> — 압륜은 같은 KP 메커니컬 조인트에 덧대는 부속이다.
+    /// 강관·플랜지 접합에도 영향이 없다.</para></summary>
+    bool UseRestraintGland = false,
+    /// <summary>강관 곡관·이형관에 쓸 종류(F12/F15/F20). 직관 등급(STWW)과 무관하게 모델링 창에서 고른다(docs/211 § 0 확정 2).
+    /// 주철관 절점에는 영향이 없다.</summary>
+    SteelFittingClass ActiveSteelFittingClass = SteelFittingClass.F12)
 {
     /// <summary>허용굴곡 적용 방식은 곡관 형식이 결정한다. A형은 양쪽 Joint(θ₁+θ₂), B형은 한쪽 Joint.</summary>
     public JointApplicationMode ApplicationMode =>
@@ -292,4 +472,16 @@ public sealed record BendSettings(
         JointDeflectionTable.Default,
         BendFittingCatalog.Default,
         JointTypeCatalog.KpMechanical);
+
+    /// <summary>직관표·곡관표에 강관 행이 전무하면 기본 강관 행을 붙인 사본을 돌려준다(docs/211 § E-1).
+    /// 기존 프로젝트 저장본에는 강관 행이 없는데 [기본값 복원]을 강요하면 사용자가 손본 주철관 값이 날아가므로 병합한다.
+    /// 강관 행이 하나라도 남아 있으면 사용자 편집으로 보고 건드리지 않는다.</summary>
+    public BendSettings WithSteelDefaults()
+    {
+        var straight = StraightPipes.WithSteelDefaults();
+        var fittings = Fittings.WithSteelDefaults();
+        return ReferenceEquals(straight, StraightPipes) && ReferenceEquals(fittings, Fittings)
+            ? this
+            : this with { StraightPipes = straight, Fittings = fittings };
+    }
 }

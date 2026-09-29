@@ -8,5 +8,6 @@ public interface IBendDirectShapeRepo
         IReadOnlyList<AdaptiveBendPlacementPlan> plans,
         AlignmentPlacementOrigin origin,
         PipeInfoParameterContext? info = null,
-        IProgress<PipeAlignmentProgress>? progress = null);
+        IProgress<PipeAlignmentProgress>? progress = null,
+        CancellationToken cancellationToken = default);
 }

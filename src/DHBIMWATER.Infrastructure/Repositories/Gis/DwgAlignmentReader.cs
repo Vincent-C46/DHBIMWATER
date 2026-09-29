@@ -5,6 +5,7 @@ using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Gis;
 using System.IO;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Gis;
 
@@ -15,7 +16,7 @@ public sealed class DwgAlignmentReader : IAlignmentSourceReader
 
     public ShapefileReadResult Read(string filePath)
     {
-        if (!File.Exists(filePath)) throw new FileNotFoundException("DWG 파일을 찾을 수 없습니다.", filePath);
+        if (!File.Exists(filePath)) throw new DhbimwaterException(ErrorCodes.PA_DwgFileMissing, $"DWG 파일을 찾을 수 없습니다: {filePath}");
 
         var document = DwgReader.Read(filePath);
         var features = document.ModelSpace.Entities.SelectMany((entity, index) => ToFeature(entity, filePath, index + 1)).ToList();

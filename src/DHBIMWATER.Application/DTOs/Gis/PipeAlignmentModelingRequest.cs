@@ -17,7 +17,11 @@ public sealed record ExcelAlignmentMapping(string SheetName, int HeaderRow, int 
 /// 진행 방향을 뒤집을 레코드번호. Loader가 해당 레코드의 정점 순서를 역순으로 만들어 시작점과 끝점을 교환한다.
 /// 레코드번호는 이 파일(엑셀은 이 시트) 안에서만 유일하므로, 파일별로 분리된 목록이어야 한다.
 /// </param>
-public sealed record AlignmentSourceFile(string FilePath, string PipeKind, string? DiameterField, string? KindField, IReadOnlyList<string>? Layers = null, ExcelAlignmentMapping? ExcelMapping = null, double? ManualDiameterMm = null, IReadOnlyDictionary<string, ResolvedPipeSpecKey>? DiameterMappings = null, IReadOnlyList<string>? ReversedRecordNumbers = null);
+/// <param name="Material">모델링 창의 관종 토글(docs/211 § N). null이면 제한 없음(테스트·구형 호출). 값이 있으면 Loader는 이 관종의 등급만 받아들이고,
+/// 필드가 다른 관종 등급·별칭을 주면 이 관종의 기본 등급으로 잡는다(docs/212 § A-2) — 창의 판별과 어긋나지 않게.</param>
+/// <param name="ExclusionRanges">관을 두지 않을 측점 구간(docs/219). Loader가 대상 레코드를 경계에서 잘라 여러 선형으로 만든다. 레코드번호는 이 파일(시트) 안 기준.</param>
+public sealed record AlignmentSourceFile(string FilePath, string PipeKind, string? DiameterField, string? KindField, IReadOnlyList<string>? Layers = null, ExcelAlignmentMapping? ExcelMapping = null, double? ManualDiameterMm = null, IReadOnlyDictionary<string, ResolvedPipeSpecKey>? DiameterMappings = null, IReadOnlyList<string>? ReversedRecordNumbers = null, PipeMaterial? Material = null,
+    IReadOnlyList<AlignmentExclusionRange>? ExclusionRanges = null);
 
 /// <param name="DiameterMm">확정 DN. null이면 사용자가 지정하지 않은 행이다.</param>
 public sealed record ResolvedPipeSpecKey(double? DiameterMm, string? PipeKind);
@@ -34,6 +38,8 @@ public sealed record PipeAlignmentModelingRequest
     public double? ReferenceY { get; init; }
     /// <summary>기준점을 프로젝트 공유좌표에도 기록할지 여부. 형상 배치 위치는 ReferenceX·Y가 결정하며 이 값과 무관하다.</summary>
     public bool ApplySharedCoordinates { get; init; }
+    /// <summary>야간 작업 여부(`DH_야간`). 이 실행으로 만드는 모든 관로 요소에 같은 값이 기록된다(docs/141 § C).</summary>
+    public bool IsNightWork { get; init; }
     public ZDatum ZDatum { get; init; } = ZDatum.Invert;
     /// <summary>TODO: ZSource 미소비 — Phase 2.</summary>
     public ZSource ZSource { get; init; } = ZSource.GeometryZ;
@@ -68,14 +74,29 @@ public sealed record PipeAlignmentModelingRequest
 }
 
 /// <param name="BendCount">실제로 생성되어 커밋된 5점 가변 곡관 수.</param>
-public sealed record PipeAlignmentModelingResult(PipeAlignmentOutputMode OutputMode, int CreatedCount, int SkippedSegments, IReadOnlyList<string> Warnings, int BendCount = 0);
+/// <param name="PreviewElementIds">선형 미리보기로 만든 DirectShape ID(ElementId.Value). 미리보기 직후 현재 뷰 Zoom에 쓴다(docs/226 § D). 최종 배치는 null.</param>
+public sealed record PipeAlignmentModelingResult(PipeAlignmentOutputMode OutputMode, int CreatedCount, int SkippedSegments, IReadOnlyList<string> Warnings, int BendCount = 0,
+    IReadOnlyList<long>? PreviewElementIds = null);
 
 /// <summary>배치되는 관로 요소에 기록할 DH_* 정보 매개변수 중 관로 전체가 공유하는 값.</summary>
-public sealed record PipeInfoParameterContext(string JointType, JointApplicationMode ApplicationMode, ZDatum ZDatum, bool Enabled = true);
+public sealed record PipeInfoParameterContext(string JointType, JointApplicationMode ApplicationMode, ZDatum ZDatum, bool Enabled = true,
+    /// <summary>야간 작업 여부(`DH_야간`). 실행 단위 값이라 관로 전체가 공유한다(docs/141 § C-4).</summary>
+    bool IsNightWork = false,
+    /// <summary>곡관 접합(소켓/플랜지). 접합 개소를 어느 매개변수에 적을지는 <b>관종과 이 값</b>이 정한다(docs/166 § 6).
+    /// <para>`DH_접합방법`(KP·타이튼)은 소켓 조인트의 <b>종류</b>일 뿐이라 용접을 표현하지 못한다 — docs/168 § 4.</para>
+    /// 기본값이 있어 이 축을 모르는 기존 호출부도 그대로 컴파일된다(설정 기본값과 같은 소켓).</summary>
+    BendConnection BendConnection = BendConnection.Socket,
+    /// <summary>주철관 소켓에 이탈방지압륜을 쓰는지. 접합 개소를 `DH_KP접합수` 대신
+    /// `DH_이탈방지압륜접합수`에 적는다(docs/166 § 11-4). 강관·플랜지에는 영향이 없다.</summary>
+    bool UseRestraintGland = false,
+    /// <summary>강관 곡관 종류(F12/F15/F20, 전역 설정). 강관 곡관의 `DH_관종등급`에는 직관 등급(STWW) 대신 이 값을 적는다
+    /// (2026-09-22 사용자 확정 — 곡관 관두께·무게는 STWW가 아니라 F로 정해진다). 직관·이경관은 계속 STWW 등급이다.</summary>
+    SteelFittingClass SteelFittingClass = SteelFittingClass.F12);
 
 // Repo 인터페이스 계약을 보존하는 기존 DTO 정의다.
 public sealed record PipeAlignmentCreateDefinition(IReadOnlyList<PipeAlignment> Alignments, AlignmentPlacementOrigin Origin);
-public sealed record PipeAlignmentCreateResult(int CreatedCount, int SkippedSegments, IReadOnlyList<string> Warnings);
+/// <param name="CreatedElementIds">만든 미리보기 DirectShape ID(ElementId.Value, docs/226 § D).</param>
+public sealed record PipeAlignmentCreateResult(int CreatedCount, int SkippedSegments, IReadOnlyList<string> Warnings, IReadOnlyList<long>? CreatedElementIds = null);
 public sealed record AlignmentPlacementOrigin(double X, double Y, ZDatum ZDatum, StraightPipeSpecTable StraightPipeSpecs,
     double TrueNorthClockwiseDegrees = 0d)
 {

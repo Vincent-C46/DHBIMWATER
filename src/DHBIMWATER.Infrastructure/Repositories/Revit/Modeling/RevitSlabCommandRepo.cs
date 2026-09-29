@@ -3,6 +3,7 @@ using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Structures;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 {
@@ -62,7 +63,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             }
 
             var level = doc.GetElement(new ElementId(levelId)) as Level;
-            if (level == null) throw new Exception($"Level id '{levelId}' not found.");
+            if (level == null) throw new DhbimwaterException(ErrorCodes.VR_LevelNotFound, $"레벨(Id {levelId})을 찾을 수 없습니다.");
 
             var floor = Floor.Create(doc, curveLoopList, new ElementId((long)slabTypeId), level.Id);
             // Z값 조정

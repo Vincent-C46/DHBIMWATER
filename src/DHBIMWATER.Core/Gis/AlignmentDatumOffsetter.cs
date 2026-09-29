@@ -72,7 +72,9 @@ public static class AlignmentDatumOffsetter
         double diameterMm, OffsetWarnings warnings)
     {
         var spec = specs.Find(alignment.PipeKind, diameterMm);
-        if (spec is null && specs.FindOuterDiameterByDiameter(diameterMm) is { } fallback)
+        // 외경 폴백은 같은 관종 안에서만(docs/211 § B-3). 알 수 없는 등급은 주철관으로 본다.
+        var material = PipeKindCatalog.MaterialOf(alignment.PipeKind) ?? PipeMaterial.DuctileIron;
+        if (spec is null && specs.FindOuterDiameterByDiameter(diameterMm, material) is { } fallback)
             spec = new StraightPipeSpec(alignment.PipeKind, diameterMm, fallback.OuterDiameterMm, 0d);
         if (spec is null) warnings.MissingSpecs.Add((alignment.PipeKind, diameterMm));
         return PipeElevationDatum.OffsetMm(datum, spec, diameterMm) / 1000d;

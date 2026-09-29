@@ -1,4 +1,5 @@
 using DHBIMWATER.Core.Geometry;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Core.Gis;
 
@@ -15,7 +16,7 @@ public static class StraightJointCutPlane
         ArgumentNullException.ThrowIfNull(firstDirection);
         ArgumentNullException.ThrowIfNull(secondDirection);
         if (firstDirection.Length <= DegenerateEpsilon || secondDirection.Length <= DegenerateEpsilon)
-            throw new ArgumentException("방향벡터 길이는 0보다 커야 합니다.");
+            throw new DhbimwaterException(ErrorCodes.PA_Internal, "방향벡터 길이는 0보다 커야 합니다.");
 
         var first = firstDirection.Normalize();
         var second = secondDirection.Normalize();
@@ -27,7 +28,7 @@ public static class StraightJointCutPlane
     {
         var (first, second) = NormalizePair(firstDirection, secondDirection);
         if (limitDeg is < 0d or > 180d)
-            throw new ArgumentOutOfRangeException(nameof(limitDeg), "임계각은 0~180도 범위여야 합니다.");
+            throw new DhbimwaterException(ErrorCodes.PA_Internal, "임계각은 0~180도 범위여야 합니다.");
 
         var dot = Math.Clamp(Dot(first, second), -1d, 1d);
         var deflectionDeg = Math.Acos(dot) * 180d / Math.PI;
@@ -38,7 +39,7 @@ public static class StraightJointCutPlane
     {
         var (axis, normal) = NormalizePair(axisDirection, planeNormal);
         if (!double.IsFinite(maxSlope) || maxSlope < 0d)
-            throw new ArgumentOutOfRangeException(nameof(maxSlope), "절단 기울기 상한은 0 이상의 유한값이어야 합니다.");
+            throw new DhbimwaterException(ErrorCodes.PA_Internal, "절단 기울기 상한은 0 이상의 유한값이어야 합니다.");
 
         var dot = Math.Clamp(Math.Abs(Dot(axis, normal)), 1e-6, 1d);
         var slope = Math.Sqrt(Math.Max(0d, 1d - dot * dot)) / dot;
@@ -50,7 +51,7 @@ public static class StraightJointCutPlane
         ArgumentNullException.ThrowIfNull(firstDirection);
         ArgumentNullException.ThrowIfNull(secondDirection);
         if (firstDirection.Length <= DegenerateEpsilon || secondDirection.Length <= DegenerateEpsilon)
-            throw new ArgumentException("방향벡터 길이는 0보다 커야 합니다.");
+            throw new DhbimwaterException(ErrorCodes.PA_Internal, "방향벡터 길이는 0보다 커야 합니다.");
         return (firstDirection.Normalize(), secondDirection.Normalize());
     }
 

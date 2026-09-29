@@ -17,6 +17,18 @@ namespace DHBIMWATER.Application.Services
         private readonly double totalWidth;
         private readonly double x2;
 
+        /// <summary>
+        /// 펌프장 전체 길이(mm) = 최우측(+X) 외벽 외면의 X. 평면은 x = 0 ~ 이 값 사이에 놓인다.
+        /// 토출조를 펌프장 오른쪽에 이격 배치할 때 기준면이 된다(<see cref="DischargeBasinPlacement"/>).
+        /// <para>※ 이 파일의 각 Calculate* 메서드는 같은 식을 인라인으로 다시 쓰고 있다.
+        /// 식이 바뀌면 여기와 함께 고쳐야 한다. // TODO: 인라인 계산을 이 메서드 호출로 정리</para>
+        /// </summary>
+        public static double TotalLength(
+            string stationType,
+            double b1, double b2, double b3, double b4, double b5, double b6, double b7,
+            double t3, double t4)
+            => b1 + b2 + b3 + b4 + b5 + b6 + t3 + b7 + (stationType == "Type2" ? t3 : t4);
+
         public static IReadOnlyList<LevelDefinition> CalculateLevels(PumpCreationRequestDto dto)
         {
             var d = dto.DesignConditionDto;

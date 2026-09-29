@@ -1,4 +1,5 @@
 using DHBIMWATER.Core.Geometry;
+using DHBIMWATER.Core.Gis;
 using DHBIMWATER.UI.Base;
 
 namespace DHBIMWATER.UI.ViewModels.Modeling;
@@ -32,8 +33,14 @@ public sealed class AlignmentDirectionRow : ViewModelBase
             Changed?.Invoke(this);
         }
     }
-    public bool IsSelected { get => _isSelected; set => SetProperty(ref _isSelected, value); }
+    public bool IsSelected { get => _isSelected; set { if (SetProperty(ref _isSelected, value)) SelectionChanged?.Invoke(this); } }
     public Action<AlignmentDirectionRow>? Changed { get; init; }
+    /// <summary>선택이 바뀌면 개요도·제외 구간 표 필터를 다시 맞춘다(docs/220 § D).</summary>
+    public Action<AlignmentDirectionRow>? SelectionChanged { get; init; }
+    /// <summary>리더가 읽은 원본(반전 전) 선형. 개요도가 반전 여부에 따라 뒤집어 그린다(docs/220 § C).</summary>
+    public PipeAlignment? Feature { get; init; }
+    public string Title => $"{FileName} · 레코드 {RecordNumber}";
+    public string MetaDisplay => $"정점 {VertexCount:N0} · {LengthM:0.#} m";
 
     /// <summary>체크 즉시 시작·끝 표시가 바뀌어야 사용자가 방향을 확인할 수 있다.</summary>
     public string StartDisplay => Format(IsReversed ? SourceEnd : SourceStart);

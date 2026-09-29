@@ -2,6 +2,7 @@ using Autodesk.Revit.DB;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Core.Piping;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
 
@@ -22,7 +23,7 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
         ("규격", 42, false),
         ("형상", 30, true),   // docs/133: 이번에는 칸만 그리고 심볼은 넣지 않는다.
         ("수량", 14, true),
-        ("비고", 30, false),  // 값을 쓰지 않는다. 사용자가 도면에서 직접 채운다.
+        ("비고", 30, false),  // 직관·단관은 관 재료 코드가 자동으로 들어온다(docs/141 § B-7). 나머지는 빈 칸.
     ];
 
     private const double RowHeightMm = 9;
@@ -35,18 +36,79 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
     public IReadOnlyList<PipeMaterialPart> GetParts()
         => PipeMaterialPartCollector.Read(Document());
 
-    public bool ViewExists(string viewName)
+    public IReadOnlySet<string> GetExistingViewNames()
         => new FilteredElementCollector(Document())
             .OfClass(typeof(View))
             .Cast<View>()
-            .Any(x => !x.IsTemplate && string.Equals(x.Name, viewName, StringComparison.Ordinal));
+            .Where(x => !x.IsTemplate)
+            .Select(x => x.Name)
+            .ToHashSet(StringComparer.Ordinal);
 
     public void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows)
     {
         var document = Document();
-        var view = CreateView(document, viewName);
+        // 격점 하나의 실패가 나머지 격점까지 되돌리지 않도록 그 격점의 변경만 묶는다(docs/208 § C-2).
+        using var sub = new SubTransaction(document);
+        sub.Start();
+        try { DrawTable(document, CreateView(document, viewName), title, rows); sub.Commit(); }
+        catch { sub.RollBack(); throw; }
+    }
 
-        // 머리행 1줄 + 자료행 n줄. 좌표 원점은 표 좌상단이고, 아래로 갈수록 Y가 작아진다.
+    public bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows)
+    {
+        var document = Document();
+
+        // 이름은 있는데 드래프팅뷰가 아니면(다른 종류의 뷰가 그 이름을 쓰는 중) 아무것도 지우지 않는다.
+        // 여기서 예외를 던지면 UseCase가 트랜잭션을 통째로 롤백해 정상인 다른 격점 도면까지 날아간다(docs/173 § B).
+        var view = new FilteredElementCollector(document)
+            .OfClass(typeof(ViewDrafting))
+            .Cast<ViewDrafting>()
+            .FirstOrDefault(x => !x.IsTemplate && string.Equals(x.Name, viewName, StringComparison.Ordinal));
+        if (view is null) return false;
+
+        // 축척을 1로 되돌린다 — 이 클래스의 mm 값은 1:1을 전제로 하고(CreateView 주석),
+        // 문자 크기(용지 mm)와 칸 폭의 눈금도 1:1에서만 맞는다. 사용자가 축척을 바꿔 놨다면 표가 이미 깨져 있다.
+        // 지우기 전에 판정한다 — 축척이 뷰 템플릿에 잠겨 있으면 Scale setter가 던지고, 그때 뷰가 비어 있으면 안 된다(docs/208 § C-3).
+        if (view.Scale != 1 && view.ViewTemplateId != ElementId.InvalidElementId)
+            throw new DhbimwaterException(ErrorCodes.MT_ViewScaleLocked,
+                $"드래프팅뷰 '{view.Name}'에 뷰 템플릿이 적용돼 축척을 1:1로 바꿀 수 없습니다. 템플릿을 해제한 뒤 다시 실행하세요.");
+
+        // 격점 하나의 실패가 나머지 격점까지 되돌리지 않도록 그 격점의 변경만 묶는다(docs/208 § C-2).
+        // ClearView 뒤 그리기가 실패하면 뷰가 비어 버리므로 반드시 함께 되돌린다.
+        using var sub = new SubTransaction(document);
+        sub.Start();
+        try
+        {
+            ClearView(document, view);
+            if (view.Scale != 1) view.Scale = 1;
+            DrawTable(document, view, title, rows);
+            sub.Commit();
+        }
+        catch { sub.RollBack(); throw; }
+        return true;
+    }
+
+    /// <summary>뷰가 소유한 요소를 전부 지운다(docs/173 — 전체 삭제 후 재작도).
+    /// <para>사용자가 이 뷰에 덧붙인 치수·상세항목·주석도 함께 사라진다. 실행 전 사용자 확인이 유일한 방어선이다.</para>
+    /// <para>한 번의 <see cref="Document.Delete(ICollection{ElementId})"/>로 넘겨야 종속 요소를
+    /// Revit이 알아서 함께 처리한다. 하나씩 지우면 이미 사라진 ID를 다시 지우려다 예외가 난다.</para></summary>
+    private static void ClearView(Document document, ViewDrafting view)
+    {
+        // 뷰 ID로 좁힌 collector는 그 뷰에 보이는 요소 = 드래프팅뷰가 소유한 요소다.
+        // WhereElementIsNotElementType()로 유형(TextNoteType 등)은 제외한다 — 유형을 지우면 문서 전체가 망가진다.
+        var owned = new FilteredElementCollector(document, view.Id)
+            .WhereElementIsNotElementType()
+            .ToElementIds();
+        if (owned.Count == 0) return;
+        document.Delete(owned);
+    }
+
+    /// <summary>표 본체를 그린다. 생성(<see cref="CreateTableView"/>)과 갱신(<see cref="RedrawTableView"/>)이 공유한다 —
+    /// 두 경로가 갈라지면 같은 격점의 새 표와 다시 그린 표가 서로 달라진다.
+    /// <para>머리행 1줄 + 자료행 n줄. 좌표 원점은 표 좌상단이고, 아래로 갈수록 Y가 작아진다.</para></summary>
+    private static void DrawTable(Document document, ViewDrafting view, string title,
+        IReadOnlyList<PipeMaterialRow> rows)
+    {
         var lineCount = rows.Count + 1;
         var totalWidthMm = Columns.Sum(x => x.WidthMm);
         var totalHeightMm = lineCount * RowHeightMm;
@@ -56,7 +118,7 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
     }
 
     private Document Document()
-        => _document() ?? throw new InvalidOperationException("활성 Revit 문서가 없습니다.");
+        => _document() ?? throw new DhbimwaterException(ErrorCodes.NoActiveDocument, "활성 Revit 문서가 없습니다.");
 
     private static ViewDrafting CreateView(Document document, string viewName)
     {
@@ -64,7 +126,7 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
             .OfClass(typeof(ViewFamilyType))
             .Cast<ViewFamilyType>()
             .FirstOrDefault(x => x.ViewFamily == ViewFamily.Drafting)
-            ?? throw new InvalidOperationException(
+            ?? throw new DhbimwaterException(ErrorCodes.MT_DraftingViewTypeMissing,
                 "드래프팅뷰 유형(ViewFamilyType)이 프로젝트에 없습니다. 템플릿에 드래프팅뷰 유형을 추가하세요.");
 
         var view = ViewDrafting.Create(document, draftingType.Id);
@@ -98,7 +160,7 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
     {
         var textTypeId = document.GetDefaultElementTypeId(ElementTypeGroup.TextNoteType);
         if (textTypeId == ElementId.InvalidElementId)
-            throw new InvalidOperationException(
+            throw new DhbimwaterException(ErrorCodes.MT_TextNoteTypeMissing,
                 "기본 문자 유형(TextNoteType)이 프로젝트에 없습니다. 템플릿에 문자 유형을 추가하세요.");
 
         // 제목은 표 좌상단 위에 왼쪽 정렬로 놓는다.
@@ -108,7 +170,8 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
         for (var col = 0; col < Columns.Length; col++)
             PlaceCellText(document, view, textTypeId, Columns[col].Heading, col, row: 0, centered: true);
 
-        // 자료행. 형상·비고는 값을 쓰지 않으므로 칸만 남는다(docs/133 § 0).
+        // 자료행. 형상은 값을 쓰지 않으므로 칸만 남는다(docs/133 § 0).
+        // 비고는 모델의 DH_비고 값을 그대로 그린다 — 일람표와 같은 값이어야 한다(docs/141 § B-7).
         for (var i = 0; i < rows.Count; i++)
         {
             var row = rows[i];
@@ -119,7 +182,7 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
                 row.Spec,
                 string.Empty,               // 형상
                 row.Count.ToString(),
-                string.Empty,               // 비고
+                row.Remark,                 // 비고
             };
             for (var col = 0; col < Columns.Length; col++)
                 PlaceCellText(document, view, textTypeId, values[col], col, i + 1, Columns[col].Centered);

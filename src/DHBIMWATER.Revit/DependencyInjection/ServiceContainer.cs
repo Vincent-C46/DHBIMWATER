@@ -8,13 +8,14 @@ using DHBIMWATER.Revit.Interop;
 using DHBIMWATER.Revit.Commands;
 using DHBIMWATER.UI.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Revit.DependencyInjection
 {
     public class ServiceContainer
     {
         private static IServiceProvider? _serviceProvider;
-        public static IServiceProvider ServiceProvider => _serviceProvider ?? throw new InvalidOperationException("ServiceContainer is not built.");
+        public static IServiceProvider ServiceProvider => _serviceProvider ?? throw new DhbimwaterException(ErrorCodes.ServiceContainerNotBuilt, "서비스 컨테이너가 준비되지 않았습니다. 명령을 다시 실행하세요.");
 
         internal static void Build(UIApplication uiApp)
         {
@@ -42,6 +43,16 @@ namespace DHBIMWATER.Revit.DependencyInjection
             services.AddTransient<IProjectLocationCoordinateTransformRepo>(provider => provider.GetRequiredService<ProjectLocationAdapter>());
 
             _serviceProvider = services.BuildServiceProvider();
+        }
+
+        /// <summary>현재 컨테이너를 폐기하지 않고 떼어 호출자에게 넘긴다(docs/236 § A).
+        /// 모델리스 창이 자기 컨테이너(→ 싱글턴 RevitDispatcher 등)의 수명을 소유하게 하려는 것이다 —
+        /// 창이 열린 동안 다른 명령이 <see cref="Build"/>로 공용 슬롯을 갈아도 창의 서비스는 살아 있다. 호출자가 닫을 때 폐기한다.</summary>
+        internal static IDisposable? Detach()
+        {
+            var detached = _serviceProvider as IDisposable;
+            _serviceProvider = null;
+            return detached;
         }
 
         public static void Dispose()

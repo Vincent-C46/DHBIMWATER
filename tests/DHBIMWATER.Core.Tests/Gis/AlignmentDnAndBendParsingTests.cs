@@ -27,6 +27,29 @@ public sealed class AlignmentDnAndBendParsingTests
     public void ParseDiameter_DoesNotTreatSerialNumberAsDiameter()
         => Assert.False(AlignmentAttributeParser.ParseDiameter("밸브실_2").Success);
 
+    /// <summary>docs/212 § D-5·D-6 — 핸드북 분수 표기(5⅝·11¼·22½·"5 5/8")를 읽고, 표준각 라벨은 핸드북 어휘로 돌려준다.</summary>
+    [Theory]
+    [InlineData("5⅝", 5.625)]
+    [InlineData("5⅝°", 5.625)]
+    [InlineData("5 5/8", 5.625)]
+    [InlineData("5-5/8", 5.625)]
+    [InlineData("11¼", 11.25)]
+    [InlineData("22½도", 22.5)]
+    public void BendKindParser_ReadsHandbookFractionNotation(string raw, double expected)
+    {
+        Assert.True(BendKindParser.TryParseAngle(raw, out var angle));
+        Assert.Equal(expected, angle, 6);
+    }
+
+    [Theory]
+    [InlineData(5.625, "5⅝")]
+    [InlineData(11.25, "11¼")]
+    [InlineData(22.5, "22½")]
+    [InlineData(45, "45")]
+    [InlineData(90, "90")]
+    public void BendKindParser_LabelUsesHandbookVocabulary(double angle, string expected)
+        => Assert.Equal(expected, BendKindParser.Label(angle));
+
     [Theory]
     [InlineData("22.5˚")]
     [InlineData("22.5°")]

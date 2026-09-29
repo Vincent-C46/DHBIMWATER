@@ -1,3 +1,4 @@
+using DHBIMWATER.Shared.Errors;
 namespace DHBIMWATER.Core.Geometry;
 
 /// <summary>드레인 피트 정의를 Void 돌출 형상으로 바꾼다. Floor·DirectShape 두 경로가 함께 쓴다.</summary>
@@ -12,7 +13,7 @@ public static class DrainPitGeometry
     public static VoidExtrusionDefinition ToVoidExtrusion(DrainPitDefinition pit)
     {
         if (pit.Shape != DrainPitShape.Rectangular)
-            throw new NotSupportedException($"드레인 피트 형상 '{pit.Shape}'는 아직 지원하지 않는다.");
+            throw new DhbimwaterException(ErrorCodes.VR_Internal, $"드레인 피트 형상 '{pit.Shape}'는 아직 지원하지 않는다.");
 
         var bottomZ = pit.TopCenter.Z - pit.Depth;
         var hx = pit.LengthX / 2;

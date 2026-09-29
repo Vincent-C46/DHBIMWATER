@@ -1,4 +1,4 @@
-using DHBIMWATER.Application.Interfaces;
+﻿using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Services;
 using DHBIMWATER.Core.Parameters;
 using DHBIMWATER.Infrastructure.Repositories.DB;
@@ -43,13 +43,16 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IPipeCommandRepo, RevitPipeSegmentCommandRepo>();
         services.AddTransient<IPipeMaterialScheduleRepo, RevitPipeMaterialScheduleRepo>();
         services.AddTransient<IPipeMaterialDraftingRepo, RevitPipeMaterialDraftingRepo>();
+        services.AddTransient<IPipeMaterialBackfillRepo, RevitPipeMaterialBackfillRepo>();
         services.AddTransient<IBeamCommandRepo, RevitBeamCommandRepo>();
         services.AddTransient<IColumnCommandRepo, RevitColumnCommandRepo>();
         services.AddTransient<ISlabCommandRepo, RevitSlabCommandRepo>();
         services.AddTransient<IFoundationCommandRepo, RevitFoundationCommandRepo>();
         services.AddTransient<IAirValveVoidCommandRepo, RevitAirValveVoidCommandRepo>();
         services.AddTransient<IDrainPitVoidCommandRepo, RevitDrainPitVoidCommandRepo>();
-        services.AddTransient<IDrainPitLocationPickRepo, RevitDrainPitLocationPickRepo>();
+        services.AddTransient<IElementParameterCommandRepo, RevitElementParameterCommandRepo>();
+        services.AddTransient<IProjectInformationQueryRepo, RevitProjectInformationQueryRepo>();
+        services.AddTransient<IProjectInformationCommandRepo, RevitProjectInformationCommandRepo>();
         services.AddTransient<IOpeningCommandRepo, RevitOpeningCommandRepo>();
         services.AddTransient<IStairCommandRepo, RevitStairCommandRepo>();
         services.AddTransient<IDirectShapeCommandRepo, RevitDirectShapeCommandRepo>();
@@ -68,6 +71,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IAlignmentStraightDirectShapeRepo, RevitAlignmentStraightDirectShapeRepo>();
         services.AddTransient<IAlignmentPipePlacementRepo, RevitAlignmentPipePlacementRepo>();
         services.AddTransient<IBendSettingsRepo, RevitBendSettingsRepo>();
+        services.AddTransient<IPipeLayoutFamilySettingsRepo, RevitPipeLayoutFamilySettingsRepo>();
         services.AddSingleton<IBendSettingsFileStore, JsonFileBendSettingsFileStore>();
         services.AddTransient<IAdaptiveBendPlacementRepo, RevitAdaptiveBendPlacementRepo>();
         services.AddTransient<IBendDirectShapeRepo, RevitBendDirectShapeRepo>();
@@ -75,6 +79,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IGenericModelRepository, RevitGenericModelRepository>();
         services.AddTransient<IExteriorWallClassifierRepo, RevitExteriorWallClassifierRepo>();
         services.AddTransient<IValveRoomOutlinePickRepo, RevitValveRoomOutlinePickRepo>();
+        services.AddTransient<IValveRoomPipingPickRepo, RevitValveRoomPipingPickRepo>();
         #endregion
 
         services.AddTransient<IExcelReader, ExcelReader>();
@@ -110,12 +115,15 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IFoundationCommandRepo, MockFoundationCommandRepo>();
         services.AddTransient<IAirValveVoidCommandRepo, MockAirValveVoidCommandRepo>();
         services.AddTransient<IDrainPitVoidCommandRepo, MockDrainPitVoidCommandRepo>();
-        services.AddTransient<IDrainPitLocationPickRepo, MockDrainPitLocationPickRepo>();
+        services.AddTransient<IElementParameterCommandRepo, MockElementParameterCommandRepo>();
+        services.AddTransient<IProjectInformationQueryRepo, MockProjectInformationQueryRepo>();
+        services.AddTransient<IProjectInformationCommandRepo, MockProjectInformationCommandRepo>();
         services.AddTransient<IOpeningCommandRepo, MockOpeningCommandRepo>();
         services.AddTransient<IDirectShapeCommandRepo, MockDirectShapeCommandRepo>();
         services.AddTransient<IViewCommandRepo, MockViewCommandRepo>();
         services.AddTransient<IPipeMaterialScheduleRepo, MockPipeMaterialScheduleRepo>();
         services.AddTransient<IPipeMaterialDraftingRepo, MockPipeMaterialDraftingRepo>();
+        services.AddTransient<IPipeMaterialBackfillRepo, MockPipeMaterialBackfillRepo>();
 
         services.AddTransient<ISetParameterRepo, MockSetParameterRepo>();
         services.AddTransient<ISharedParameterRepository, MockSharedParameterRepository>();
@@ -134,6 +142,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IAlignmentPipePlacementRepo, RevitAlignmentPipePlacementRepo>();
         // TODO: Mock 블록에 Revit Repo가 덮어쓰기 등록됨 — 별도 확인 필요
         services.AddTransient<IBendSettingsRepo, MockBendSettingsRepo>();
+        services.AddTransient<IPipeLayoutFamilySettingsRepo, MockPipeLayoutFamilySettingsRepo>();
         services.AddSingleton<IBendSettingsFileStore, JsonFileBendSettingsFileStore>();
         services.AddTransient<IAdaptiveBendPlacementRepo, MockAdaptiveBendPlacementRepo>();
         services.AddTransient<IBendDirectShapeRepo, MockBendDirectShapeRepo>();

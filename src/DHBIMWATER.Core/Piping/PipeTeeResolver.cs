@@ -39,15 +39,16 @@ public static class PipeTeeResolver
             legs[main.Pair.Branch].Edge.Id);
     }
 
-    private static (double X, double Y)? DirectionAwayFrom(PipeEdgeDefinition edge, Point2D node)
+    // 아래 셋은 PipeCrossResolver가 같은 값·같은 규약으로 써야 하므로 internal로 연다(docs/175 § B-2).
+    internal static (double X, double Y)? DirectionAwayFrom(PipeEdgeDefinition edge, Point2D node)
     {
         var other = IsAt(edge.Start, node) ? edge.End : edge.Start;
         var length = node.DistanceTo(other);
         return length <= double.Epsilon ? null : ((other.X - node.X) / length, (other.Y - node.Y) / length);
     }
 
-    private static double AngleDeg((double X, double Y) a, (double X, double Y) b)
+    internal static double AngleDeg((double X, double Y) a, (double X, double Y) b)
         => Math.Acos(Math.Clamp(a.X * b.X + a.Y * b.Y, -1, 1)) * 180 / Math.PI;
 
-    private static bool IsAt(Point2D point, Point2D node) => point.DistanceTo(node) <= PositionToleranceMm;
+    internal static bool IsAt(Point2D point, Point2D node) => point.DistanceTo(node) <= PositionToleranceMm;
 }

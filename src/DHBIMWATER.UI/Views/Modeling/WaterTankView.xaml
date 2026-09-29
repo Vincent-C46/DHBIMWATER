@@ -95,14 +95,14 @@
                                             <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                                                 <TextBlock Text="1-6." Style="{StaticResource LabelTextBlockStyle}" Width="30" VerticalAlignment="Center"/>
                                                 <TextBlock Text="기둥 유형" Style="{StaticResource LabelTextBlockStyle}" Width="150" VerticalAlignment="Center"/>
-                                                <ComboBox Width="130" Height="25" Margin="10,0" VerticalAlignment="Center"
+                                                <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Width="130" Height="25" Margin="10,0" VerticalAlignment="Center"
                                                           ItemsSource="{Binding ColumnTypeNames}"
                                                           SelectedItem="{Binding ColumnTypeName, Mode=TwoWay}"/>
                                             </StackPanel>
                                             <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                                                 <TextBlock Text="1-7." Style="{StaticResource LabelTextBlockStyle}" Width="30" VerticalAlignment="Center"/>
                                                 <TextBlock Text="보 유형" Style="{StaticResource LabelTextBlockStyle}" Width="150" VerticalAlignment="Center"/>
-                                                <ComboBox Width="130" Height="25" Margin="10,0" VerticalAlignment="Center"
+                                                <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Width="130" Height="25" Margin="10,0" VerticalAlignment="Center"
                                                           ItemsSource="{Binding BeamTypeNames}"
                                                           SelectedItem="{Binding BeamTypeName, Mode=TwoWay}"/>
                                             </StackPanel>

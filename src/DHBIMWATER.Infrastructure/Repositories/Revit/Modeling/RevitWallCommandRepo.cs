@@ -72,11 +72,13 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
             //wall.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).Set(linearWallDefinition.ElementCode);
             wall.LookupParameter("DH_Addin")?.Set("DHBIMWATER");
-            wall.LookupParameter("DH_Cateogry")?.Set(linearWallDefinition.Category);
+            wall.LookupParameter("DH_Category")?.Set(linearWallDefinition.Category);
             wall.LookupParameter("DH_ElementCode")?.Set(linearWallDefinition.ElementCode);
             wall.LookupParameter("DH_Part")?.Set(linearWallDefinition.Part);
             wall.LookupParameter("DH_Zone")?.Set(linearWallDefinition.Zone);
-            wall.LookupParameter("DH_IsExterior")?.Set(0);
+            // 외벽/내벽에 따라 거푸집 유형이 달라져 수량산출이 이 값을 쓴다(docs/155 § B).
+            // 배수지·펌프장은 생성 직후 ClassifyExteriorWallsUseCase가 다시 판정해 덮어쓴다.
+            wall.LookupParameter("DH_IsExterior")?.Set(linearWallDefinition.IsExterior ? 1 : 0);
             wall.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).Set("");
 
             //_dialog.Info("RevitWallCommandRepo", $"CreateWall - Revit Implementation\n 벽체 높이: {linearWallDefinition.Height}mm");
@@ -125,7 +127,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             profileWall.LookupParameter("DH_Addin")?.Set("DHBIMWATER");
             profileWall.LookupParameter("DH_Part")?.Set(profileWallDefinition.Part);
             profileWall.LookupParameter("DH_Zone")?.Set(profileWallDefinition.Zone);
-            profileWall.LookupParameter("DH_IsExterior")?.Set(0);
+            profileWall.LookupParameter("DH_IsExterior")?.Set(profileWallDefinition.IsExterior ? 1 : 0);
 
             if (profileWallDefinition.IsFlipped) profileWall.Flip();
 

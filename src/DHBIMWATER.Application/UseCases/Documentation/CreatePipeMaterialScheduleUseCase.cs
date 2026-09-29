@@ -1,4 +1,7 @@
 using DHBIMWATER.Application.Interfaces;
+using DHBIMWATER.Core.Parameters;
+using DHBIMWATER.Core.Piping;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Application.UseCases.Documentation;
 
@@ -16,17 +19,21 @@ public sealed class CreatePipeMaterialScheduleUseCase
 
     private readonly ITransactionContext _transaction;
     private readonly IPipeMaterialScheduleRepo _repo;
+    private readonly ISharedParameterRepository _sharedParameterRepo;
 
-    public CreatePipeMaterialScheduleUseCase(ITransactionContext transaction, IPipeMaterialScheduleRepo repo)
+    public CreatePipeMaterialScheduleUseCase(ITransactionContext transaction, IPipeMaterialScheduleRepo repo,
+        ISharedParameterRepository sharedParameterRepo)
     {
         _transaction = transaction;
         _repo = repo;
+        _sharedParameterRepo = sharedParameterRepo;
     }
 
     public PipeMaterialScheduleResult Execute()
     {
         // 스캔은 읽기 전용이라 트랜잭션 밖에서 먼저 한다. 만들 것이 없으면 트랜잭션을 아예 열지 않는다.
-        var scan = _repo.Scan();
+        var parts = _repo.GetParts();
+        var scan = PipeMaterialScan.Of(parts);
         var targets = BuildTargets(scan);
         if (targets.Count == 0) return new PipeMaterialScheduleResult([], [], scan);
 
@@ -38,12 +45,28 @@ public sealed class CreatePipeMaterialScheduleUseCase
             try
             {
                 _transaction.Begin("배관재료표 일람표 생성");
+                // 재기록을 건너뛴 옛 문서는 DH_비고·DH_부재번호 바인딩이 없어 열을 못 찾았다(docs/208 § 0-1).
+                // EnsureParameters는 멱등이라 이미 바인딩된 문서에서는 아무 일도 하지 않는다(docs/131 § A).
+                _sharedParameterRepo.EnsureParameters(ValvePipingParameters.Definitions);
+                // 뷰 이름 존재 확인은 격점마다 전체 뷰를 훑지 않고 한 번 받아 둔다(docs/208 § D-3).
+                var existing = new HashSet<string>(_repo.GetExistingViewNames(), StringComparer.Ordinal);
                 foreach (var (scheduleName, junctionId) in targets)
                 {
                     // 같은 이름이 이미 있으면 덮어쓰지 않는다. 사용자가 열 폭·서식을 손봤을 수 있다.
-                    if (_repo.ScheduleExists(scheduleName)) { skipped.Add(scheduleName); continue; }
-                    _repo.CreateSchedule(scheduleName, junctionId);
-                    created.Add(scheduleName);
+                    if (existing.Contains(scheduleName)) { skipped.Add(scheduleName); continue; }
+                    // 격점 하나가 실패해도(열 누락·이름 충돌 등) 나머지 격점은 살린다(docs/208 § C).
+                    // Repo가 SubTransaction으로 그 격점의 변경만 되돌린다 — 바깥 Transaction은 여기서 관리한다.
+                    try
+                    {
+                        _repo.CreateSchedule(scheduleName, junctionId);
+                        created.Add(scheduleName);
+                        existing.Add(scheduleName);
+                    }
+                    catch (DhbimwaterException ex) when (ex.Code == ErrorCodes.NoActiveDocument) { throw; }
+                    catch (Exception ex)
+                    {
+                        skipped.Add($"{scheduleName} — [{ErrorCodes.MT_ScheduleCreateFailed}] {ex.Message}");
+                    }
                 }
                 _transaction.Commit();
                 return new PipeMaterialScheduleResult(created, skipped, scan);
@@ -62,7 +85,7 @@ public sealed class CreatePipeMaterialScheduleUseCase
     {
         var targets = scan.JunctionIds
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-            .Select(x => ($"{NamePrefix}_{x}", x))
+            .Select(x => (PipeMaterialViewName.For(NamePrefix, x), x))
             .ToList();
         if (scan.UnassignedCount > 0) targets.Add((UnassignedName, ""));
         return targets;

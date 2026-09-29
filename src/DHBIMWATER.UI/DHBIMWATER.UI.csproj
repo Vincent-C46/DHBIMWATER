@@ -31,6 +31,7 @@
 	  <None Remove="Resources\Icons\Sheet.png" />
 	  <None Remove="Resources\Icons\Trash.png" />
 	  <None Remove="Resources\Icons\valve.png" />
+	  <None Remove="Resources\Icons\valve_symbol.png" />
 	  <None Remove="Resources\Icons\ViewDirection0.png" />
 	  <None Remove="Resources\Icons\ViewDirection1.png" />
 	  <None Remove="Resources\Icons\ViewDirection2.png" />
@@ -93,6 +94,9 @@
 	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 	  </Resource>
 	  <Resource Include="Resources\Icons\valve.png">
+	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+	  </Resource>
+	  <Resource Include="Resources\Icons\valve_symbol.png">
 	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 	  </Resource>
 	  <Resource Include="Resources\PumpStationImages\TYPE-1_종단개요.png">
@@ -170,6 +174,56 @@
 	  <Resource Include="Resources\PumpStationImages\1-2.펌프장_종단제원.png">
 	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 	  </Resource>
+	</ItemGroup>
+
+	<!-- 토출조 도해. 수령자료 엑셀(토출조 input data\*.xlsx) 내장 EMF를 PNG로 추출한 것. docs/img/164_토출조/ -->
+	<ItemGroup>
+		<Resource Include="Resources\PumpStationImages\토출조_평면-좌우측-암거.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="Resources\PumpStationImages\토출조_평면-좌우측-PIPE.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="Resources\PumpStationImages\토출조_평면-중앙부.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="Resources\PumpStationImages\토출조_개구부-평면.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="Resources\PumpStationImages\토출조_종단-단차미적용.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="Resources\PumpStationImages\토출조_종단-단차적용.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
+	</ItemGroup>
+
+	<!-- 밸브실 참고도(평면·단면). 같은 폴더의 .svg가 원본이며 PNG는 3배 해상도로 변환한 것. 치수 기호는 ValveRoomView 라벨과 같다. -->
+	<ItemGroup>
+		<Resource Include="Resources\ValveRoomImages\이토밸브실_평면도.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="Resources\ValveRoomImages\이토밸브실_단면도.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="Resources\ValveRoomImages\타이밸브실_평면도.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="Resources\ValveRoomImages\타이밸브실_단면도.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="Resources\ValveRoomImages\제수밸브실_평면도.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="Resources\ValveRoomImages\제수밸브실_단면도.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="Resources\ValveRoomImages\공기밸브실_평면도.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="Resources\ValveRoomImages\공기밸브실_단면도.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
 	</ItemGroup>
 
 	<ItemGroup>

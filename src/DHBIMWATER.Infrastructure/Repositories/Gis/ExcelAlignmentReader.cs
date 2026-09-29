@@ -7,6 +7,7 @@ using DHBIMWATER.Application.DTOs.Gis;
 using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Gis;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Gis;
 
@@ -42,11 +43,11 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
         return rows;
     }
 
-    public ShapefileReadResult Read(string filePath) => throw new InvalidOperationException("엑셀·CSV 소스는 열 매핑이 필요합니다. Read(filePath, mapping)을 사용하세요.");
+    public ShapefileReadResult Read(string filePath) => throw new DhbimwaterException(ErrorCodes.PA_ExcelMappingRequired, "엑셀·CSV 소스는 열 매핑이 필요합니다. Read(filePath, mapping)을 사용하세요.");
 
     public ShapefileReadResult Read(string filePath, ExcelAlignmentMapping mapping)
     {
-        if (!File.Exists(filePath)) throw new FileNotFoundException("엑셀·CSV 파일을 찾을 수 없습니다.", filePath);
+        if (!File.Exists(filePath)) throw new DhbimwaterException(ErrorCodes.PA_ExcelFile, $"엑셀·CSV 파일을 찾을 수 없습니다: {filePath}");
         using var workbook = OpenWorkbook(filePath);
         var sheet = FindSheet(workbook, mapping.SheetName);
         var used = sheet.RangeUsed();
@@ -239,7 +240,7 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
 
     private static IXLWorksheet FindSheet(XLWorkbook workbook, string sheetName)
         => workbook.Worksheets.FirstOrDefault(x => string.Equals(x.Name, sheetName, StringComparison.Ordinal))
-            ?? throw new InvalidOperationException($"'{sheetName}' 시트를 찾을 수 없습니다.");
+            ?? throw new DhbimwaterException(ErrorCodes.PA_ExcelFile, $"'{sheetName}' 시트를 찾을 수 없습니다.");
 
     private static bool TryReadDouble(IXLCell cell, out double value)
     {

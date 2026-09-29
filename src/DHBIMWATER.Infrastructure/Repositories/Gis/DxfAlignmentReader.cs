@@ -3,6 +3,7 @@ using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Gis;
 using System.IO;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Gis;
 
@@ -12,7 +13,7 @@ public sealed class DxfAlignmentReader : IAlignmentSourceReader
     public bool CanRead(string filePath) => string.Equals(Path.GetExtension(filePath), ".dxf", StringComparison.OrdinalIgnoreCase);
     public ShapefileReadResult Read(string filePath)
     {
-        if (!File.Exists(filePath)) throw new FileNotFoundException("DXF 파일을 찾을 수 없습니다.", filePath);
+        if (!File.Exists(filePath)) throw new DhbimwaterException(ErrorCodes.PA_DxfFormat, $"DXF 파일을 찾을 수 없습니다: {filePath}");
         var entities = DxfGeometryReader.Read(filePath);
         var features = entities.Select((x, i) => new PipeAlignment(x.Vertices, string.Empty, 0, Path.GetFullPath(filePath), (i + 1).ToString(), x.Attributes)).ToList();
         var warnings = features.Count == 0 ? new List<string> { "POLYLINE 또는 LWPOLYLINE 엔티티를 찾지 못했습니다. DWG 파일이 아닌 ASCII DXF인지 확인하세요." } : new List<string>();
@@ -79,7 +80,11 @@ internal static class DxfGeometryReader
         if (!string.IsNullOrWhiteSpace(layer)) attributes["LAYER"] = layer;
         return attributes;
     }
-    private static double Number(string value) => double.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+    private static double Number(string value)
+        => double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n)
+            ? n
+            // .NET 번역문 대신 어느 값이 문제인지 알린다(docs/209 § G). 좌표 하나가 빠지면 선형이 엉뚱해지므로 파일 단위로 실패한다.
+            : throw new DhbimwaterException(ErrorCodes.PA_DxfFormat, $"DXF 좌표 값 '{value}'을(를) 숫자로 읽을 수 없습니다.");
 }
 
 internal static class CadXDataAttributeParser

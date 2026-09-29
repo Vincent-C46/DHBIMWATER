@@ -1,6 +1,7 @@
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Core.Parameters;
 using DHBIMWATER.Core.Piping;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Application.UseCases.AutoGenerator;
 
@@ -20,9 +21,9 @@ public sealed class CreateValvePipingUseCase
 
     public PipeCreationResult Execute(PipeNetworkDefinition network)
     {
-        if (network.Edges.Count == 0) throw new InvalidOperationException("생성할 배관 세그먼트가 없습니다.");
+        if (network.Edges.Count == 0) throw new DhbimwaterException(ErrorCodes.PL_NoSegments, "생성할 배관 세그먼트가 없습니다.");
         if (!_repositories.TryGetValue(network.OutputMode, out var repository))
-            throw new InvalidOperationException($"{network.OutputMode} 배관 출력 구현이 등록되지 않았습니다.");
+            throw new DhbimwaterException(ErrorCodes.PL_Internal, $"{network.OutputMode} 배관 출력 구현이 등록되지 않았습니다.");
 
         using (_transaction)
         {

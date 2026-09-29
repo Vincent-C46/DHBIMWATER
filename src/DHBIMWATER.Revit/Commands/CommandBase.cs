@@ -17,8 +17,9 @@ namespace DHBIMWATER.Revit.Commands
             }
             catch (System.Exception ex)
             {
-                // 예외 처리 로직
-                message = ex.Message;
+                // 코드 있는 예외는 "[코드] 메시지", 그 외는 [SYS-999] 원문(docs/205 § D-4). 스택은 로그 파일에.
+                ErrorPresenter.Log(GetType().Name, ex);
+                message = ErrorPresenter.Format(ex);
                 return Result.Failed;
             }
             finally

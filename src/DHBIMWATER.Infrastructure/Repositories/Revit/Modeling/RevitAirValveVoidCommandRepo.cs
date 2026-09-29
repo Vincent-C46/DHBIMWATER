@@ -1,8 +1,8 @@
 using Autodesk.Revit.DB;
-using Autodesk.Revit.UI;
 using DHBIMWATER.Application.DTOs.Revit.ValveRoom;
 using DHBIMWATER.Application.Interfaces;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling;
 
@@ -21,22 +21,22 @@ public sealed class RevitAirValveVoidCommandRepo : IAirValveVoidCommandRepo
 
     public void CreateAirValveFoundationVoid(int foundationElementId, AirValveVoidPlacementDefinition definition)
     {
-        var doc = _doc() ?? throw new InvalidOperationException("활성 Revit 문서를 찾을 수 없습니다.");
+        var doc = _doc() ?? throw new DhbimwaterException(ErrorCodes.NoActiveDocument, "활성 Revit 문서가 없습니다.");
         var foundation = doc.GetElement(new ElementId(foundationElementId))
-            ?? throw new InvalidOperationException("공기밸브실 독립기초를 찾을 수 없습니다.");
+            ?? throw new DhbimwaterException(ErrorCodes.VR_FoundationTypeNotFound, "공기밸브실 독립기초를 찾을 수 없습니다.");
         var symbol = new FilteredElementCollector(doc).OfClass(typeof(FamilySymbol)).WhereElementIsElementType().OfType<FamilySymbol>()
             .FirstOrDefault(item => item.FamilyName.Equals(FamilyName, StringComparison.OrdinalIgnoreCase));
-        if (symbol == null) throw new InvalidOperationException($"면기반 Void 패밀리 '{FamilyName}'을(를) 프로젝트에 로드해야 합니다.");
+        if (symbol == null) throw new DhbimwaterException(ErrorCodes.VR_VoidFamilyNotLoaded, $"면기반 Void 패밀리 '{FamilyName}'을(를) 프로젝트에 로드해야 합니다.");
         if (!symbol.IsActive) { symbol.Activate(); doc.Regenerate(); }
 
-        var box = foundation.get_BoundingBox(null) ?? throw new InvalidOperationException("독립기초의 형상 정보를 읽을 수 없습니다.");
+        var box = foundation.get_BoundingBox(null) ?? throw new DhbimwaterException(ErrorCodes.VR_FoundationGeometryUnreadable, "독립기초의 형상 정보를 읽을 수 없습니다.");
         var isXAxis = definition.Axis.Equals("X", StringComparison.OrdinalIgnoreCase);
         // void_면기반의 Void는 호스팅한 외곽면에서 기초 내부 쪽으로 돌출한다.
         // 따라서 X/Y 관통 모두 음수 방향 외곽면을 시작면으로 사용한다.
         var targetNormal = isXAxis ? -XYZ.BasisX : -XYZ.BasisY;
         var desiredCenter = CreateDesiredCenter(box, definition.PipeCenter);
         var host = FindPlanarFace(foundation, targetNormal, desiredCenter)
-            ?? throw new InvalidOperationException(
+            ?? throw new DhbimwaterException(ErrorCodes.VR_VoidFaceNotFound,
                 $"독립기초에서 {definition.Axis}축 Void를 위한 시작면(법선 {Format(targetNormal)}, 중심 {Format(desiredCenter)})을 찾을 수 없습니다. " +
                 $"검출된 평면 법선: {DescribePlanarNormals(foundation)}");
 
@@ -47,7 +47,7 @@ public sealed class RevitAirValveVoidCommandRepo : IAirValveVoidCommandRepo
         // 모델 좌표다. 심볼 좌표를 넘기면 인스턴스가 회전·이동량만큼 평면에서 어긋난 위치에 떨어진다.
         var instance = doc.Create.NewFamilyInstance(host.Face.Reference, host.ModelPoint, XYZ.BasisZ, symbol);
         var radius = instance.LookupParameter("r");
-        if (radius == null || radius.IsReadOnly) throw new InvalidOperationException($"면기반 Void 패밀리 '{FamilyName}'에서 읽기 가능한 인스턴스 매개변수 'r'을 찾을 수 없습니다.");
+        if (radius == null || radius.IsReadOnly) throw new DhbimwaterException(ErrorCodes.VR_VoidParameterUnwritable, $"면기반 Void 패밀리 '{FamilyName}'에서 읽기 가능한 인스턴스 매개변수 'r'을 찾을 수 없습니다.");
         radius.Set(UC.MmToFt(definition.Radius));
 
         // 관통 길이는 기초의 해당 축 방향 전체 길이 + 여유. 시작면에서 기초 안쪽으로 돌출하므로
@@ -55,7 +55,7 @@ public sealed class RevitAirValveVoidCommandRepo : IAirValveVoidCommandRepo
         var hostLength = isXAxis ? box.Max.X - box.Min.X : box.Max.Y - box.Min.Y;
         var depth = instance.LookupParameter(DepthParameterName);
         if (depth == null || depth.IsReadOnly)
-            throw new InvalidOperationException(
+            throw new DhbimwaterException(ErrorCodes.VR_VoidParameterUnwritable,
                 $"면기반 Void 패밀리 '{FamilyName}'에서 쓰기 가능한 인스턴스 매개변수 '{DepthParameterName}'을(를) 찾을 수 없습니다. " +
                 $"유형 매개변수로 되어 있으면 인스턴스 매개변수로 변경해야 합니다.");
         depth.Set(hostLength + UC.MmToFt(PenetrationMarginMm));
@@ -167,7 +167,7 @@ public sealed class RevitAirValveVoidCommandRepo : IAirValveVoidCommandRepo
     /// 기초·벽체·슬래브까지 사라지기 때문이다. Void 인스턴스는 배치된 채로 남으므로 수동 절단이 가능하다.
     /// </para>
     /// </summary>
-    private static void EnsureVoidCut(Document doc, Element host, FamilyInstance voidInstance, double volumeBeforePlacement)
+    private void EnsureVoidCut(Document doc, Element host, FamilyInstance voidInstance, double volumeBeforePlacement)
     {
         // 자동 절단 또는 기존 절단 관계로 이미 잘렸으면 더 할 일이 없다.
         if (volumeBeforePlacement - ComputeCutSolidVolume(host) > CutVolumeTolerance) return;
@@ -197,13 +197,19 @@ public sealed class RevitAirValveVoidCommandRepo : IAirValveVoidCommandRepo
                 "본관 중심 깊이와 직경이 기초 두께 안에 들어오는지 확인해야 합니다.");
     }
 
-    /// <summary>절단 실패를 알리되 생성 작업은 계속한다. 모델과 Void 인스턴스는 그대로 남는다.</summary>
-    // TODO: 다른 Revit Repo와 동일하게 TaskDialog를 직접 쓴다. 추후 IDialogService 주입으로 통일하면 좋다.
-    private static void WarnCutFailed(string reason) =>
-        TaskDialog.Show(
-            "Void 절단 실패",
-            $"Void가 독립기초를 절단하지 못했습니다. {reason}\n\n" +
-            "모델 생성은 계속 진행합니다. Void 인스턴스는 배치된 상태로 남아 있으므로 Revit에서 직접 절단할 수 있습니다.");
+    /// <summary>절단 실패를 모아 두고 생성 작업은 계속한다. 모델과 Void 인스턴스는 그대로 남는다.
+    /// 종전에는 트랜잭션 도중 TaskDialog를 띄웠다 — UseCase가 <see cref="TakeWarnings"/>로 가져가 완료 대화상자에 보여준다(docs/238 § C).</summary>
+    private void WarnCutFailed(string reason) =>
+        _warnings.Add($"Void 절단 실패 — {reason} Void 인스턴스는 남아 있으므로 Revit에서 직접 절단할 수 있습니다.");
+
+    private readonly List<string> _warnings = [];
+
+    public IReadOnlyList<string> TakeWarnings()
+    {
+        var warnings = _warnings.ToList();
+        _warnings.Clear();
+        return warnings;
+    }
 
     /// <summary>
     /// 절단이 반영된 기초 솔리드의 총 체적(ft³). 면 탐색과 달리 <see cref="GeometryInstance.GetInstanceGeometry()"/>를 써야 한다.

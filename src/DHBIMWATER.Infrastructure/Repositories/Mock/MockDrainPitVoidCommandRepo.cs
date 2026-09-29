@@ -6,6 +6,6 @@ namespace DHBIMWATER.Infrastructure.Repositories.Mock;
 
 public sealed class MockDrainPitVoidCommandRepo : IDrainPitVoidCommandRepo
 {
-    public string? CreateDrainPitVoid(IReadOnlyList<int> hostElementIds, long levelId,
-        DrainPitDefinition definition, DrainPitVoidFamilyMappingDto mapping) => null;
+    public DrainPitPlacementResult CreateDrainPitVoid(IReadOnlyList<int> hostElementIds, long levelId,
+        DrainPitDefinition definition, DrainPitVoidFamilyMappingDto mapping) => new(0, true, null);
 }

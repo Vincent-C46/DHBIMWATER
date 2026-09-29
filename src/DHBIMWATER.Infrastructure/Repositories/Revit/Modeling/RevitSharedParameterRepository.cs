@@ -3,11 +3,13 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using DHBIMWATER.Core.Parameters;
 using DHBIMWATER.Infrastructure.Converters;
+using DHBIMWATER.Shared.Diagnostics;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Windows.Controls;
 using App = Autodesk.Revit.ApplicationServices.Application;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 {
@@ -21,7 +23,8 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             _doc = doc;
         }
 
-        public void EnsureParameters(IReadOnlyList<SharedParameterDefinition> definitions)
+        public void EnsureParameters(IReadOnlyList<SharedParameterDefinition> definitions,
+            IReadOnlyList<int>? extraCategoryIds = null)
         {
             if (definitions == null || definitions.Count == 0) return;
 
@@ -66,11 +69,17 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             try
             {
                 string header = "*META\tVERSION\tMINVERSION\r\nMETA\t2\t1\r\n*GROUP\tID\tNAME\r\n*PARAM\tGUID\tNAME\tDATATYPE\tDATACATEGORY\tGROUP\tVISIBLE\tDESCRIPTION\tUSERMODIFIABLE\tHIDEWHENNOVALUE\r\n";
+                // 애드인이 ProgramData로 설치돼 사용자 프로필에 Addins\{version} 폴더가 없으면 WriteAllText가 던졌다(docs/207 § E).
+                Directory.CreateDirectory(Path.GetDirectoryName(sharedParameterFilePath)!);
                 File.WriteAllText(sharedParameterFilePath, header); // 생성 or 덮어쓰기
 
                 app.SharedParametersFilename = sharedParameterFilePath; // 경로 지정
-                DefinitionFile defFile = app.OpenSharedParameterFile();
+                DefinitionFile defFile = app.OpenSharedParameterFile()
+                    ?? throw new DhbimwaterException(ErrorCodes.SharedParameterFileFailed, $"공유 매개변수 파일을 열 수 없습니다: {sharedParameterFilePath}");
                 BindingMap bindingMap = doc.ParameterBindings;
+
+                // 호출부가 실측해 넘긴 추가 카테고리. 정의마다 같으므로 루프 밖에서 한 번만 만든다.
+                var extraCategories = ResolveExtraCategories(doc, extraCategoryIds);
 
                 foreach (var def in definitions)
                 {
@@ -102,16 +111,18 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
                     #region 프로젝트 매개변수 생성
                     CategorySet categorySet = RevitParameterMapper.ToCategorySet(def.Categories, doc);
+                    foreach (Category extra in extraCategories) categorySet.Insert(extra);
                     Binding binding = RevitParameterMapper.ToBinding(def.BindingType, categorySet, app);
 
                     // 동명 매개변수가 이미 다른 카테고리로 묶여 있어도 이번 카테고리를 반드시 더한다.
-                    // 이름만 보고 건너뛰면 DHBoost 등 외부가 먼저 만든 동명 매개변수 탓에
+                    // 이름만 보고 건너뛰면 외부 애드인이 먼저 만든 동명 매개변수 탓에
                     // 일반 모델 바인딩이 빠지고 값 기록이 통째로 실패한다.
                     (Definition? boundDef, ElementBinding? boundBinding) = FindExistingBinding(doc, def.Name);
 
                     if (boundDef == null)
                     {
                         bindingMap.Insert(sharedDef, binding, groupType);
+                        PlacementProfiler.Count("공유 매개변수 신규 바인딩", 1);   // docs/197 § A-4 (계측 전용)
                     }
                     else
                     {
@@ -135,6 +146,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
                         {
                             Binding mergedBinding = RevitParameterMapper.ToBinding(def.BindingType, merged, app);
                             bindingMap.ReInsert(boundDef, mergedBinding, groupType);
+                            PlacementProfiler.Count("공유 매개변수 바인딩 갱신", 1);   // docs/197 § A-4 (계측 전용)
                         }
                     }
                     #endregion
@@ -145,6 +157,24 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
                 // 기존 공유매개변수 복원
                 app.SharedParametersFilename = previousFilePath;
             }
+        }
+
+        /// <summary>추가 바인딩 카테고리(BuiltInCategory 정수값)를 Revit Category로 바꾼다.
+        /// 알 수 없는 값이나 매개변수를 붙일 수 없는 카테고리는 조용히 버린다 —
+        /// 여기서 예외를 던지면 이미 진행 중인 배치 트랜잭션이 통째로 롤백된다(docs/141).</summary>
+        private static IReadOnlyList<Category> ResolveExtraCategories(Document doc, IReadOnlyList<int>? categoryIds)
+        {
+            if (categoryIds is null || categoryIds.Count == 0) return Array.Empty<Category>();
+
+            var resolved = new List<Category>();
+            foreach (var id in categoryIds.Distinct())
+            {
+                Category? category = null;
+                try { category = doc.Settings.Categories.get_Item((BuiltInCategory)id); }
+                catch { /* 이 문서에 없는 카테고리. 버린다. */ }
+                if (category is not null && category.AllowsBoundParameters) resolved.Add(category);
+            }
+            return resolved;
         }
 
         // 이름 같은 정의가 이미 바인딩됐으면 그 정의와 바인딩을 준다. 없으면 (null, null).

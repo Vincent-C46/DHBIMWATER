@@ -3,6 +3,7 @@ using Autodesk.Revit.DB.Structure;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Core.Piping;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
+using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
 
@@ -15,9 +16,11 @@ internal sealed class RevitPipeGenericModelCommandRepo : IPipeCommandRepo
     public RevitPipeGenericModelCommandRepo(Func<Document?> document) => _document = document;
     public PipeOutputMode OutputMode => PipeOutputMode.GenericModel;
 
+    // docs/158 § F: 원본 삭제(SourceElementIdsToDelete)는 PipeAccessorySegment 경로 전용이다. 여기서는 무시한다.
+    // docs/161: DH_Zone(밸브실 유형) 기록도 같다 — 이 경로는 network.Zone을 무시한다.
     public PipeCreationResult CreateNetwork(PipeNetworkDefinition network)
     {
-        var document = _document() ?? throw new InvalidOperationException("활성 Revit 문서가 없습니다.");
+        var document = _document() ?? throw new DhbimwaterException(ErrorCodes.NoActiveDocument, "활성 Revit 문서가 없습니다.");
         foreach (var edge in network.Edges)
         {
             var shape = DirectShape.CreateElement(document, new ElementId(BuiltInCategory.OST_GenericModel));
@@ -31,7 +34,7 @@ internal sealed class RevitPipeGenericModelCommandRepo : IPipeCommandRepo
             if (!string.IsNullOrWhiteSpace(fitting.FamilyTypeName))
             {
                 var symbol = FindSymbol(document, fitting.FamilyTypeName)
-                    ?? throw new InvalidOperationException($"배관부속 패밀리 '{fitting.FamilyTypeName}'를 찾을 수 없습니다. 프로젝트에 로드돼 있는지 확인하세요.");
+                    ?? throw new DhbimwaterException(ErrorCodes.PL_FamilyNotFound, $"배관부속 패밀리 '{fitting.FamilyTypeName}'를 찾을 수 없습니다. 프로젝트에 로드돼 있는지 확인하세요.");
                 if (!symbol.IsActive) { symbol.Activate(); document.Regenerate(); }
                 document.Create.NewFamilyInstance(point, symbol, StructuralType.NonStructural);
                 continue;
@@ -51,7 +54,7 @@ internal sealed class RevitPipeGenericModelCommandRepo : IPipeCommandRepo
         var familyName = familyTypeName[..separator];
         var typeName = familyTypeName[(separator + 3)..];
         return new FilteredElementCollector(document).OfClass(typeof(FamilySymbol)).Cast<FamilySymbol>()
-            .FirstOrDefault(x => x.Family.Name == familyName && x.Name == typeName);
+            .FirstOrDefault(x => x.FamilyName == familyName && x.Name == typeName);   // FamilyName은 요소 조회가 없다(docs/206 § H)
     }
 
     private static XYZ ToXyz(DHBIMWATER.Core.Geometry.Point2D point, double elevation, DHBIMWATER.Core.Geometry.Point2D referencePoint) => new(UC.MmToFt(point.X + referencePoint.X), UC.MmToFt(point.Y + referencePoint.Y), UC.MmToFt(elevation));
