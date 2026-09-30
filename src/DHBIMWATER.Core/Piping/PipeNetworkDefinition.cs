@@ -124,4 +124,4 @@ public sealed record PipeNetworkDefinition(
     /// <para>기본값이 플랜지인 이유: 원장에서 밸브실은 실당 용접 1개소를 빼면 전량 플랜지다(docs/168 § 5-3).</para></summary>
     Gis.BendConnection JointConnection = Gis.BendConnection.Flanged);
 // 이탈방지압륜 플래그는 창에서 지정하지 않는다(docs/175 § A). 신규 배치는 압륜 없음으로 기록하고,
-// 사용자가 인스턴스의 DH_이탈방지압륜접합수로 제어한다. 재기록 경로는 그 값을 보존한다(PipeJointCountWriter.ReadRestraintGland).
+// 사용자가 인스턴스 접합 슬롯 종류(이탈방지압륜접합)로 제어한다. 재기록 경로는 그 값을 보존한다(PipeJointCountWriter.ReadRestraintGland).

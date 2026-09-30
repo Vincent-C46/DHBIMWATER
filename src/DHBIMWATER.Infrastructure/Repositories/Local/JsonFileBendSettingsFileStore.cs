@@ -36,7 +36,9 @@ public sealed class JsonFileBendSettingsFileStore : IBendSettingsFileStore
                 form,
                 dto.UseRestraintGland,
                 // 강관 곡관 종류 필드가 없는 구 파일은 F12로 읽는다(docs/211 § C-8).
-                dto.ActiveSteelFittingClass ?? SteelFittingClass.F12);
+                dto.ActiveSteelFittingClass ?? SteelFittingClass.F12,
+                // 강관 접합 적용 필드가 없는 구 파일은 편측으로 읽는다(docs/243 § B).
+                dto.SteelApplicationMode ?? JointApplicationMode.SingleJoint);
         }
         catch (JsonException ex)
         {
@@ -61,7 +63,8 @@ public sealed class JsonFileBendSettingsFileStore : IBendSettingsFileStore
             ActiveBendConnection = settings.ActiveBendConnection,
             ActiveBendForm = settings.ActiveBendForm,
             UseRestraintGland = settings.UseRestraintGland,
-            ActiveSteelFittingClass = settings.ActiveSteelFittingClass
+            ActiveSteelFittingClass = settings.ActiveSteelFittingClass,
+            SteelApplicationMode = settings.SteelApplicationMode
         };
         File.WriteAllText(path, JsonSerializer.Serialize(dto, JsonOptions));
     }
@@ -79,5 +82,7 @@ public sealed class JsonFileBendSettingsFileStore : IBendSettingsFileStore
         public bool UseRestraintGland { get; set; }
         /// <summary>강관 곡관 종류(F12/F15/F20). 구 파일에는 없어 null → F12(docs/211 § C-8).</summary>
         public SteelFittingClass? ActiveSteelFittingClass { get; set; }
+        /// <summary>강관 곡관 접합 적용. 구 파일에는 없어 null → 편측(docs/243 § B).</summary>
+        public JointApplicationMode? SteelApplicationMode { get; set; }
     }
 }

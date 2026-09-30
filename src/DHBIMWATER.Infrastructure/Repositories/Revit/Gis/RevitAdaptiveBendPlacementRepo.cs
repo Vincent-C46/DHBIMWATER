@@ -109,8 +109,10 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
                 writer.AngleDeg(instance, PipeAlignmentParameters.AllowableDeflection, plan.EffectiveAllowableDeg);
                 writer.AngleDeg(instance, PipeAlignmentParameters.ResidualDeflection, plan.ResidualDeg);
                 writer.YesNo(instance, PipeAlignmentParameters.IsAcceptable, plan.IsAcceptable);
-                // 강관 곡관에는 A/B형·소켓이 없다 — 형식은 비우고 접합 개소는 직관과 같은 요소당 1(`1S`=용접 1개소)로 적는다(docs/211 § 0-1 A3·A4).
-                var socketEnds = isSteel ? 1 : info.ApplicationMode == JointApplicationMode.BothJoints ? 2 : 1;
+                // 강관 곡관에는 A/B형이 없어 형식은 비운다(docs/211 § 0-1 A4). 접합 개소·구성은 강관 전용 접합 적용(편측 1 · 양측 2)을 따른다 —
+                // 곡관 형식(A/B)은 주철관 형상도 바꾸므로 강관은 따로 둔 설정을 본다(docs/243 § B, docs/211 § 0-1 A3 개정).
+                var applicationMode = isSteel ? info.SteelApplicationMode : info.ApplicationMode;
+                var socketEnds = applicationMode == JointApplicationMode.BothJoints ? 2 : 1;
                 // 접합 개소는 새로 재는 값이 아니라 접합 적용(편측/양측) 설정을 옮겨 적는 것이다 — 곡관 하나는 양 끝이 붙어도
                 // 편측이면 1개소로 센다(docs/166 § 3-1). 부설은 요소당 1이며 접합수와 무관한 별도 계수다.
                 // 편측·양측은 개수의 문제일 뿐 종류·규격은 같으므로 슬롯 1벌이다. 규격은 요소 관경과 같아 비운다(docs/186 § 5).

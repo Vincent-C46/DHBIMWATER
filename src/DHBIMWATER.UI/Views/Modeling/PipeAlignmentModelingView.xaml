@@ -303,6 +303,11 @@
                                           ItemsSource="{Binding SteelFittingClassOptions, Mode=OneWay}"
                                           SelectedItem="{Binding SteelFittingClassOption, Mode=TwoWay}"
                                           ToolTip="KS D 3578 이형관 종류 · 곡관 두께·무게 결정 (직관 STWW와 무관)"/>
+                                <TextBlock Text="접합 적용" Margin="0,10,0,3"/>
+                                <ComboBox Style="{StaticResource PrimaryComboBoxStyle}"
+                                          ItemsSource="{Binding SteelApplicationModeOptions, Mode=OneWay}"
+                                          SelectedItem="{Binding SteelApplicationModeOption, Mode=TwoWay}"
+                                          ToolTip="강관 곡관의 접합 개소(슬롯 수)와 접합구성(1S/2S). 허용굴곡 판정에는 영향이 없다."/>
                             </StackPanel>
                             <!-- 주철관 소켓 전용 항목. 관종이 강관이면 접는다(docs/211 § G-4·§ N). -->
                             <StackPanel Visibility="{Binding IsDuctileIronSelected, Converter={StaticResource BoolToVisibility}}">

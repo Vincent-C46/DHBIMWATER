@@ -121,8 +121,10 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
         writer.AngleDeg(shape, PipeAlignmentParameters.AllowableDeflection, plan.EffectiveAllowableDeg);
         writer.AngleDeg(shape, PipeAlignmentParameters.ResidualDeflection, plan.ResidualDeg);
         writer.YesNo(shape, PipeAlignmentParameters.IsAcceptable, plan.IsAcceptable);
-        // 강관 곡관에는 A/B형·소켓이 없다 — 형식은 비우고 접합 개소는 직관과 같은 요소당 1(`1S`=용접 1개소)로 적는다(docs/211 § 0-1 A3·A4).
-        var socketEnds = isSteel ? 1 : info.ApplicationMode == JointApplicationMode.BothJoints ? 2 : 1;
+        // 강관 곡관에는 A/B형이 없어 형식은 비운다(docs/211 § 0-1 A4). 접합 개소·구성은 강관 전용 접합 적용(편측 1 · 양측 2)을 따른다 —
+        // 곡관 형식(A/B)은 주철관 형상도 바꾸므로 강관은 따로 둔 설정을 본다(docs/243 § B, docs/211 § 0-1 A3 개정).
+        var applicationMode = isSteel ? info.SteelApplicationMode : info.ApplicationMode;
+        var socketEnds = applicationMode == JointApplicationMode.BothJoints ? 2 : 1;
         // 가변 패밀리 경로(RevitAdaptiveBendPlacementRepo)와 같은 규칙이다 — 두 경로가 다른 값을 찍으면
         // 출력 모드만 바꿔도 산출서가 달라진다(docs/166 § 6).
         writer.JointSlots(shape, PipeKindCatalog.MaterialOf(plan.PipeKind), info.BendConnection,

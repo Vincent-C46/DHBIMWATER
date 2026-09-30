@@ -49,9 +49,9 @@ public sealed class RevitBendSettingsRepo : IBendSettingsRepo
         var joints = Deserialize<JointDeflectionSpec>(entity.Get<string>(schema.GetField(JointDeflectionField)));
         var fittings = Deserialize<BendFittingEntry>(entity.Get<string>(schema.GetField(FittingField)));
         var activeJointType = entity.Get<string>(schema.GetField(ActiveJointTypeField));
-        var (form, connection, restraintGland, steelClass) = ParseModes(entity.Get<string>(schema.GetField(ApplicationModeField)));
+        var (form, connection, restraintGland, steelClass, steelMode) = ParseModes(entity.Get<string>(schema.GetField(ApplicationModeField)));
         return new BendSettings(new StraightPipeSpecTable(straight), new JointDeflectionTable(joints),
-            new BendFittingCatalog(fittings), string.IsNullOrWhiteSpace(activeJointType) ? JointTypeCatalog.KpMechanical : activeJointType, connection, form, restraintGland, steelClass);
+            new BendFittingCatalog(fittings), string.IsNullOrWhiteSpace(activeJointType) ? JointTypeCatalog.KpMechanical : activeJointType, connection, form, restraintGland, steelClass, steelMode);
     }
 
     public void Save(BendSettings settings)
@@ -67,8 +67,9 @@ public sealed class RevitBendSettingsRepo : IBendSettingsRepo
         entity.Set(schema.GetField(ActiveJointTypeField), settings.ActiveJointType);
         // 기존 Schema에 필드를 추가할 수 없으므로 같은 문자열 필드에 함께 저장한다. 구 값("SingleJoint")도 ParseModes가 그대로 읽는다.
         // 5번째 토큰 = 강관 곡관 종류(docs/211 § C-8). 4토큰 구 저장본은 ParseModes가 F12로 읽는다.
+        // 6번째 토큰 = 강관 곡관 접합 적용(docs/243 § B). 5토큰 구 저장본은 편측으로 읽는다.
         entity.Set(schema.GetField(ApplicationModeField),
-            $"{settings.ApplicationMode}|{settings.ActiveBendConnection}|{settings.ActiveBendForm}|{settings.UseRestraintGland}|{settings.ActiveSteelFittingClass}");
+            $"{settings.ApplicationMode}|{settings.ActiveBendConnection}|{settings.ActiveBendForm}|{settings.UseRestraintGland}|{settings.ActiveSteelFittingClass}|{settings.SteelApplicationMode}");
         storage.SetEntity(entity);
     }
 
@@ -76,7 +77,7 @@ public sealed class RevitBendSettingsRepo : IBendSettingsRepo
         => string.IsNullOrWhiteSpace(json) ? new List<T>() : JsonSerializer.Deserialize<List<T>>(json, JsonOptions) ?? new List<T>();
 
     /// <summary>구 저장본(형식 필드 없음)은 ApplicationMode로 형식을 역매핑한다: 양쪽 Joint→A형, 그 외→B형(2026-09-03).</summary>
-    private static (BendForm Form, BendConnection Connection, bool UseRestraintGland, SteelFittingClass SteelFittingClass) ParseModes(string? text)
+    private static (BendForm Form, BendConnection Connection, bool UseRestraintGland, SteelFittingClass SteelFittingClass, JointApplicationMode SteelApplicationMode) ParseModes(string? text)
     {
         var parts = (text ?? string.Empty).Split('|');
         var mode = Enum.TryParse<JointApplicationMode>(parts[0], out var parsedMode) ? parsedMode : JointApplicationMode.SingleJoint;
@@ -92,7 +93,11 @@ public sealed class RevitBendSettingsRepo : IBendSettingsRepo
         var steelClass = parts.Length > 4 && Enum.TryParse<SteelFittingClass>(parts[4], out var parsedClass) && parsedClass != SteelFittingClass.None
             ? parsedClass
             : SteelFittingClass.F12;
-        return (form, connection, restraintGland, steelClass);
+        // 6번째 토큰이 없는 구 저장본은 강관 곡관 편측으로 읽는다 — 기존 강관 곡관의 슬롯 수 1을 지킨다(docs/243 § B).
+        var steelMode = parts.Length > 5 && Enum.TryParse<JointApplicationMode>(parts[5], out var parsedSteelMode)
+            ? parsedSteelMode
+            : JointApplicationMode.SingleJoint;
+        return (form, connection, restraintGland, steelClass, steelMode);
     }
 
     private static DataStorage? FindStorage(Document doc)

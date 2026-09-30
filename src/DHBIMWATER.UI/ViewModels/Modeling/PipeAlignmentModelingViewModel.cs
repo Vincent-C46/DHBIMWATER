@@ -35,6 +35,12 @@ public sealed record SteelFittingClassOption(string Label, SteelFittingClass Val
     public override string ToString() => Label;
 }
 
+/// <summary>강관 곡관 접합 적용(편측 1개소 · 양측 2개소) 선택지(docs/243 § B).</summary>
+public sealed record SteelApplicationModeOption(string Label, JointApplicationMode Value)
+{
+    public override string ToString() => Label;
+}
+
 /// <summary>DWG·DXF 파일 하나에 포함된 레이어의 다중선택 항목.</summary>
 public sealed class CadLayerOption : ViewModelBase
 {
@@ -173,6 +179,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
     private BendConnectionOption? _bendConnectionOption;
     private BendFormOption? _bendFormOption;
     private SteelFittingClassOption? _steelFittingClassOption;
+    private SteelApplicationModeOption? _steelApplicationModeOption;
     /// <summary>창 전체의 관종(docs/211 § N). 등급 목록·소켓 전용 항목·접합 라벨·규격표 창 탭이 이 값을 따른다.</summary>
     private PipeMaterial _selectedMaterial = PipeMaterial.DuctileIron;
     private const double ExistingSharedCoordinateWarningDistanceM = 10_000d;
@@ -367,6 +374,23 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         {
             if (!SetProperty(ref _steelFittingClassOption, value) || value is null) return;
             _settings = _settings with { ActiveSteelFittingClass = value.Value };
+            Summary = string.Empty;
+        }
+    }
+    public IReadOnlyList<SteelApplicationModeOption> SteelApplicationModeOptions { get; } = new[]
+    {
+        new SteelApplicationModeOption(PipeAlignmentParameters.Label(JointApplicationMode.SingleJoint), JointApplicationMode.SingleJoint),
+        new SteelApplicationModeOption(PipeAlignmentParameters.Label(JointApplicationMode.BothJoints), JointApplicationMode.BothJoints)
+    };
+    /// <summary>강관 곡관의 접합 적용. 슬롯 수와 접합구성(1S/2S)만 정하고 허용굴곡 판정에는 영향이 없다(docs/243 § B).
+    /// 주철관의 곡관 형식(A/B)과 따로 둔다 — A/B형은 주철관 형상도 바꾼다.</summary>
+    public SteelApplicationModeOption? SteelApplicationModeOption
+    {
+        get => _steelApplicationModeOption;
+        set
+        {
+            if (!SetProperty(ref _steelApplicationModeOption, value) || value is null) return;
+            _settings = _settings with { SteelApplicationMode = value.Value };
             Summary = string.Empty;
         }
     }
@@ -1250,6 +1274,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         BendFormOption = BendFormOptions.First(x => x.Value == _settings.ActiveBendForm);
         // 저장본의 None(구 값)은 기본 F12로 본다.
         SteelFittingClassOption = SteelFittingClassOptions.FirstOrDefault(x => x.Value == _settings.ActiveSteelFittingClass) ?? SteelFittingClassOptions[0];
+        SteelApplicationModeOption = SteelApplicationModeOptions.FirstOrDefault(x => x.Value == _settings.SteelApplicationMode) ?? SteelApplicationModeOptions[0];
         // 이 속성은 _settings를 직접 읽으므로 설정을 통째로 갈아끼운 뒤 알려주지 않으면 체크박스가 옛 값을 보여준다.
         OnPropertyChanged(nameof(UseRestraintGland));
     }

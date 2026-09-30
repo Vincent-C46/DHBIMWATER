@@ -1513,7 +1513,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             if (!string.IsNullOrEmpty(remark))
                 SetOptionalTextParameterIfEmpty(part.Instance, ValvePipingParameters.Remark, remark, failed);
             // 접합·부설 개소(docs/166 § 7, docs/170 § D). 부재당 1개소이며 매개변수는 관종 + 접합 방식 + 압륜이 정한다.
-            // 압륜은 창에서 지정하지 않는다(docs/175 § A). 사용자가 인스턴스 DH_이탈방지압륜접합수로 제어하며,
+            // 압륜은 창에서 지정하지 않는다(docs/175 § A). 사용자가 인스턴스 접합 슬롯 종류(이탈방지압륜접합)로 제어하며,
             // 재기록은 그 값을 보존한다(PipeJointCountWriter.ReadRestraintGland).
             PipeJointCountWriter.Write(part.Instance, network.Material,
                 connections.TryGetValue(part.Instance.Id, out var connection) ? connection : network.JointConnection,

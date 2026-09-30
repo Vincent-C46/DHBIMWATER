@@ -26,7 +26,8 @@ public sealed class BendSettingsFileStoreTests
                 JointTypeCatalog.Tyton,
                 BendConnection.Flanged,
                 BendForm.AType,
-                ActiveSteelFittingClass: SteelFittingClass.F20);
+                ActiveSteelFittingClass: SteelFittingClass.F20,
+                SteelApplicationMode: JointApplicationMode.BothJoints);
 
             store.Save(path, settings);
             var loaded = store.Load(path);
@@ -38,6 +39,7 @@ public sealed class BendSettingsFileStoreTests
             Assert.Equal(JointApplicationMode.BothJoints, loaded.ApplicationMode);
             Assert.Equal(BendConnection.Flanged, loaded.ActiveBendConnection);
             Assert.Equal(SteelFittingClass.F20, loaded.ActiveSteelFittingClass);
+            Assert.Equal(JointApplicationMode.BothJoints, loaded.SteelApplicationMode);
             var steel = loaded.Fittings.Find(100, 45, PipeMaterial.Steel, BendConnection.Socket, SteelFittingClass.F20);
             Assert.NotNull(steel);
             Assert.Equal(9.08, steel!.WeightKg);
@@ -58,6 +60,8 @@ public sealed class BendSettingsFileStoreTests
                 """);
             var loaded = new JsonFileBendSettingsFileStore().Load(path);
             Assert.Equal(SteelFittingClass.F12, loaded.ActiveSteelFittingClass);
+            // 강관 접합 적용 필드가 없는 구 파일은 편측이다 — 기존 강관 곡관 슬롯 수 1을 지킨다(docs/243 § B).
+            Assert.Equal(JointApplicationMode.SingleJoint, loaded.SteelApplicationMode);
         }
         finally { if (File.Exists(path)) File.Delete(path); }
     }

@@ -86,12 +86,15 @@ public sealed record PipeInfoParameterContext(string JointType, JointApplication
     /// <para>`DH_접합방법`(KP·타이튼)은 소켓 조인트의 <b>종류</b>일 뿐이라 용접을 표현하지 못한다 — docs/168 § 4.</para>
     /// 기본값이 있어 이 축을 모르는 기존 호출부도 그대로 컴파일된다(설정 기본값과 같은 소켓).</summary>
     BendConnection BendConnection = BendConnection.Socket,
-    /// <summary>주철관 소켓에 이탈방지압륜을 쓰는지. 접합 개소를 `DH_KP접합수` 대신
-    /// `DH_이탈방지압륜접합수`에 적는다(docs/166 § 11-4). 강관·플랜지에는 영향이 없다.</summary>
+    /// <summary>주철관 소켓에 이탈방지압륜을 쓰는지. 켜면 접합 슬롯 `종류`를 `KP접합` 대신
+    /// `이탈방지압륜접합`으로 적는다(docs/166 § 11-4). 강관·플랜지에는 영향이 없다.</summary>
     bool UseRestraintGland = false,
     /// <summary>강관 곡관 종류(F12/F15/F20, 전역 설정). 강관 곡관의 `DH_관종등급`에는 직관 등급(STWW) 대신 이 값을 적는다
     /// (2026-09-22 사용자 확정 — 곡관 관두께·무게는 STWW가 아니라 F로 정해진다). 직관·이경관은 계속 STWW 등급이다.</summary>
-    SteelFittingClass SteelFittingClass = SteelFittingClass.F12);
+    SteelFittingClass SteelFittingClass = SteelFittingClass.F12,
+    /// <summary>강관 곡관의 접합 적용(편측/양측). 곡관 슬롯 수와 접합구성(1S/2S)에만 쓴다(docs/243 § B).
+    /// 주철관은 <paramref name="ApplicationMode"/>(곡관 형식 유도)를 쓴다.</summary>
+    JointApplicationMode SteelApplicationMode = JointApplicationMode.SingleJoint);
 
 // Repo 인터페이스 계약을 보존하는 기존 DTO 정의다.
 public sealed record PipeAlignmentCreateDefinition(IReadOnlyList<PipeAlignment> Alignments, AlignmentPlacementOrigin Origin);

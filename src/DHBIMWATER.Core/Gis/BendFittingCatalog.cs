@@ -6,7 +6,7 @@ namespace DHBIMWATER.Core.Gis;
 public enum BendForm { AType, BType }
 
 /// <summary>이형관 접합 방식. 핸드북에서 소켓곡관과 플랜지곡관은 R·t가 다른 별도 표다(e·s는 같다).
-/// 강관에서 <see cref="Socket"/>은 <b>용접</b>을 뜻한다(접합수 매핑 <c>PipeAlignmentParameters.JointCountParameterFor</c>와 같은 규약).</summary>
+/// 강관에서 <see cref="Socket"/>은 <b>용접</b>을 뜻한다(접합 슬롯 종류 <c>PipeAlignmentParameters.JointKindFor</c>와 같은 규약).</summary>
 public enum BendConnection { Socket, Flanged }
 
 /// <summary>KS D 3578 강관 이형관의 종류(F12/F15/F20). 관두께 T와 무게만 다르고 외경·R·L은 같다.
@@ -455,13 +455,16 @@ public sealed record BendSettings(
     BendForm ActiveBendForm = BendForm.BType,
     /// <summary>주철관 소켓 접합에 <b>이탈방지압륜</b>을 쓰는지(docs/166 § 11-4).
     /// <para>산출서에서 `이탈방지압륜 접합 및 부설`은 `KP접합 및 부설`과 별개 공종이라 개소를 다른 열에 적어야 한다.
-    /// 켜면 주철관 소켓 부재의 접합 개소가 <c>DH_이탈방지압륜접합수</c>로, 끄면 <c>DH_KP접합수</c>로 간다.</para>
+    /// 켜면 주철관 소켓 부재의 접합 슬롯 `종류`가 <c>이탈방지압륜접합</c>, 끄면 <c>KP접합</c>이 된다.</para>
     /// <para>형상·허용굴곡에는 <b>영향이 없다</b> — 압륜은 같은 KP 메커니컬 조인트에 덧대는 부속이다.
     /// 강관·플랜지 접합에도 영향이 없다.</para></summary>
     bool UseRestraintGland = false,
     /// <summary>강관 곡관·이형관에 쓸 종류(F12/F15/F20). 직관 등급(STWW)과 무관하게 모델링 창에서 고른다(docs/211 § 0 확정 2).
     /// 주철관 절점에는 영향이 없다.</summary>
-    SteelFittingClass ActiveSteelFittingClass = SteelFittingClass.F12)
+    SteelFittingClass ActiveSteelFittingClass = SteelFittingClass.F12,
+    /// <summary>강관 곡관의 접합 적용(편측 1개소 · 양측 2개소). 슬롯 수와 접합구성(1S/2S)만 정한다 — 강관 허용굴곡은 늘 한쪽 Joint로 판정한다.
+    /// <para>강관에는 A/B형이 없어 <see cref="ApplicationMode"/>(곡관 형식 유도)와 분리한다 — 공유하면 주철관 형상(s=0/200)과 간섭한다(docs/243 § B).</para></summary>
+    JointApplicationMode SteelApplicationMode = JointApplicationMode.SingleJoint)
 {
     /// <summary>허용굴곡 적용 방식은 곡관 형식이 결정한다. A형은 양쪽 Joint(θ₁+θ₂), B형은 한쪽 Joint.</summary>
     public JointApplicationMode ApplicationMode =>

@@ -28,9 +28,9 @@ internal sealed class PipeParameterWriter
     /// <summary>접합 슬롯(<c>DH_접합{n}_종류</c>·<c>_규격</c>·<c>_수</c>)을 기록한다(docs/186 § 4·§ 6-2).
     /// <para>종류를 매개변수 <b>이름</b>이 아니라 <b>값</b>으로 적으므로 한 부재가 규격이 다른 접합 둘을 가질 수 있다 —
     /// 이경관 `D2400x1650`이 슬롯 2벌(`D2400` 1개소 + `D1650` 1개소)로 갈린다.</para>
-    /// <para><paramref name="slots"/>가 비면(직관) 아무것도 쓰지 않는다. <b>빈 슬롯에 0을 채우지 않는다</b> —
-    /// 슬롯은 "있으면 적는" 칸이라 `종류`가 비면 그 자체로 없는 것이다. 개소 매개변수 넷이 0을 명시적으로 쓰던 규칙
-    /// (빈칸 = 미태깅과 구분)은 칸이 <b>고정</b>이라 필요했던 것이다.</para>
+    /// <para>슬롯은 "있으면 적는" 칸이라 `종류`가 비면 그 자체로 없는 것이다. 개소 매개변수 넷이 0을 명시적으로 쓰던 규칙
+    /// (빈칸 = 미태깅과 구분)은 칸이 <b>고정</b>이라 필요했던 것이다. 다만 <b>다시 기록</b>할 때 쓴 벌 뒤의 옛 슬롯은 비운다 —
+    /// 남겨 두면 수량산출이 옛 `종류`·`수`까지 세어 접합이 과다 계상된다(docs/243 § A).</para>
     /// <para>종류를 못 찾는 관종(PE·PVC 소켓)은 슬롯을 비우고 <see cref="UnmappedJointWarning"/>에 모은다.</para></summary>
     /// <param name="slots">슬롯 1벌 = (규격, 개수). 규격이 빈 문자열이면 수량산출이 요소 관경을 쓴다(docs/186 § 4-3).</param>
     public void JointSlots(Element element, PipeMaterial? material, BendConnection connection,
@@ -41,7 +41,8 @@ internal sealed class PipeParameterWriter
         {
             if (slots is { Count: > 0 })
                 _unmappedJointMaterials.Add(material is { } m ? PipeAlignmentParameters.Label(m) : "관종 미상");
-            Integer(element, PipeAlignmentParameters.JointTotalCount, 0);
+            // 빈 목록으로 부르면 옛 슬롯 1..3을 비우고 DH_접합수 = 0을 쓴다(docs/243 § A).
+            JointSlots(element, Array.Empty<(string Kind, string Spec, int Count)>());
             return;
         }
 
@@ -71,7 +72,22 @@ internal sealed class PipeParameterWriter
             Integer(element, PipeAlignmentParameters.JointSlotCount(slot), slotValue.Count);
             writtenCount += slotValue.Count;
         }
+        for (var slot = index + 1; slot <= PipeAlignmentParameters.JointSlotDefinitionCount; slot++)
+            ClearSlot(element, slot);
         Integer(element, PipeAlignmentParameters.JointTotalCount, writtenCount);
+    }
+
+    /// <summary>다시 기록할 때 남은 옛 슬롯을 비운다. 매개변수가 없으면 남은 값도 없으므로 조용히 건너뛴다 — <c>Missing</c>을 늘리지 않는다.</summary>
+    private static void ClearSlot(Element element, int slot)
+    {
+        Clear(element, PipeAlignmentParameters.JointSlotKind(slot), StorageType.String, p => p.Set(string.Empty));
+        Clear(element, PipeAlignmentParameters.JointSlotSpec(slot), StorageType.String, p => p.Set(string.Empty));
+        Clear(element, PipeAlignmentParameters.JointSlotCount(slot), StorageType.Integer, p => p.Set(0));
+    }
+
+    private static void Clear(Element element, string name, StorageType storage, Action<Parameter> set)
+    {
+        if (FindParameter(element, name) is { IsReadOnly: false } parameter && parameter.StorageType == storage) set(parameter);
     }
 
     /// <summary>접합 구성(<c>DH_접합구성</c>)을 적는다 — 플랜지면 단부 전부가 플랜지(`2F`), 소켓 계열(용접·KP·압륜)이면

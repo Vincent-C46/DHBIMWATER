@@ -127,7 +127,8 @@ public sealed class ModelPipeAlignmentUseCase
         var origin = new AlignmentPlacementOrigin(reference?.X ?? 0, reference?.Y ?? 0, request.ZDatum, settings.StraightPipes);
         var infoContext = new PipeInfoParameterContext(settings.ActiveJointType, settings.ApplicationMode, request.ZDatum,
             IsNightWork: request.IsNightWork, BendConnection: settings.ActiveBendConnection,
-            UseRestraintGland: settings.UseRestraintGland, SteelFittingClass: settings.ActiveSteelFittingClass);
+            UseRestraintGland: settings.UseRestraintGland, SteelFittingClass: settings.ActiveSteelFittingClass,
+            SteelApplicationMode: settings.SteelApplicationMode);
         var elevationWarnings = GetElevationWarnings(alignments, request, settings.StraightPipes)
             .Concat(GetSlopeDatumWarnings(alignments, request, settings.StraightPipes));
         // 원통 DirectShape와 Adaptive 모두 같은 곡관 계획 사용. PipingSystem만 Revit 부속 자동 생성.
