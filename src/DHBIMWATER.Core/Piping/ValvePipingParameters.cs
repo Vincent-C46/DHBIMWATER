@@ -36,6 +36,8 @@ public static class ValvePipingParameters
     public const string ValveJointLayingCount = "DH_접합및부설수";
     public const string Weight = Gis.PipeAlignmentParameters.Weight;
     public const string UnitWeight = Gis.PipeAlignmentParameters.UnitWeight;
+    /// <summary>관 등급(`상수 1종관`·`STWW 400 A`). 계획관로와 같은 이름·GUID다(docs/260 § C-5). 밸브류에는 적지 않는다.</summary>
+    public const string Grade = Gis.PipeAlignmentParameters.Grade;
 
     public static string JointSlotKind(int slot) => Gis.PipeAlignmentParameters.JointSlotKind(slot);
     public static string JointSlotSpec(int slot) => Gis.PipeAlignmentParameters.JointSlotSpec(slot);
@@ -88,6 +90,7 @@ public static class ValvePipingParameters
         [ValveJointLayingCount] = new("f23792f1-948b-4a3a-8f29-7b4370b8e2da"),
         [Weight] = Gis.PipeAlignmentParameters.Guids[Weight],
         [UnitWeight] = Gis.PipeAlignmentParameters.Guids[UnitWeight],
+        [Grade] = Gis.PipeAlignmentParameters.Guids[Grade],
         [JointComposition] = Gis.PipeAlignmentParameters.Guids[JointComposition],
         [Part] = Gis.PipeAlignmentParameters.Guids[Part],
         [NominalDiameter] = Gis.PipeAlignmentParameters.Guids[NominalDiameter],
@@ -131,8 +134,9 @@ public static class ValvePipingParameters
         Def(JointTotalCount, ParameterSpecType.Integer, categories: [ParameterCategory.PipeFitting]),
         Def(LayingCount, ParameterSpecType.Integer, categories: [ParameterCategory.PipeFitting]),
         Def(ValveJointLayingCount, ParameterSpecType.Integer, categories: [ParameterCategory.PipeAccessory]),
-        Def(Weight, ParameterSpecType.Number),
-        Def(UnitWeight, ParameterSpecType.Number),
+        Def(Weight, ParameterSpecType.Mass),                  // docs/264
+        Def(UnitWeight, ParameterSpecType.MassPerUnitLength),
+        Text(Grade),
         Text(JointComposition),
         // docs/178 § C — 계획관로와 값 형태를 맞추는 네 칸. 이름·GUID가 같으므로 일반 모델 바인딩에 두 카테고리가 병합된다.
         Text(Part, ParameterGroupType.IdentityData),

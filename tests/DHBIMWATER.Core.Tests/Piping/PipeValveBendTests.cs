@@ -169,7 +169,7 @@ public sealed class PipeValveBendTests
     [Fact]
     public void Reconstructor_ValveBendBecomesNode_WithValveSideDirection()
     {
-        // 커넥터[0](최소 Id)이 +Y 쪽 = 밸브 쪽. 역가져오기 저장소가 Id 순으로 정렬해 넘긴다(docs/225 § E).
+        // 커넥터[0]이 +Y 쪽 = 밸브 쪽. 역가져오기 저장소가 긴 레그(밸브 쪽)를 [0]으로 넘긴다(docs/247).
         var corner = P(2000, 0);
         var valveBend = new PickedPipePart(2, PipePartRole.ValveBend, "DH_밸브부관 : 100A", corner, 0,
         [

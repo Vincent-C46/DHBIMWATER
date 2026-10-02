@@ -26,6 +26,7 @@ namespace DHBIMWATER.UI.Views.Modeling
             InitializeComponent();
             DataContext = pumpingStationViewModel;
             pumpingStationViewModel.CloseAction = Close;
+            pumpingStationViewModel.ConcreteLauncher.ShowDialog = vm => ConcreteSettingsView.Show(this, vm);   // docs/249 § E
             ContentRendered += (s, e) =>
             {
                 SizeToContent = SizeToContent.Manual;

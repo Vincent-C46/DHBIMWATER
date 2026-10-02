@@ -1,5 +1,6 @@
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.UI.Base;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.UI.ViewModels.Modeling;
 

@@ -1,4 +1,5 @@
 using DHBIMWATER.Core.Parameters;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.Core.Gis;
 
@@ -9,7 +10,7 @@ namespace DHBIMWATER.Core.Gis;
 /// `DH_접합적용`·`DH_곡률반경`)를 뺐고 <see cref="UnitWeight"/>를 더했다. 이미 바인딩된 문서에서는
 /// 뺀 매개변수가 빈 칸으로 남는다 — EnsureParameters는 추가·병합만 하기 때문이다.</para>
 /// <para>docs/214에서 5개(`DH_외경`·`DH_관두께`·`DH_레코드번호`·`DH_곡관형식`·`DH_부설길이`)를 더 뺐다.
-/// 앞 둘은 DHBoost 측점편집의 DirectShape 원통 재생성이 읽던 값인데 DirectShape를 측점편집 대상에서
+/// 앞 둘은 연동 애드인 측점편집의 DirectShape 원통 재생성이 읽던 값인데 DirectShape를 측점편집 대상에서
 /// 제외하기로 확정(2026-09-22)해 읽는 곳이 없어졌다. `DH_레코드번호`는 `Alignment` 태그와 중복,
 /// `DH_곡관형식`은 읽는 곳이 없었고, `DH_부설길이`는 곡관에서 연장이 아닌 값(절점→관끝 거리)이라 뺐다.</para>
 /// </summary>
@@ -31,29 +32,27 @@ public static class PipeAlignmentParameters
     public const string ActualDeflection = "DH_실제굴곡각";
     public const string StandardAngle = "DH_곡관규격각";
     /// <summary>주관 외 나머지 구경 표기 — T형 분기경 `D150`, 십자 `D600xD300`, 이경관 작은 쪽 `D600`.
-    /// <para>수량산출(DHBoost)의 <b>규격2</b> 칸이다. <see cref="NominalDiameter"/>는 주관 한 구경(`DN300`)이라
+    /// <para>수량산출의 <b>규격2</b> 칸이다. <see cref="NominalDiameter"/>는 주관 한 구경(`DN300`)이라
     /// 분기 쪽을 담을 자리가 없어 따로 둔다.</para>
     /// <para><b>사용자가 고쳐 쓰는 칸</b>이다 — 십자관 세 구경이 다 다르면 배치가 적은 값 위에 손으로 덮어쓴다.
     /// 그래서 배치·재기록 경로 모두 <b>비어 있을 때만</b> 쓴다(<see cref="Remark"/>와 같은 규칙).</para></summary>
     public const string BranchSpec = "DH_분기규격";
 
     /// <summary>현장 절단 개소(Integer). 수량산출 「강관 절단」·「주철관 절단」 행을 만든다.
-    /// <para>배치가 <b>1</b>을 적어 두고 사용자가 고친다 &mdash; 부재 하나를 한 번 자르는 것이 기본이고,
-    /// 자르지 않는 부재는 0으로 지운다. 접합 슬롯 합계가 0인 것과 빈칸을 구분한다.
-    /// 빈칸(미태깅)과 0(세어보니 없다)을 구분한다.</para>
-    /// <para>밸브·이음관에는 적지 않는다 &mdash; 자르는 대상이 아니다(<see cref="Piping.PipeMaterialSpecText.IsCutTarget"/>).</para></summary>
+    /// <para>값은 <see cref="Piping.PipeCountRules"/>가 정한다(docs/266) — 계획관로 단관 1 · 곡관 0 · 이경관 1,
+    /// 밸브실 평단 단관 1 + 유입부 소켓 1곳당 1(<see cref="Piping.PipeJointConnectionPass"/>). 빈칸(미태깅)과 0(세어보니 없다)을 구분한다.</para>
+    /// <para>밸브류에는 적지 않는다 &mdash; 자르는 대상이 아니다.</para></summary>
     public const string CutCount = "DH_절단수";
-
-    /// <summary><see cref="CutCount"/>의 배치 기본값.</summary>
-    public const int DefaultCutCount = 1;
     public const string AllowableDeflection = "DH_허용굴곡각";
     public const string ResidualDeflection = "DH_잔여굴곡각";
     public const string IsAcceptable = "DH_허용여부";
     /// <summary>요소 한 개의 무게(kg)(docs/178 § A-2, 2026-09-16 사용자 확정).
     /// <para><b>곡관</b>: 곡관표의 한 개 무게(소켓 포함, KP/타이튼·A/B형별). <b>직관</b>: <see cref="UnitWeight"/> × <see cref="Length"/> + 소켓 무게
-    /// (<see cref="StraightPipeWeight"/>). 이경관은 비워 둔다. 강관 직관은 kg/m × 연장(소켓 무게 0), 강관 곡관은 F 종류별 한 개 무게(docs/211).</para></summary>
+    /// (<see cref="StraightPipeWeight"/>). 이경관은 핸드북 편락관 무게, 표에 없는 조합·강관은 비운다(docs/260 § G). 강관 직관은 kg/m × 연장(소켓 무게 0), 강관 곡관은 F 종류별 한 개 무게(docs/211).</para>
+    /// <para>질량(kg) 형식이며 내부 단위로 변환해 기록한다(docs/264).</para></summary>
     public const string Weight = "DH_무게";
-    /// <summary>직관부 단위중량(kg/m, 핸드북 M무게). 직관·단관에만 있고 곡관은 비워 둔다 — 곡관은 한 개 무게로 센다.</summary>
+    /// <summary>직관부 단위중량(kg/m, 핸드북 M무게). 직관·단관에만 있고 곡관은 비워 둔다 — 곡관은 한 개 무게로 센다.
+    /// <para>단위 길이당 질량(kg/m) 형식 — 내부 단위가 kg/ft라 변환해 기록한다(docs/264).</para></summary>
     public const string UnitWeight = "DH_단위중량";
     /// <summary>접합 슬롯 수 합계. <c>DH_접합{n}_수</c>를 기록한 뒤 자동으로 쓴다.</summary>
     public const string JointTotalCount = "DH_접합수";
@@ -79,7 +78,7 @@ public static class PipeAlignmentParameters
     public static string JointSlotCount(int slot) => $"{JointSlotPrefix}{slot}_수";
 
     /// <summary>공유 매개변수로 <b>정의해 두는</b> 슬롯 벌 수. 스캔 상한이 아니다 —
-    /// 수량산출(DHBoost)은 `DH_접합{n}_*` 이름 규칙으로 훑으므로 나중에 벌을 더 정의해도 그쪽을 다시 빌드하지 않는다.</summary>
+    /// 수량산출은 `DH_접합{n}_*` 이름 규칙으로 훑으므로 나중에 벌을 더 정의해도 그쪽을 다시 빌드하지 않는다.</summary>
     public const int JointSlotDefinitionCount = 3;
 
     /// <summary>부설 개소 수. 산출 관행상 요소당 1이며, 접합수와 무관한 별도 계수다(docs/166 § 3-3).</summary>
@@ -89,7 +88,6 @@ public static class PipeAlignmentParameters
     public const string NightWork = "DH_야간";
 
     public const string AddinValue = "DHBIMWATER";
-    public const string StraightPartValue = "직관";
     public const string BendPartValue = "곡관";
     public const string ReducerPartValue = "이경관";
 
@@ -136,7 +134,7 @@ public static class PipeAlignmentParameters
         LengthDef(Length), Def(NodeId, ParameterSpecType.Integer),
         Def(ActualDeflection, ParameterSpecType.Angle), Def(StandardAngle, ParameterSpecType.Angle), Def(AllowableDeflection, ParameterSpecType.Angle), Def(ResidualDeflection, ParameterSpecType.Angle),
         Def(IsAcceptable, ParameterSpecType.YesNo),
-        NumberDef(Weight), NumberDef(UnitWeight), Def(NightWork, ParameterSpecType.YesNo),
+        Def(Weight, ParameterSpecType.Mass), Def(UnitWeight, ParameterSpecType.MassPerUnitLength), Def(NightWork, ParameterSpecType.YesNo),
         Def(JointTotalCount, ParameterSpecType.Integer),
         Def(LayingCount, ParameterSpecType.Integer),
         Text(JointComposition),
@@ -149,7 +147,7 @@ public static class PipeAlignmentParameters
     };
 
     /// <summary><b>관종 + 곡관 접합</b> → 접합 슬롯 `종류` 칸에 적을 문자열(docs/186 § 4-2).
-    /// <para>수량산출(DHBoost)의 <c>PipeWorkCatalog</c> 키와 <b>문자열이 같아야</b> 행이 선다.</para>
+    /// <para>수량산출의 <c>PipeWorkCatalog</c> 키와 <b>문자열이 같아야</b> 행이 선다.</para>
     /// <para>대응이 없으면(PE·PVC 융착·접착) null이다. 호출부는 값을 지어내지 말고 <b>슬롯을 비우고</b> 경고를 남긴다.</para></summary>
     public static string? JointKindFor(PipeMaterial? material, BendConnection connection, bool useRestraintGland = false)
         => connection == BendConnection.Flanged ? "플랜지접합" : material switch
@@ -207,6 +205,5 @@ public static class PipeAlignmentParameters
 
     private static SharedParameterDefinition Text(string name, ParameterGroupType group = ParameterGroupType.Data, bool userModifiable = true) => Def(name, ParameterSpecType.Text, group, userModifiable);
     private static SharedParameterDefinition LengthDef(string name) => Def(name, ParameterSpecType.Length);
-    private static SharedParameterDefinition NumberDef(string name) => Def(name, ParameterSpecType.Number);
     private static SharedParameterDefinition Def(string name, ParameterSpecType spec, ParameterGroupType group = ParameterGroupType.Data, bool userModifiable = true) => new() { Name = name, Guid = Guids[name], SpecType = spec, GroupType = group, BindingType = ParameterBindingType.Instance, Categories = new[] { ParameterCategory.GenericModel }, UserModifiable = userModifiable };
 }

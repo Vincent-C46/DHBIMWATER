@@ -12,14 +12,16 @@ public sealed class PlacementStationParametersTests
         Assert.Equal(12, PlacementStationParameters.Definitions.Count);
         Assert.Equal(12, PlacementStationParameters.Guids.Values.Distinct().Count());
         Assert.Equal(new Guid("53dfa8cd-0583-4a4b-90a9-31762c06eb2c"), PlacementStationParameters.Guids[PlacementStationParameters.SourceFile]);
-        Assert.Equal(new Guid("cb041b23-f945-4e3d-a3fe-0f74ff49ae94"), PlacementStationParameters.Guids[PlacementStationParameters.StaStart]);
+        Assert.Equal(new Guid("26a4c229-638c-4e3e-89de-21fb23211344"), PlacementStationParameters.Guids[PlacementStationParameters.StaStart]);
+        Assert.Equal("StaStart(m)", PlacementStationParameters.StaStart);
+        Assert.Equal("StaEnd(m)", PlacementStationParameters.StaEnd);
 
         AssertDefinition(PlacementStationParameters.SourceFile, ParameterSpecType.Text);
         AssertDefinition(PlacementStationParameters.Alignment, ParameterSpecType.Text);
         AssertDefinition(PlacementStationParameters.Profile, ParameterSpecType.Text);
         AssertDefinition(PlacementStationParameters.StaStart, ParameterSpecType.Number);
         AssertDefinition(PlacementStationParameters.StaEnd, ParameterSpecType.Number);
-        AssertDefinition(PlacementStationParameters.ZOffset, ParameterSpecType.Number);
+        AssertDefinition(PlacementStationParameters.ZOffset, ParameterSpecType.Length);
         AssertDefinition(PlacementStationParameters.Flip, ParameterSpecType.YesNo);
         AssertDefinition(PlacementStationParameters.VerticalBasis, ParameterSpecType.Text);
         AssertDefinition(PlacementStationParameters.ShapeKind, ParameterSpecType.Text);

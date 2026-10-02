@@ -9,6 +9,7 @@ using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Application.UseCases.Gis;
 using DHBIMWATER.UI.Base;
 using DHBIMWATER.UI.Commands;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.UI.ViewModels.Modeling;
 

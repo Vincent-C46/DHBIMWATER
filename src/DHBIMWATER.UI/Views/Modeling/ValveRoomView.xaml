@@ -134,18 +134,21 @@
                 </Setter>
             </Style>
 
-            <!-- 참고도 접기/펼치기 토글. 모양은 CancelButtonStyle(회색 버튼)과 맞추고, 문구는 상태에 따라 바뀐다. -->
+            <!-- 참고도 접기/펼치기 토글. 입력 영역과 참고도 사이에 두고 화살표만 표시한다(펼침 ◀ / 접힘 ▶, docs/242).
+                 색은 CancelButtonStyle(회색 버튼)과 맞춘다. -->
             <Style x:Key="ImagePanelToggleStyle" TargetType="ToggleButton">
                 <Setter Property="Background" Value="{StaticResource Brush.Gray.300}"/>
                 <Setter Property="Foreground" Value="Black"/>
                 <Setter Property="FontWeight" Value="SemiBold"/>
-                <Setter Property="Padding" Value="15,8"/>
+                <Setter Property="Padding" Value="0"/>
+                <Setter Property="Width" Value="24"/>
+                <Setter Property="Height" Value="48"/>
                 <Setter Property="Cursor" Value="Hand"/>
-                <Setter Property="Content" Value="참고도 펼치기 ▶"/>
+                <Setter Property="Content" Value="▶"/>
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="ToggleButton">
-                            <Border Background="{TemplateBinding Background}" CornerRadius="8" SnapsToDevicePixels="True">
+                            <Border Background="{TemplateBinding Background}" CornerRadius="6" SnapsToDevicePixels="True">
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
                             </Border>
                             <ControlTemplate.Triggers>
@@ -161,7 +164,7 @@
                 </Setter>
                 <Style.Triggers>
                     <Trigger Property="IsChecked" Value="True">
-                        <Setter Property="Content" Value="참고도 접기 ◀"/>
+                        <Setter Property="Content" Value="◀"/>
                     </Trigger>
                 </Style.Triggers>
             </Style>
@@ -182,10 +185,12 @@
         <Grid Grid.Row="1">
         <Grid.ColumnDefinitions>
             <!-- 참고도 열 폭은 코드비하인드(ApplyImagePanel)가 화면 폭에 맞춰 정한다 — 펼침 최대 680, 접힘 0. -->
+            <!-- 가운데 열은 참고도 토글 — 버튼 24 + 오른쪽 여백 8(코드비하인드 ToggleColumnWidth와 맞춤). -->
             <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
             <ColumnDefinition x:Name="ImageColumn" Width="680"/>
         </Grid.ColumnDefinitions>
-        <Border Grid.Column="0" Background="White" CornerRadius="15" Margin="20,12" Padding="20">
+        <Border Grid.Column="0" Background="White" CornerRadius="15" Margin="20,12,8,12" Padding="20">
             <Border.Effect><DropShadowEffect BlurRadius="15" ShadowDepth="2" Color="#DDE4EB" Opacity="0.3"/></Border.Effect>
             <DockPanel>
                 <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
@@ -571,8 +576,13 @@
             </DockPanel>
         </Border>
 
+        <!-- 기본은 펼침(IsChecked=True). 접으면 참고도 열이 사라지고 창 폭도 그만큼 줄어든다. -->
+        <ToggleButton x:Name="ImagePanelToggle" Grid.Column="1" VerticalAlignment="Center" Margin="0,0,8,0"
+                      Style="{StaticResource ImagePanelToggleStyle}" IsChecked="True"
+                      Checked="OnImagePanelToggleChanged" Unchecked="OnImagePanelToggleChanged"/>
+
         <!-- 밸브실 종류별 참고도. 이미지 리소스가 없으면 빈 칸으로 표시된다. -->
-        <Border x:Name="ImagePanel" Grid.Column="1" Background="White" CornerRadius="15" Margin="0,12,20,12" Padding="14">
+        <Border x:Name="ImagePanel" Grid.Column="2" Background="White" CornerRadius="15" Margin="0,12,20,12" Padding="14">
             <Border.Effect><DropShadowEffect BlurRadius="15" ShadowDepth="2" Color="#DDE4EB" Opacity="0.3"/></Border.Effect>
             <!-- 고정 높이 대신 * 행: 기본은 열 폭에 맞춰 이미지 비율(2190×930)대로 커지고,
                  창이 화면 높이에 걸려 줄어들면 두 이미지가 같이 줄어든다. -->
@@ -598,11 +608,10 @@
         <Grid Grid.Row="2" Margin="20,0,20,16">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Border Background="#EEF2F7" CornerRadius="8" Padding="10"><TextBlock Text="{Binding Summary}" Foreground="#2C3E50" TextWrapping="Wrap"/></Border>
-            <!-- 기본은 펼침(IsChecked=True). 접으면 참고도 열이 사라지고 창 폭도 그만큼 줄어든다. -->
-            <ToggleButton x:Name="ImagePanelToggle" Grid.Row="1" HorizontalAlignment="Left" Margin="0,12,0,0"
-                          Style="{StaticResource ImagePanelToggleStyle}" IsChecked="True"
-                          Checked="OnImagePanelToggleChanged" Unchecked="OnImagePanelToggleChanged"/>
             <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+                <!-- docs/249 § E — 구조물 공용 부재별 콘크리트 강도 -->
+                <Button Style="{StaticResource CancelButtonStyle}" Content="콘크리트 강도" Command="{Binding ConcreteLauncher.OpenCommand}" Margin="0,0,8,0"
+                        ToolTip="펌프장·토출조·배수지·밸브실 공용 부재별 콘크리트 강도를 지정합니다. 다음 생성부터 적용됩니다."/>
                 <Button Style="{StaticResource CancelButtonStyle}" Content="기본값" Command="{Binding ResetCommand}" Margin="0,0,8,0"/>
                 <Button Content="모델 생성" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CreateCommand}"/>
             </StackPanel>

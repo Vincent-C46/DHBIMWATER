@@ -33,6 +33,13 @@ internal sealed class JointCountDiagnostics
 /// (제수밸브실 D600·D300은 부설수와 플랜지접합수가 같은 값이고, 세 실의 D1650도 부재 수와 맞는다).
 /// 관행이 "부재를 하나 놓고 붙이는 품"을 1개소로 세기 때문이라, 모델의 실제 연결 관계를 재는 것이
 /// 오히려 산출서를 못 맞춘다. 그래서 실측을 버리고 부재당 1개소로 돌렸다.</para>
+/// <para><b>플랜지는 슬롯에 적지 않는다(docs/262·263, 2026-10-02)</b> — 플랜지 접합은 맞붙은 두 부재가 플랜지를 하나씩 내어
+/// 1개소를 이루므로, 부재마다 단부 수를 적으면 2배가 된다(제수밸브실 D600 원장 3 / 종전 6). 플랜지 접합 수량은 연결 패스가
+/// 모델 연결(플랜지 ↔ 플랜지 1건 = 1개소)로 세어 귀속 부재 슬롯에 적는다(docs/266 § 1). 소켓은 종전대로 부재당 단부 수다. `DH_접합구성`(`1S2F`)은 그대로 기록한다.</para>
+/// <para><b>docs/266 개정(2026-10-02)</b> — 개수 규칙은 Core <see cref="PipeCountRules"/> 한곳에 두고 여기서는 결과를 쓰기만 한다.
+/// 플랜지 개소는 DHBIMWATER 연결 패스(<see cref="PipeJointConnectionRecorder"/>)가 연결을 세어 귀속 부재 슬롯에 적는다
+/// (수량산출 애드인은 읽기만 한다). 부설은 직관 0 · 나머지 1, 절단은 평단 단관 1 + 유입부 소켓(연결 패스) — 옛 「관·이형관 절단 1」 기본값은 없앴다.
+/// 밸브부관은 개수에서 이형관으로 본다(R-7) — 밸브 판정은 카테고리만 본다(<see cref="IsValveForCount"/>).</para>
 /// </summary>
 internal static class PipeJointCountWriter
 {
@@ -42,6 +49,11 @@ internal static class PipeJointCountWriter
     public static bool IsAccessory(FamilyInstance instance)
         => instance.Category?.Id.Value == (long)BuiltInCategory.OST_PipeAccessory
            || PipeValveBend.IsValveBendFamily(instance.Symbol?.Family?.Name);
+
+    /// <summary>개수용 밸브 판정 — 배관 밸브류 카테고리만(docs/266 R-7·R-8). 밸브부관은 명칭·무게에서만 밸브류처럼 다루고(<see cref="IsAccessory"/>)
+    /// 개수는 강관 이형관으로 센다.</summary>
+    public static bool IsValveForCount(FamilyInstance instance)
+        => instance.Category?.Id.Value == (long)BuiltInCategory.OST_PipeAccessory;
 
     /// <summary>이 부재의 접합 방식을 정한다(docs/170 § A).
     /// <para><b>부재명은 인스턴스에서 직접 읽는다</b> — 호출부가 방금 만든 이름이 아니라 <b>이미 찍혀 있던</b>
@@ -76,71 +88,38 @@ internal static class PipeJointCountWriter
             .Any(slot => string.Equals(instance.LookupParameter(ValvePipingParameters.JointSlotKind(slot))?.AsString(),
                 "이탈방지압륜접합", StringComparison.Ordinal));
 
-    /// <summary>한 부재의 개소 수를 기록한다.
-    /// <para>관부재는 부설 1 + 접합 1이고, 접합을 어느 매개변수에 넣을지는 <b>관종 + 접합 방식 + 압륜</b>이
-    /// 정한다(<see cref="PipeJointMethodTable"/> → 계획관로 표에 위임).</para>
-    /// <para>밸브류는 <b>전부 0</b>이다 — 접합·부설이 `제수밸브 접합 및 부설`(CGI…) 품에 이미 들어 있어
-    /// 여기서 또 찍으면 이중 계상이 된다. 빈칸이 아니라 0을 남기는 것은 "세어보니 없다"와 "미태깅"을
-    /// 구분하기 위해서다(docs/166 확정 3).</para></summary>
+    /// <summary>한 부재의 개소 수를 기록한다. 값은 <see cref="PipeCountRules.ForValveRoomMember"/>가 정한다(docs/266 § 2-1).
+    /// <para>밸브류는 `DH_접합및부설수 = 1`만 쓴다. 그 밖은 부설·절단·소켓 슬롯을 쓴다 — 슬롯을 다시 쓰면 플랜지 슬롯도 지워지므로
+    /// 호출부는 이 뒤에 연결 패스(<see cref="PipeJointConnectionRecorder.Apply"/>)를 돌려야 플랜지가 다시 붙는다.</para>
+    /// <para>절단은 부재 자체 몫(평단 단관)만 쓴다. 밸브실 문서의 유입부 몫은 연결 패스가 더해 다시 쓴다.</para></summary>
     /// <param name="composition"><see cref="ResolveComposition"/>가 정한 접합 구성(`2S1F`). 호출부가 부재명 접두를 만들 때
     /// 이미 구했으므로 여기서 다시 구하지 않는다 — 두 번 구하면 부재명과 접합구성이 어긋날 수 있다.</param>
     public static void Write(FamilyInstance instance, PipeMaterial? material, BendConnection connection,
         bool useRestraintGland, string? composition, ICollection<string> failed, JointCountDiagnostics diagnostics,
         IReadOnlyDictionary<string, bool>? flags = null)
     {
-        if (IsAccessory(instance))
-        {
-            SetInteger(instance, ValvePipingParameters.ValveJointLayingCount, 1, failed);
-            return;
-        }
-
         var part = instance.LookupParameter(ValvePipingParameters.Part)?.AsString()
             ?? instance.LookupParameter(ValvePipingParameters.ItemName)?.AsString()
             ?? string.Empty;
-        SetInteger(instance, ValvePipingParameters.LayingCount,
-            IsStraightOrShort(part) ? 0 : 1, failed);
+        var counts = PipeCountRules.ForValveRoomMember(new PipeMemberCountInput(
+            part, composition, material is { } m ? PipeAlignmentParameters.Code(m) : null,
+            IsValveForCount(instance), connection == BendConnection.Flanged, useRestraintGland));
+
+        if (counts.ValveJointLayingCount is { } valveLaying)
+        {
+            SetInteger(instance, ValvePipingParameters.ValveJointLayingCount, valveLaying, failed);
+            return;
+        }
+        if (counts.LayingCount is { } laying) SetInteger(instance, ValvePipingParameters.LayingCount, laying, failed);
+        if (counts.CutCount is { } cut) SetInteger(instance, ValvePipingParameters.CutCount, cut, failed);
+        if (counts.MaterialAssumedSteel) diagnostics.CountMaterialAssumedSteel();
 
         var writer = new PipeParameterWriter();
-        writer.JointSlots(instance, BuildSlots(instance, material, connection, useRestraintGland, composition, diagnostics));
+        writer.JointSlots(instance, counts.SocketSlots.Select(x => (x.Kind, x.Spec, x.Count)).ToList());
         foreach (var name in writer.Missing) failed.Add(name);
 
         WriteComposition(instance, composition, failed);
     }
-
-    private static IReadOnlyList<(string Kind, string Spec, int Count)> BuildSlots(FamilyInstance instance,
-        PipeMaterial? material, BendConnection connection, bool useRestraintGland, string? composition,
-        JointCountDiagnostics diagnostics)
-    {
-        var ends = PipeJointComposition.Decode(composition);
-        if (ends.IsEmpty)
-            ends = connection == BendConnection.Socket ? new PipeJointEnds(1, 0) : new PipeJointEnds(0, 1);
-
-        var slots = new List<(string Kind, string Spec, int Count)>();
-        if (ends.Socket > 0)
-        {
-            var effective = material;
-            if (effective is null)
-            {
-                effective = PipeMaterial.Steel;
-                diagnostics.CountMaterialAssumedSteel();
-            }
-            if (PipeAlignmentParameters.JointKindFor(effective, BendConnection.Socket, useRestraintGland) is { } kind)
-                slots.Add((kind, string.Empty, ends.Socket));
-        }
-        if (ends.Flange > 0)
-        {
-            var part = PipeMaterialSpecText.StripJointMark(instance.LookupParameter(ValvePipingParameters.Part)?.AsString()
-                ?? instance.LookupParameter(ValvePipingParameters.ItemName)?.AsString());
-            var spec = part is PipeMaterialSpecText.TeeName or PipeMaterialSpecText.CrossName
-                ? instance.LookupParameter(ValvePipingParameters.BranchSpec)?.AsString() ?? string.Empty
-                : string.Empty;
-            slots.Add(("플랜지접합", spec, ends.Flange));
-        }
-        return slots;
-    }
-
-    private static bool IsStraightOrShort(string part)
-        => PipeMaterialSpecText.StripJointMark(part) is PipeMaterialSpecText.StraightName or PipeMaterialSpecText.ShortName;
 
     /// <summary>부재의 접합 구성(`2S1F`)을 정한다. 부재명 접두가 이 값에서 나오므로(2026-09-15) 채번·이름 기록보다 먼저 부른다.
     /// <para>우선순위: <b>이미 찍힌 값</b>(사용자가 손으로 고친 구성이 우선, <c>DH_비고</c>와 같은 태도) → 패밀리 플래그

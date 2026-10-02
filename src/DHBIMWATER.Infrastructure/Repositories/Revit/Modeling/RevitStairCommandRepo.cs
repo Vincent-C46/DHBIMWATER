@@ -281,7 +281,8 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
                 if (stairsDefinition.Concrete is not null)
                 {
-                    var materialId = FindOrCreateConcreteMaterial(doc, stairsDefinition.Concrete);
+                    // 벽·바닥과 같은 공용 재료 로직(원본 선택·패턴 없음·구조자산 강도)을 쓴다(docs/250 § C).
+                    var materialId = ConcreteMaterialFactory.FindOrCreate(doc, stairsDefinition.Concrete);
                     if (materialId != ElementId.InvalidElementId)
                     {
                         configuredType.get_Parameter(BuiltInParameter.STAIRS_ATTR_TREAD_MATERIAL)?.Set(materialId);
@@ -295,27 +296,6 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             }
 
             return (configuredType, created);
-        }
-
-        private static ElementId FindOrCreateConcreteMaterial(Document doc, ConcreteSpec concrete)
-        {
-            var existing = new FilteredElementCollector(doc)
-                .OfClass(typeof(Material))
-                .Cast<Material>()
-                .FirstOrDefault(m => m.Name.Equals(concrete.MaterialName, StringComparison.OrdinalIgnoreCase));
-            if (existing != null) return existing.Id;
-
-            var source = new FilteredElementCollector(doc)
-                .OfClass(typeof(Material))
-                .Cast<Material>()
-                .FirstOrDefault(m => m.Name.Contains("콘크리트") || m.Name.Contains("concrete", StringComparison.OrdinalIgnoreCase));
-            if (source == null) return ElementId.InvalidElementId;
-
-            var created = source.Duplicate(concrete.MaterialName) as Material;
-            if (created == null) return ElementId.InvalidElementId;
-            var strength = UnitUtils.ConvertToInternalUnits(concrete.CompressiveStrength, UnitTypeId.Megapascals);
-            created.get_Parameter(BuiltInParameter.PHY_MATERIAL_PARAM_CONCRETE_COMPRESSION)?.Set(strength);
-            return created.Id;
         }
 
         private static void WarmUpNewStairsType(

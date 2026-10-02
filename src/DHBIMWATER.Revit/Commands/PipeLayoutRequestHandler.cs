@@ -2,6 +2,7 @@
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.UseCases.AutoGenerator;
 using DHBIMWATER.Core.Piping;
+using DHBIMWATER.Infrastructure.Logging;
 using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Revit.Commands;
@@ -24,7 +25,7 @@ internal sealed class PipeLayoutRequestHandler : IExternalEventHandler
     public PipeLayoutFamilySettings? PendingNetworkFamilySettings { get; set; }
     /// <summary>외곽 피킹·창 닫기에서 함께 남길 레이아웃 저장본(docs/204 § E-2).</summary>
     public PipeLayoutFamilySettings? PendingLayoutSettings { get; set; }
-    /// <summary>Revit에서 선택할 부재(docs/179 § F-2). DHBoost QuantityRequestHandler.ElementIdsToSelect와 같은 역할이다.</summary>
+    /// <summary>Revit에서 선택할 부재(docs/179 § F-2). 수량산출 애드인 QuantityRequestHandler.ElementIdsToSelect와 같은 역할이다.</summary>
     public IReadOnlyList<long> ElementIdsToSelect { get; set; } = [];
     /// <summary>창을 연 문서(docs/237 § B). 다른 문서가 활성이면 어떤 요청도 실행하지 않는다 — 원본 삭제가 엉뚱한 문서에서 돌지 않게.</summary>
     public Autodesk.Revit.DB.Document? OwnerDocument { get; set; }
@@ -113,11 +114,12 @@ internal sealed class PipeLayoutRequestHandler : IExternalEventHandler
                     // 모델 트랜잭션은 이 줄에서 이미 커밋됐다. 패밀리 설정 저장은 자기 트랜잭션을 여는 별개 작업이므로
                     // (SavePipeLayoutFamilySettingsUseCase.cs:18) 반드시 커밋 "뒤"에 부른다 — 안에서 부르면 중첩 트랜잭션이다.
                     var settingsSaveError = SaveFamilySettingsWithModel();
-                    // 경고는 배치 실패가 아니다(트랜잭션은 이미 커밋됐다). 성공으로 알리되 본문을 함께 보여준다.
-                    // 건너뛴 부속도 마찬가지다 — 나머지는 정상 생성됐으므로 성공으로 알리고 alert로만 보여준다(docs/145 § 4-7).
-                    NotifyModelCreationCompleted(true, result.Warnings.Count == 0
-                        ? result.Summary
-                        : $"{result.Summary} 확인 필요 {result.Warnings.Count}건.", result.Skipped, result.PlacedElementIds);
+                    // 사용자에게는 성공/실패 부재만 알리고, 요약·경고·실패 사유는 로그로만 남긴다(2026-10-01 사용자 결정).
+                    // 경고는 배치 실패가 아니다(트랜잭션은 이미 커밋됐다). 건너뛴 부속도 나머지는 정상 생성됐으므로 성공으로 알린다(docs/145 § 4-7).
+                    LogCreationResult(result);
+                    NotifyModelCreationCompleted(true, result.Skipped.Count == 0
+                        ? "배치 성공"
+                        : $"배치 완료 · 실패 {result.Skipped.Count}개", result.Skipped, result.PlacedElementIds);
                     modelCompletionNotified = true;
                     // 설정 저장 실패는 모델 생성 실패가 아니다(docs/195 § D). 상태줄로만 알린다 —
                     // 성공했을 때는 아무 것도 덮어쓰지 않아 모델 요약이 상태줄에 그대로 남는다.
@@ -125,8 +127,6 @@ internal sealed class PipeLayoutRequestHandler : IExternalEventHandler
                         FamilySettingsSaved?.Invoke(false, $"모델은 생성했습니다. 다만 패밀리 설정 저장에 실패했습니다: {settingsSaveError}");
                     if (result.Skipped.Count > 0)
                         ShowSkippedDialog(result.Skipped);
-                    if (result.Warnings.Count > 0)
-                        TaskDialog.Show("배관 생성 확인 필요", $"{result.Summary}\n\n- " + string.Join("\n- ", result.Warnings.Take(20)));
                     break;
 
                 case PipeLayoutRequestId.PickOutline:
@@ -149,7 +149,7 @@ internal sealed class PipeLayoutRequestHandler : IExternalEventHandler
                     break;
 
                 case PipeLayoutRequestId.SelectInRevit:
-                    // DHBoost QuantityRequestHandler.cs:97-101 이식(docs/179 § F-2).
+                    // 수량산출 애드인 QuantityRequestHandler.cs:97-101 이식(docs/179 § F-2).
                     // 같은 요청이 큐에 두 번 쌓이면(Pending, docs/235 § A) 두 번째는 목록이 이미 비어 있다 — 알리지 않고 건너뛴다.
                     if (ElementIdsToSelect.Count == 0) break;
                     var uiDoc = uiapp.ActiveUIDocument;
@@ -168,7 +168,7 @@ internal sealed class PipeLayoutRequestHandler : IExternalEventHandler
                     ElementsSelected?.Invoke(requestedCount, elementIds.Count);
                     if (elementIds.Count == 0) break;
                     uiDoc.Selection.SetElementIds(elementIds);
-                    // DHBoost에는 없는 한 줄 — 화면 밖 부재도 찾아가야 하므로 뷰를 옮긴다(docs/179 § 0).
+                    // 수량산출 애드인에는 없는 한 줄 — 화면 밖 부재도 찾아가야 하므로 뷰를 옮긴다(docs/179 § 0).
                     uiDoc.ShowElements(elementIds);
                     break;
 
@@ -231,19 +231,36 @@ internal sealed class PipeLayoutRequestHandler : IExternalEventHandler
 
     /// <summary>모델링하지 못해 건너뛴 곡관·T형·밸브를 한 번에 보여준다(docs/145 § 4-7).
     /// 생성 자체는 성공이므로 오류 대화상자가 아니라 알림이다.</summary>
+    /// <summary>실패 부재만 알린다 — 어떤 부재인지까지만 보이고, 좌표·사유는 로그(<see cref="LogCreationResult"/>)에 있다.
+    /// 캔버스의 실패 위치 표시는 그대로다.</summary>
     private static void ShowSkippedDialog(IReadOnlyList<PipeConnectionFailure> skipped)
     {
-        var lines = skipped.Take(20).Select(x => FormattableString.Invariant(
-            $"- {x.Role} '{x.FamilyTypeName}' 캔버스 ({x.CanvasPoint.X:N0}, {x.CanvasPoint.Y:N0})mm: {x.Detail}"))
-            .ToList();
-        if (skipped.Count > lines.Count) lines.Add($"- 그 외 {skipped.Count - lines.Count}건");
-        var dialog = new TaskDialog("배관 생성 - 건너뛴 부속")
+        var lines = skipped.Take(20).Select(x => string.IsNullOrWhiteSpace(x.FamilyTypeName)
+            ? $"- {x.Role}"
+            : $"- {x.Role} '{x.FamilyTypeName}'").ToList();
+        if (skipped.Count > lines.Count) lines.Add($"- 그 외 {skipped.Count - lines.Count}개");
+        var dialog = new TaskDialog("배관 배치 - 실패 부재")
         {
-            MainInstruction = $"모델링하지 못해 건너뛴 부속 {skipped.Count}개",
-            MainContent = string.Join(Environment.NewLine, lines) + Environment.NewLine + Environment.NewLine +
-                          "나머지 부재는 정상 생성됐습니다. 건너뛴 자리의 관 커넥터는 연결하지 않고 열어 두었습니다."
+            MainInstruction = $"배치하지 못한 부재 {skipped.Count}개",
+            MainContent = string.Join(Environment.NewLine, lines),
         };
         dialog.Show();
+    }
+
+    /// <summary>생성 결과 상세를 로그로만 남긴다(2026-10-01 사용자 결정) — 배치 요약, 경고 전부(이경 절점·매개변수 바인딩·표고 보정 등),
+    /// 실패 부재의 좌표·사유. 경로: <see cref="LogManager.LogFilePath"/>. 검색 태그 <c>PIPE_LAYOUT_RESULT</c>.</summary>
+    private static void LogCreationResult(PipeCreationResult result)
+    {
+        var log = new System.Text.StringBuilder();
+        log.AppendLine($"PIPE_LAYOUT_RESULT {result.Summary}");
+        foreach (var warning in result.Warnings) log.AppendLine($"  경고: {warning}");
+        foreach (var x in result.Skipped)
+            log.AppendLine(FormattableString.Invariant(
+                $"  실패: {x.Role} '{x.FamilyTypeName}' ElementId {x.ElementId} 캔버스 ({x.CanvasPoint.X:N0}, {x.CanvasPoint.Y:N0})mm EL {x.ElevationMm:N0}mm: {x.Detail}"));
+        if (result.Warnings.Count > 0 || result.Skipped.Count > 0)
+            LogManager.Logger.Warn(log.ToString().TrimEnd());
+        else
+            LogManager.Logger.Info(log.ToString().TrimEnd());
     }
 
     private void NotifyModelCreationCompleted(bool succeeded, string message, IReadOnlyList<PipeConnectionFailure> failures,

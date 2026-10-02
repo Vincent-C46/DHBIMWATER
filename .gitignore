@@ -78,3 +78,8 @@ graft/
 *.pdf
 *.xlsx
 *.dyn
+# Crash dumps and local tooling state
+*.stackdump
+.unlazy/
+.mcp.json
+.ignore

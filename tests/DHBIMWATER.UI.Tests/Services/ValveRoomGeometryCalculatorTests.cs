@@ -525,6 +525,74 @@ public class ValveRoomGeometryCalculatorTests
         Assert.Equal("VR-111", ex.Code);
     }
 
+    [Fact]
+    public void CalculateSections_ReturnsAaAlongXAndBbAlongY()
+    {
+        var dto = CreateSluiceValveRoomDto(upperSlabThickness: 250);
+
+        var sections = ValveRoomGeometryCalculator.CalculateSections(dto);
+
+        Assert.Equal(2, sections.Count);
+        var a = sections[0];
+        var b = sections[1];
+        Assert.Equal("A-A", a.Name);
+        Assert.Equal("B-B", b.Name);
+        Assert.Equal(new Vector3D(1, 0, 0), a.Right);
+        Assert.Equal(new Vector3D(0, -1, 0), b.Right);
+        // 기초 중앙 = (내부 길이/2, 내부 폭/2) — PlanSpec(폭 2000, 길이 3000)
+        Assert.Equal(new Point3D(1500, 1000, 0), a.CutOrigin);
+        Assert.Equal(new Point3D(1500, 1000, 0), b.CutOrigin);
+    }
+
+    [Fact]
+    public void CalculateSections_FarClipReachesPlainConcreteEdgePlusMargin()
+    {
+        var dto = CreateSluiceValveRoomDto(upperSlabThickness: 250);
+
+        var sections = ValveRoomGeometryCalculator.CalculateSections(dto);
+
+        // halfX = 1500 + 외벽 300 + 기초확장 300 + 버림 100 = 2200, halfY = 1000 + 700 = 1700, 여유치 500
+        Assert.Equal(2700, sections[0].HalfWidth);
+        Assert.Equal(2200, sections[0].FarClipDepth);
+        Assert.Equal(2200, sections[1].HalfWidth);
+        Assert.Equal(2700, sections[1].FarClipDepth);
+    }
+
+    [Fact]
+    public void CalculateSections_VerticalRangeCoversPlainConcreteToTopSlab()
+    {
+        var dto = CreateSluiceValveRoomDto(upperSlabThickness: 250);
+
+        var sections = ValveRoomGeometryCalculator.CalculateSections(dto);
+
+        // ZMin = 0 - 기초 500 - 버림 100 - 500, ZMax = 내부높이 2500 + 상부슬래브 250 + 500
+        Assert.All(sections, s =>
+        {
+            Assert.Equal(-1100, s.ZMin);
+            Assert.Equal(3250, s.ZMax);
+        });
+    }
+
+    [Fact]
+    public void CalculateSections_AirValveRoomIgnoresPlainConcrete()
+    {
+        var dto = new ValveRoomGeometryRequestDto(
+            new ValveRoomDesignConditionDto("공기밸브실", 123.45),
+            new ValveRoomPlanSpecDto(1500, 1800),
+            new ValveRoomProfileSpecDto(2000, 100, 650, 300, 300, 400),
+            null,
+            null);
+
+        var sections = ValveRoomGeometryCalculator.CalculateSections(dto);
+
+        // halfX = 900 + 300 + 300 = 1500, halfY = 750 + 600 = 1350 (버림 확장 없음)
+        Assert.Equal(new Point3D(900, 750, 0), sections[0].CutOrigin);
+        Assert.Equal(2000, sections[0].HalfWidth);
+        Assert.Equal(1850, sections[0].FarClipDepth);
+        Assert.Equal(123450 - 650 - 500, sections[0].ZMin);
+        Assert.Equal(123450 + 2400 + 500, sections[0].ZMax);
+    }
+
     /// <summary>중간벽 + 중간슬래브를 모두 가진 이토밸브실. 1층 안목 2000, 중간슬래브 두께 300.</summary>
     private static ValveRoomGeometryRequestDto CreateMudValveRoomWithSlabDto() => new(
         new ValveRoomDesignConditionDto("이토밸브실", 0),

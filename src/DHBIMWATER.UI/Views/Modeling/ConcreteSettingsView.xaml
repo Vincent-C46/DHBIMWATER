@@ -1,0 +1,41 @@
+<Window x:Class="DHBIMWATER.UI.Views.Modeling.ConcreteSettingsView"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:controls="clr-namespace:DHBIMWATER.UI.Controls"
+        xmlns:vm="clr-namespace:DHBIMWATER.UI.ViewModels.Modeling"
+        mc:Ignorable="d" d:DataContext="{d:DesignInstance vm:ConcreteSettingsViewModel}"
+        Title="DHBIMWATER - 콘크리트 강도" Width="640" SizeToContent="Height" WindowStartupLocation="CenterOwner"
+        Background="#F4F7F9" WindowStyle="None" FontFamily="Segoe UI, Malgun Gothic" ShowInTaskbar="False" ResizeMode="NoResize">
+    <!-- docs/249 § E. 펌프장·토출조·배수지·밸브실 공용 부재별 콘크리트 설정. [확인]하면 문서(DataStorage)에 저장되고 다음 생성부터 쓰인다. -->
+    <Window.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="/DHBIMWATER.UI;component/Styles/Generic.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary></Window.Resources>
+    <WindowChrome.WindowChrome><WindowChrome CaptionHeight="0" CornerRadius="15" GlassFrameThickness="1" UseAeroCaptionButtons="False"/></WindowChrome.WindowChrome>
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <controls:TitleBar/>
+        <Border Grid.Row="1" Background="White" CornerRadius="12" Margin="20,12" Padding="16">
+            <StackPanel>
+                <TextBlock Text="부재별 콘크리트 재료" Style="{StaticResource SubHeadingTextBlockStyle}" Foreground="#4A6FA5"/>
+                <TextBlock Text="이 문서의 펌프장·토출조·배수지·밸브실 생성에 공통으로 쓰입니다. 이미 만든 부재는 바뀌지 않습니다. 보·기둥은 사용한 패밀리 유형의 구조 재료가 바뀝니다."
+                           Style="{StaticResource CaptionTextBlockStyle}" Margin="0,0,0,10"/>
+                <DataGrid Style="{StaticResource PrimaryDataGridStyle}" ItemsSource="{Binding Rows}" MinHeight="230" Margin="0,0,0,8">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="부재" Binding="{Binding MemberName, Mode=OneWay}" IsReadOnly="True" Width="110"/>
+                        <DataGridTextColumn Header="최대골재 (mm)" Binding="{Binding MaxAggregateSize, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="110"/>
+                        <DataGridTextColumn Header="강도 (MPa)" Binding="{Binding CompressiveStrength, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
+                        <DataGridTextColumn Header="슬럼프 (mm)" Binding="{Binding Slump, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="105"/>
+                        <DataGridTextColumn Header="재료명" Binding="{Binding MaterialName, Mode=OneWay}" IsReadOnly="True" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <TextBlock Text="같은 두께의 바닥에 강도가 다른 부재가 섞이면 유형 이름 뒤에 강도가 붙습니다(예: 일반 - 200mm_18MPa)."
+                           Style="{StaticResource CaptionTextBlockStyle}"/>
+            </StackPanel>
+        </Border>
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="20,0,20,16">
+            <Button Content="기본값" Command="{Binding ResetCommand}" Style="{StaticResource CancelButtonStyle}" Margin="0,0,8,0" ToolTip="모두 25-24-120, 버림콘크리트만 25-18-120으로 되돌립니다(저장은 [확인] 시)."/>
+            <Button Content="확인" Command="{Binding ConfirmCommand}" Style="{StaticResource PrimaryButtonStyle}" Margin="0,0,8,0" IsDefault="True" ToolTip="문서에 저장하고 닫습니다. 다음 생성부터 적용됩니다."/>
+            <Button Content="취소" Command="{Binding CancelCommand}" Style="{StaticResource CancelButtonStyle}" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>

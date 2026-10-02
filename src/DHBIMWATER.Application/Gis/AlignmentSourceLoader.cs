@@ -2,6 +2,7 @@ using DHBIMWATER.Application.DTOs.Gis;
 using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Shared.Errors;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.Application.Gis;
 

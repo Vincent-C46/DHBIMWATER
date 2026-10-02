@@ -587,7 +587,7 @@ public static class PipeNetworkReconstructor
         return Math.Round(average, 1);
     }
 
-    /// <summary>절점 부속 1개를 캔버스용으로 싣는다. 밸브부관 B는 밸브 쪽(<c>Connectors[0]</c>, Id 순) 방향까지,
+    /// <summary>절점 부속 1개를 캔버스용으로 싣는다. 밸브부관 B는 밸브 쪽(<c>Connectors[0]</c>, 긴 레그) 방향까지,
     /// A는 종류만 싣는다(docs/225 § E, docs/227 § E).</summary>
     private static ImportedNodeFitting ToImportedNodeFitting(PickedPipePart part, Point2D position) => part.Role switch
     {
@@ -605,7 +605,8 @@ public static class PipeNetworkReconstructor
         IReadOnlyList<int> Members, IReadOnlyList<PickedPipePart> Replacements, ImportedBypass Bypass, Point2D CenterA, Point2D CenterA2);
 
     /// <summary>
-    /// 밸브부관 A 분기 → B → (관·밸브 1개) → B → A 분기로 이어진 묶음을 찾아 바이패스 세트로 떼어 낸다.
+    /// 밸브부관 A 분기 → B → (관·밸브 1~2개) → B → A 분기로 이어진 묶음을 찾아 바이패스 세트로 떼어 낸다.
+    /// 밸브가 2개면 그 사이 관 길이를 단관 길이로 읽는다(docs/255 § C).
     /// <para>A–A 사이 본관(관·밸브)은 세트가 아니다(docs/230 § 0) — 건드리지 않아 일반 관·인라인 밸브로 복원된다.
     /// 각 A는 "바깥 주관 ↔ 안쪽 주관" 합성 관으로 바꿔 본관 체인이 끊기지 않게 하고, 두 A 안쪽 주관이 모두 비어 있으면
     /// (본관 밸브 없이 모델링됨) 그 사이에도 합성 관을 넣어 본관 선 하나로 잇는다.</para>
@@ -623,13 +624,22 @@ public static class PipeNetworkReconstructor
             if (!matches.TryGetValue((a, branchA), out var bHit) || parts[bHit.Part].Role != PipePartRole.ValveBend
                 || parts[bHit.Part].Connectors.Count != 2) continue;
 
-            // 바이패스 쪽 — B의 다른 커넥터에서 체인을 따라가 다른 B에 닿아야 한다. 그 체인의 밸브는 정확히 1개(바이패스 밸브).
+            // 바이패스 쪽 — B의 다른 커넥터에서 체인을 따라가 다른 B에 닿아야 한다. 그 체인의 밸브는 1개 또는 2개(바이패스 밸브, docs/255).
             var b = bHit.Part;
             var (bypassChain, bypassEnd) = WalkChain(parts, matches, (b, 1 - bHit.Conn));
             if (bypassEnd is not { } b2Hit || parts[b2Hit.Part].Role != PipePartRole.ValveBend || b2Hit.Part == b
                 || parts[b2Hit.Part].Connectors.Count != 2) continue;
             var bypassValves = bypassChain.Where(x => parts[x].Role == PipePartRole.Accessory).ToList();
-            if (bypassValves.Count != 1) continue;
+            if (bypassValves.Count is not (1 or 2)) continue;
+            // 밸브 2개 세트(docs/255 § C-2) — 두 밸브 사이는 관만 있어야 한다. 다른 부속이 끼면 세트가 아니다(낱개 경고로 간다).
+            var spoolLengthMm = 0.0;
+            if (bypassValves.Count == 2)
+            {
+                var between = bypassChain.Skip(bypassChain.IndexOf(bypassValves[0]) + 1)
+                    .Take(bypassChain.IndexOf(bypassValves[1]) - bypassChain.IndexOf(bypassValves[0]) - 1).ToList();
+                if (between.Any(x => parts[x].Role != PipePartRole.Segment)) continue;
+                spoolLengthMm = Math.Round(between.Sum(x => parts[x].Connectors[0].Point.DistanceTo(parts[x].Connectors[1].Point)), 1);
+            }
             var b2 = b2Hit.Part;
             if (!matches.TryGetValue((b2, 1 - b2Hit.Conn), out var a2Hit) || parts[a2Hit.Part].Role != PipePartRole.ValveTee
                 || a2Hit.Part == a || claimed.Contains(a2Hit.Part) || parts[a2Hit.Part].Connectors.Count != 3
@@ -673,9 +683,25 @@ public static class PipeNetworkReconstructor
             var normal = Normalize(new Point2D(parts[a].Connectors[branchA].Point.X - centerA.X, parts[a].Connectors[branchA].Point.Y - centerA.Y))
                          ?? parts[a].Connectors[branchA].Outward;
             var bypass = new ImportedBypass(parts[bypassValves[0]].FamilyTypeName, bypassDiameter, normal,
-                members.Select(x => parts[x].ElementId).Distinct().ToList());
+                members.Select(x => parts[x].ElementId).Distinct().ToList())
+            {
+                SecondValveFamilyTypeName = bypassValves.Count == 2 ? parts[bypassValves[1]].FamilyTypeName : null,
+                SpoolLengthMm = spoolLengthMm,
+                ValvePositions = bypassValves.Count == 2 ? bypassValves.Select(x => parts[x].Origin).ToList() : []
+            };
             result.Add(new CollapsedBypassSet(members, replacements, bypass, centerA, centerA2));
         }
+
+        // 분기에 밸브부관 B가 물린 A인데 세트로 묶이지 못한 것 — 대개 세트 부재 일부를 선택하지 않은 경우다(2026-09-29).
+        // 낱개 절점 부속으로는 복원되지만 재생성하면 세트가 아니게 되므로 알린다. 곡관·T 자리에 따로 쓴 A·B는 분기에 B가 없어 해당하지 않는다.
+        var loose = Enumerable.Range(0, parts.Count)
+            .Where(i => !claimed.Contains(i) && parts[i].Role == PipePartRole.ValveTee && parts[i].Connectors.Count == 3
+                        && matches.TryGetValue((i, BranchIndex(parts[i].Connectors)), out var hit) && parts[hit.Part].Role == PipePartRole.ValveBend)
+            .Select(i => parts[i].ElementId)
+            .ToList();
+        if (loose.Count > 0)
+            warnings.Add($"밸브부관 A {loose.Count}개(ElementId {string.Join(", ", loose)})를 바이패스 세트로 묶지 못해 낱개 부속으로 가져왔습니다. " +
+                         "세트 부재(밸브부관 A 2 · B 2 · 바이패스 밸브 · 채움관)를 모두 선택했는지 확인하세요.");
         return result;
     }
 

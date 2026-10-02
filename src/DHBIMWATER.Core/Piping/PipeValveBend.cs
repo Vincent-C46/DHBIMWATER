@@ -30,6 +30,11 @@ public static class PipeValveBend
     public const int ValveTeeConnectorCount = 4;
     public const int ValveBendConnectorCount = 2;
 
+    /// <summary>밸브부관 A로 볼 수 있는 커넥터 수인지 — 수직분기 없는 3포트도 받는다(2026-09-29).
+    /// 배치 경계(<c>MeasureTee</c>)는 수평 커넥터 3개만 검사하므로 3포트 A도 모델이 만들어진다. 역가져오기·재기록이 4개만 받으면
+    /// 그렇게 만든 A가 T형으로 돌아와 바이패스 세트가 풀린다. 수평 3개 여부는 호출부가 따로 본다.</summary>
+    public static bool IsValveTeeConnectorCount(int count) => count is 3 or ValveTeeConnectorCount;
+
     /// <summary>B가 지원하는 꺾임각. 90° 곡관형만 다룬다(docs/225 § 0-1).</summary>
     public const double AngleDeg = 90;
 

@@ -17,6 +17,11 @@ namespace DHBIMWATER.Infrastructure.Repositories.Mock
             return 0;
         }
 
+        public int CreateSectionView(SectionCutDefinition cut)
+        {
+            return 0;
+        }
+
         //public int UpdateSectionView(SectionViewDefinition sectionViewDef)
         //{
         //    return 0;

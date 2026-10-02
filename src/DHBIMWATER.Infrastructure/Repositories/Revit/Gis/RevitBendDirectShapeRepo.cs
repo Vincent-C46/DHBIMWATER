@@ -7,6 +7,8 @@ using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Infrastructure.Helpers;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
 using DHBIMWATER.Shared.Errors;
+using DHBIMWATER.Core.Piping;
+using PipeCountRules = DHBIMWATER.Core.Piping.PipeCountRules;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Gis;
 
@@ -130,13 +132,15 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
         writer.JointSlots(shape, PipeKindCatalog.MaterialOf(plan.PipeKind), info.BendConnection,
             new[] { (Spec: string.Empty, Count: socketEnds) },
             info.UseRestraintGland);
-        writer.Integer(shape, PipeAlignmentParameters.LayingCount, 1);
+        writer.Integer(shape, PipeAlignmentParameters.LayingCount, PipeCountRules.PlannedBendLayingCount);
+        // 곡관은 자르지 않는다 — 0과 미기록을 구분하려고 명시한다(docs/266 § 2-4).
+        writer.Integer(shape, PipeAlignmentParameters.CutCount, PipeCountRules.PlannedBendCutCount);
         writer.JointComposition(shape, info.BendConnection, endCount: 2, socketEnds: socketEnds);   // A형 `2S` · B형 `1S`(docs/199 § 2)
-        writer.Number(shape, PipeAlignmentParameters.Weight, plan.WeightKg);   // 곡관표의 한 개 무게(docs/178 § A-2)
+        writer.MassKg(shape, PipeAlignmentParameters.Weight, plan.WeightKg);   // 곡관표의 한 개 무게(docs/178 § A-2)
         // DirectShape는 측점편집 대상이 아니다(docs/214, 2026-09-22 사용자 확정) — 갱신용 태그는 적지 않는다.
         // 수량산출이 읽는 셋(구간·측점시작·측점끝)만 남긴다.
         writer.Text(shape, PlacementStationParameters.Alignment, plan.RecordNumber);
-        writer.Number(shape, PlacementStationParameters.StaStart, plan.StaStartM);
-        writer.Number(shape, PlacementStationParameters.StaEnd, plan.StaEndM);
+        writer.StationM(shape, PlacementStationParameters.StaStart, plan.StaStartM);
+        writer.StationM(shape, PlacementStationParameters.StaEnd, plan.StaEndM);
     }
 }

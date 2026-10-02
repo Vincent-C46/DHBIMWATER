@@ -4,6 +4,7 @@ using DHBIMWATER.Application.DTOs.Gis;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Core.Gis;
+using DHBIMWATER.Core.Piping;
 using DHBIMWATER.Infrastructure.Helpers;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
 using DHBIMWATER.Shared.Errors;
@@ -50,14 +51,14 @@ internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
                     new[] { plan.UpstreamZOffsetM, plan.DownstreamZOffsetM, plan.UpstreamZOffsetM });
                 var start = points[0];
                 var end = points[1];
-                if (!TryBuildSolid(start, end, points[2] - points[0], plan, PipeSolidFactory.MaterialIdFor(doc, materialIds, plan.Placement.PipeKind), out var solid, out var isSolid))
+                if (!TryBuildSolids(start, end, points[2] - points[0], plan, PipeSolidFactory.MaterialIdFor(doc, materialIds, plan.Placement.PipeKind), out var solids, out var isSolid))
                 {
                     failed++;
                     continue;
                 }
                 if (isSolid) solidReducers++;
                 var shape = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
-                shape.SetShape(new GeometryObject[] { solid });
+                shape.SetShape(solids.Cast<GeometryObject>().ToList());
                 var large = Math.Max(plan.Placement.UpstreamDiameterMm, plan.Placement.DownstreamDiameterMm);
                 var small = Math.Min(plan.Placement.UpstreamDiameterMm, plan.Placement.DownstreamDiameterMm);
                 shape.Name = $"이경관_{plan.Placement.PipeKind}_{large:0}x{small:0}";
@@ -87,10 +88,12 @@ internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
 
     /// <param name="modelRunDirection">모델좌표 진행방향. 단부면은 이 방향에 직각이다 — 편심 이경관은
     /// 상·하류 Z 오프셋이 달라 축이 기울지만 단부면은 앞뒤 직관과 같은 관축 직각면이어야 한다.</param>
-    private static bool TryBuildSolid(XYZ start, XYZ end, XYZ modelRunDirection, ReducerDirectShapePlacementPlan plan, ElementId materialId,
-        out Solid solid, out bool isSolid)
+    /// <remarks>대경 원통 + 원뿔 + 소경 원통 최대 세 솔리드다 — 주철 B형(소경 200)·C형(대경 200)(docs/260 § G-4), 강관 C·E(docs/261).
+    /// 원통은 진행방향과 평행하게 그쪽 끝 Z를 유지하고, 합집합 연산 없이 솔리드를 그대로 싣는다.</remarks>
+    private static bool TryBuildSolids(XYZ start, XYZ end, XYZ modelRunDirection, ReducerDirectShapePlacementPlan plan, ElementId materialId,
+        out IReadOnlyList<Solid> solids, out bool isSolid)
     {
-        solid = null!;
+        solids = Array.Empty<Solid>();
         isSolid = false;
         var axis = modelRunDirection;
         if (axis.GetLength() <= 1e-9) return false;
@@ -100,22 +103,46 @@ internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
         var yAxis = axis.CrossProduct(xAxis).Normalize();
         var profiles = plan.EndProfiles();
         var options = new SolidOptions(materialId, ElementId.InvalidElementId);
-        var outer = GeometryCreationUtilities.CreateBlendGeometry(
-            PipeSolidFactory.CircleLoop(start, UC.MmToFt(profiles.Upstream.OuterDiameterMm / 2d), xAxis, yAxis),
-            PipeSolidFactory.CircleLoop(end, UC.MmToFt(profiles.Downstream.OuterDiameterMm / 2d), xAxis, yAxis), null, options);
-        var upstreamInner = profiles.Upstream.OuterDiameterMm / 2d - profiles.Upstream.WallThicknessMm;
-        var downstreamInner = profiles.Downstream.OuterDiameterMm / 2d - profiles.Downstream.WallThicknessMm;
-        if (profiles.Upstream.WallThicknessMm <= 0d || profiles.Downstream.WallThicknessMm <= 0d || upstreamInner <= 0.01d || downstreamInner <= 0.01d)
+        // out 매개변수는 로컬 함수가 캡처할 수 없어 지역 변수로 받는다.
+        var solidOnly = profiles.Upstream.WallThicknessMm <= 0d || profiles.Downstream.WallThicknessMm <= 0d
+            || profiles.Upstream.OuterDiameterMm / 2d - profiles.Upstream.WallThicknessMm <= 0.01d
+            || profiles.Downstream.OuterDiameterMm / 2d - profiles.Downstream.WallThicknessMm <= 0.01d;
+        isSolid = solidOnly;
+
+        // 대경·소경 원통 길이(docs/260 § G-4, docs/261). 상류가 대경이면 상류 쪽이 대경 원통이다.
+        var placement = plan.Placement;
+        var upstreamIsLarge = placement.UpstreamDiameterMm >= placement.DownstreamDiameterMm;
+        var upstreamStraightFt = UC.MmToFt(upstreamIsLarge ? placement.LargeStraightMm : placement.SmallStraightMm);
+        var downstreamStraightFt = UC.MmToFt(upstreamIsLarge ? placement.SmallStraightMm : placement.LargeStraightMm);
+        var spanFt = (end - start).GetLength();
+        if (upstreamStraightFt + downstreamStraightFt >= spanFt - 1e-6)
         {
-            solid = outer;
-            isSolid = true;
+            // 원통이 몸통을 다 차지하면(대체 길이가 짧은 경우 등) 원뿔 하나로 둔다.
+            solids = new[] { Segment(start, end, profiles.Upstream, profiles.Downstream) };
             return true;
         }
-        var inner = GeometryCreationUtilities.CreateBlendGeometry(
-            PipeSolidFactory.CircleLoop(start, UC.MmToFt(upstreamInner), xAxis, yAxis),
-            PipeSolidFactory.CircleLoop(end, UC.MmToFt(downstreamInner), xAxis, yAxis), null, options);
-        solid = BooleanOperationsUtils.ExecuteBooleanOperation(outer, inner, BooleanOperationsType.Difference);
+
+        // 원통은 진행방향과 평행하게 그쪽 끝 Z를 유지하고, 원뿔이 두 원통 끝을 잇는다(편심이면 원뿔 축만 기운다).
+        var taperStart = start + axis * upstreamStraightFt;
+        var taperEnd = end - axis * downstreamStraightFt;
+        var list = new List<Solid>(3);
+        if (upstreamStraightFt > 1e-9) list.Add(Segment(start, taperStart, profiles.Upstream, profiles.Upstream));
+        list.Add(Segment(taperStart, taperEnd, profiles.Upstream, profiles.Downstream));
+        if (downstreamStraightFt > 1e-9) list.Add(Segment(taperEnd, end, profiles.Downstream, profiles.Downstream));
+        solids = list;
         return true;
+
+        Solid Segment(XYZ from, XYZ to, ReducerEndProfile fromProfile, ReducerEndProfile toProfile)
+        {
+            var outer = GeometryCreationUtilities.CreateBlendGeometry(
+                PipeSolidFactory.CircleLoop(from, UC.MmToFt(fromProfile.OuterDiameterMm / 2d), xAxis, yAxis),
+                PipeSolidFactory.CircleLoop(to, UC.MmToFt(toProfile.OuterDiameterMm / 2d), xAxis, yAxis), null, options);
+            if (solidOnly) return outer;
+            var inner = GeometryCreationUtilities.CreateBlendGeometry(
+                PipeSolidFactory.CircleLoop(from, UC.MmToFt(fromProfile.OuterDiameterMm / 2d - fromProfile.WallThicknessMm), xAxis, yAxis),
+                PipeSolidFactory.CircleLoop(to, UC.MmToFt(toProfile.OuterDiameterMm / 2d - toProfile.WallThicknessMm), xAxis, yAxis), null, options);
+            return BooleanOperationsUtils.ExecuteBooleanOperation(outer, inner, BooleanOperationsType.Difference);
+        }
     }
 
     private static void WriteParameters(PipeParameterWriter writer, DirectShape shape, ReducerDirectShapePlacementPlan plan, PipeInfoParameterContext info)
@@ -129,7 +156,7 @@ internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
         // 수량산출 규격2 — 이경관은 작은 쪽이 분기 구경이다. DirectShape는 매번 새로 만들어지므로 그대로 쓴다.
         writer.Text(shape, PipeAlignmentParameters.BranchSpec, PipeAlignmentParameters.BranchSpecText(small));
         // 현장 절단 개소. 이경관도 관 부재라 기본 1을 적어 두고 사용자가 고친다.
-        writer.Integer(shape, PipeAlignmentParameters.CutCount, PipeAlignmentParameters.DefaultCutCount);
+        writer.Integer(shape, PipeAlignmentParameters.CutCount, PipeCountRules.PlannedReducerCutCount);
         writer.Text(shape, PipeAlignmentParameters.Material, PipeKindCatalog.MaterialOf(placement.PipeKind) is { } material ? PipeAlignmentParameters.Code(material) : string.Empty);
         writer.Text(shape, PipeAlignmentParameters.Grade, placement.PipeKind);
         writer.YesNo(shape, PipeAlignmentParameters.NightWork, info.IsNightWork);   // docs/141 § C-4
@@ -140,13 +167,15 @@ internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
         writer.JointSlots(shape, PipeKindCatalog.MaterialOf(placement.PipeKind), info.BendConnection,
             new[] { (Spec: $"D{large:0}", Count: 1), (Spec: $"D{small:0}", Count: 1) },
             info.UseRestraintGland);
-        writer.Integer(shape, PipeAlignmentParameters.LayingCount, 1);
+        writer.Integer(shape, PipeAlignmentParameters.LayingCount, PipeCountRules.PlannedReducerLayingCount);
+        // 카탈로그(핸드북 편락관) 무게. 표에 없는 조합·강관은 비운다(docs/260 § G-5).
+        if (placement.WeightKg is { } weightKg) writer.MassKg(shape, PipeAlignmentParameters.Weight, weightKg);
         // 이경관은 `DH_접합구성`을 비워 둔다(docs/199 § 2, 2026-09-21 사용자 확정). 관로 이경관은 패밀리가 아니라
         // 생성한 DirectShape 솔리드라 밸브실처럼 단부 플래그(`좌측_소켓`…)를 읽어 소켓/플랜지를 정할 근거가 없다.
         // 모르는 값을 지어내지 않는다 — 필요하면 사용자가 속성창에서 `1S1F`처럼 직접 적는다.
         // DirectShape는 측점편집 대상이 아니다(docs/214) — 수량산출이 읽는 셋만 남긴다.
         writer.Text(shape, PlacementStationParameters.Alignment, plan.RecordNumber);
-        writer.Number(shape, PlacementStationParameters.StaStart, placement.StaStartM);
-        writer.Number(shape, PlacementStationParameters.StaEnd, placement.StaEndM);
+        writer.StationM(shape, PlacementStationParameters.StaStart, placement.StaStartM);
+        writer.StationM(shape, PlacementStationParameters.StaEnd, placement.StaEndM);
     }
 }

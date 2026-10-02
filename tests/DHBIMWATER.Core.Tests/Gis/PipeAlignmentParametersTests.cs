@@ -34,8 +34,8 @@ public sealed class PipeAlignmentParametersTests
         // DH_무게는 종전 GUID 그대로(곡관 한 개 무게·직관 총무게), DH_단위중량은 새 GUID(직관 kg/m) — docs/178 § A-2.
         var weight = Assert.Single(PipeAlignmentParameters.Definitions, x => x.Name == PipeAlignmentParameters.Weight);
         var unitWeight = Assert.Single(PipeAlignmentParameters.Definitions, x => x.Name == PipeAlignmentParameters.UnitWeight);
-        Assert.Equal(ParameterSpecType.Number, weight.SpecType);
-        Assert.Equal(ParameterSpecType.Number, unitWeight.SpecType);
+        Assert.Equal(ParameterSpecType.Mass, weight.SpecType);
+        Assert.Equal(ParameterSpecType.MassPerUnitLength, unitWeight.SpecType);
         Assert.Equal(new Guid("a6e1f5b0-9c1e-4d7a-8e2f-1b3c4d5e6f70"), weight.Guid);
         Assert.Equal(new Guid("89b45662-b0e6-4047-9fe7-1d40a8be0359"), unitWeight.Guid);
         Assert.Equal(PipeAlignmentParameters.Guids.Count, PipeAlignmentParameters.Guids.Values.Distinct().Count());
@@ -70,27 +70,11 @@ public sealed class PipeAlignmentParametersTests
     }
 
     [Fact]
-    public void 절단수는_Integer이고_기본값은_1이다()
+    public void 절단수는_Integer다()
     {
         var definition = Assert.Single(PipeAlignmentParameters.Definitions, x => x.Name == PipeAlignmentParameters.CutCount);
         Assert.Equal(ParameterSpecType.Integer, definition.SpecType);
-        Assert.Equal(1, PipeAlignmentParameters.DefaultCutCount);
     }
-
-    [Theory]
-    // 우리가 짓는 부재명만 절단 대상이다. 접합 표기가 앞에 붙어도 떼고 본다.
-    [InlineData("직관", true)]
-    [InlineData("단관", true)]
-    [InlineData("2S1F 곡관", true)]
-    [InlineData("3F T형", true)]
-    [InlineData("십자", true)]
-    // 밸브·이음관은 완제품이라 자르지 않는다. 패밀리 이름이 그대로 부재명이 된다.
-    [InlineData("제수밸브(BFV)", false)]
-    [InlineData("공기밸브", false)]
-    [InlineData("이음관", false)]
-    [InlineData("", false)]
-    public void 절단_대상은_관과_이형관뿐이다(string partName, bool expected)
-        => Assert.Equal(expected, PipeMaterialSpecText.IsCutTarget(partName));
 
     // ── 밸브실 배관이 계획관로와 같은 이름·GUID·타입으로 네 칸을 더 갖는지(docs/178 § C-1) ──
 

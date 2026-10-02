@@ -17,6 +17,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<CreatePumpingStationUseCase>();
         services.AddTransient<CreateValvePipingUseCase>();
         services.AddTransient<SavePipeLayoutFamilySettingsUseCase>();
+        services.AddTransient<SaveConcreteSettingsUseCase>();
         services.AddTransient<CreateValveRoomUseCase>();
         // 토출조는 ViewModel이 인터페이스로 받는다 — UI 단위 테스트에서 Revit 의존 없이 스텁으로 갈아끼우기 위해서다.
         services.AddTransient<ICreateDischargeBasinUseCase, CreateDischargeBasinUseCase>();

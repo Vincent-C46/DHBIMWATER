@@ -6,6 +6,7 @@ using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Core.Parameters;
 using DHBIMWATER.Shared.Diagnostics;
 using DHBIMWATER.Shared.Errors;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.Application.UseCases.Gis;
 
@@ -25,14 +26,16 @@ public sealed class ModelPipeAlignmentUseCase
     private readonly IReducerDirectShapeRepo _reducerRepo;
     private readonly IAlignmentStraightDirectShapeRepo _straightDirectShapeRepo;
     private readonly IElementTypeQueryRepo _typeQueryRepo;
+    /// <summary>플랜지 선형의 연결 기준 접합(docs/266 § 1). 테스트·옛 조립은 넘기지 않아도 된다.</summary>
+    private readonly IPipeJointConnectionRepo? _jointConnectionRepo;
 
     public ModelPipeAlignmentUseCase(ITransactionContext transaction, AlignmentSourceLoader loader, IPipeAlignmentCommandRepo alignmentRepo,
         IAlignmentStraightPlacementRepo straightRepo, IAlignmentPipePlacementRepo pipeRepo, IProjectLocationCommandRepo projectLocationRepo,
         IProjectLocationQueryRepo projectLocationQueryRepo,
         ISharedParameterRepository sharedParameterRepo, BendSettingsProvider bendSettings, IAdaptiveBendPlacementRepo adaptiveBendRepo,
         IBendDirectShapeRepo bendDirectShapeRepo, IReducerDirectShapeRepo reducerRepo, IAlignmentStraightDirectShapeRepo straightDirectShapeRepo,
-        IElementTypeQueryRepo typeQueryRepo)
-    { _transaction = transaction; _loader = loader; _alignmentRepo = alignmentRepo; _straightRepo = straightRepo; _pipeRepo = pipeRepo; _projectLocationRepo = projectLocationRepo; _projectLocationQueryRepo = projectLocationQueryRepo; _sharedParameterRepo = sharedParameterRepo; _bendSettings = bendSettings; _adaptiveBendRepo = adaptiveBendRepo; _bendDirectShapeRepo = bendDirectShapeRepo; _reducerRepo = reducerRepo; _straightDirectShapeRepo = straightDirectShapeRepo; _typeQueryRepo = typeQueryRepo; }
+        IElementTypeQueryRepo typeQueryRepo, IPipeJointConnectionRepo? jointConnectionRepo = null)
+    { _jointConnectionRepo = jointConnectionRepo; _transaction = transaction; _loader = loader; _alignmentRepo = alignmentRepo; _straightRepo = straightRepo; _pipeRepo = pipeRepo; _projectLocationRepo = projectLocationRepo; _projectLocationQueryRepo = projectLocationQueryRepo; _sharedParameterRepo = sharedParameterRepo; _bendSettings = bendSettings; _adaptiveBendRepo = adaptiveBendRepo; _bendDirectShapeRepo = bendDirectShapeRepo; _reducerRepo = reducerRepo; _straightDirectShapeRepo = straightDirectShapeRepo; _typeQueryRepo = typeQueryRepo; }
 
     /// <summary>최종 모델 전 Line DirectShape 선형 미리보기 커밋.</summary>
     public PipeAlignmentModelingResult Preview(PipeAlignmentModelingRequest request, IProgress<PipeAlignmentProgress>? progress = null, CancellationToken cancellationToken = default)
@@ -151,7 +154,9 @@ public sealed class ModelPipeAlignmentUseCase
         using (PlacementProfiler.Step("02b 이경관 계획"))
             reducerPlan = UsesBends(request.OutputMode)
                 ? ReducerTrimPlanner.Plan(alignments,
-                    new FixedReducerSpecSource(request.ReducerBodyLengthMm, AlignmentFor(request.ZDatum)), bendPlan,
+                    // docs/260 § G — 대·소경 카탈로그 길이·무게. 표에 없는 조합(·강관)만 입력 길이로 대체한다.
+                    new CatalogReducerSpecSource(settings.ActiveBendConnection, settings.ActiveJointType, request.ReducerForm,
+                        request.ReducerBodyLengthMm, AlignmentFor(request.ZDatum), settings.ActiveSteelFittingClass), bendPlan,
                     request.SnapToleranceMm / 1000d, stepVertices)
                 : null;
         var mergedTrims = MergeTrims(bendPlan, reducerPlan, alignments);
@@ -215,11 +220,16 @@ public sealed class ModelPipeAlignmentUseCase
                         && reducerPlan is not null
                         ? PlaceReducers(reducerPlan, alignments, origin, infoContext, progress, cancellationToken)
                         : new ReducerPlacementResult(0, Array.Empty<string>());
+                // 플랜지 선형은 부재끼리 맞닿은 연결 1건 = 1개소로 센다 — 부재별로는 정할 수 없어 배치를 다 끝낸 뒤 문서 전체로 센다(docs/266 § 1).
+                IReadOnlyList<string> jointWarnings = [];
+                if (request.OutputMode == PipeAlignmentOutputMode.Adaptive && _jointConnectionRepo is not null)
+                    using (PlacementProfiler.Step("08b 연결 기준 접합"))
+                        jointWarnings = _jointConnectionRepo.RecordConnectionJoints();
                 progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.Committing, 0, 0));
                 using (PlacementProfiler.Step("09 트랜잭션 Commit")) _transaction.Commit();
                 var suppressedWarningSummary = SummarizeSuppressedWarnings(_transaction.SuppressedWarnings);
                 return new PipeAlignmentModelingResult(request.OutputMode, count, skipped,
-                    loaded.Warnings.Concat(elevationWarnings).Concat(infeasibleWarnings).Concat(reducerPlan?.Warnings ?? Array.Empty<string>()).Concat(repoWarnings).Concat(bendResult.Warnings).Concat(reducerResult.Warnings)
+                    loaded.Warnings.Concat(elevationWarnings).Concat(infeasibleWarnings).Concat(reducerPlan?.Warnings ?? Array.Empty<string>()).Concat(repoWarnings).Concat(bendResult.Warnings).Concat(reducerResult.Warnings).Concat(jointWarnings)
                         .Concat(FindOuterDiameterMismatches(straightResult, bendResult)).Concat(suppressedWarningSummary).ToList(),
                     bendResult.Count);
             }

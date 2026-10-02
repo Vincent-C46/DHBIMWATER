@@ -3,7 +3,10 @@ using Autodesk.Revit.UI;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Core.Piping;
+using DHBIMWATER.Infrastructure.Helpers;
+using DHBIMWATER.Infrastructure.Repositories.Local;
 using DHBIMWATER.Shared.Errors;
+using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
 
@@ -20,9 +23,11 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
     private const int MaxWarningLines = 5;
 
     /// <summary>한 부재의 복원된 재료표 값.
-    /// 뒤의 넷은 계획관로와 같은 형태로 적는 정보 매개변수(docs/178 § C-3)의 원천이다 — 신규 배치의 <c>MaterialPart</c>와 같은 뜻.</summary>
+    /// 뒤의 넷은 계획관로와 같은 형태로 적는 정보 매개변수(docs/178 § C-3)의 원천이다 — 신규 배치의 <c>MaterialPart</c>와 같은 뜻.
+    /// <para><paramref name="IsValveTee"/>·<paramref name="WyeAngleDeg"/>는 무게 조회용이다(docs/260 § E).</para></summary>
     private sealed record Restored(string JunctionId, FamilyInstance Instance, string Name, string Spec,
-        double DiameterMm, double? BranchDiameterMm = null, double? LengthMm = null, double? DeflectionDeg = null);
+        double DiameterMm, double? BranchDiameterMm = null, double? LengthMm = null, double? DeflectionDeg = null,
+        bool IsValveTee = false, double? WyeAngleDeg = null);
 
     private readonly Func<Document?> _document;
     private readonly Func<UIDocument?> _uiDocument;
@@ -37,10 +42,11 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
     {
         var document = Document();
         var (candidates, fromSelection) = Candidates(document);
-        return new PipeMaterialBackfillScan(candidates.Count, fromSelection);
+        return new PipeMaterialBackfillScan(candidates.Count, fromSelection,
+            PipeMaterialPartCollector.AddinInstances(document).Count(), AdaptiveCandidates(document).Count);
     }
 
-    public PipeMaterialBackfillResult Backfill()
+    public PipeMaterialBackfillResult Backfill(BendSettings catalog)
     {
         var document = Document();
         // UseCase가 방금 넣은 바인딩이 '기존' 요소에 반영된 뒤에 LookupParameter를 불러야 한다.
@@ -107,10 +113,7 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             if (part.BranchDiameterMm is { } branchSpecMm)
                 SetOptionalTextIfEmpty(part.Instance, ValvePipingParameters.BranchSpec,
                     PipeAlignmentParameters.BranchSpecText(branchSpecMm), failed);
-            // 현장 절단 개소. 신규 배치와 같은 규칙 — 관·이형관만, 기본 1, 이미 값이 있으면 그대로 둔다.
-            if (PipeMaterialSpecText.IsCutTarget(part.Name))
-                SetOptionalIntegerIfEmpty(part.Instance, ValvePipingParameters.CutCount,
-                    PipeAlignmentParameters.DefaultCutCount, failed);
+            // 현장 절단 개소는 PipeJointCountWriter.Write(평단 단관)와 연결 패스(유입부 소켓)가 정한다(docs/266 § 2-2).
             if (part.LengthMm is { } lengthMm) SetOptionalDouble(part.Instance, ValvePipingParameters.Length, UnitUtils.ConvertToInternalUnits(lengthMm, UnitTypeId.Millimeters), failed);
             if (part.DeflectionDeg is { } deflectionDeg) SetOptionalDouble(part.Instance, ValvePipingParameters.BendAngle, UnitUtils.ConvertToInternalUnits(deflectionDeg, UnitTypeId.Degrees), failed);
             // DH_격점번호는 배치 당시 입력이라 복원할 수 없다. 비운 채로 두면 '배관재료표_미지정'으로 모인다.
@@ -128,7 +131,28 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
                 connections.TryGetValue(part.Instance.Id, out var connection) ? connection : BendConnection.Flanged,
                 PipeJointCountWriter.ReadRestraintGland(part.Instance), compositions.GetValueOrDefault(part.Instance.Id), failed, diagnostics,
                 flagsById.GetValueOrDefault(part.Instance.Id));
+            // 카탈로그 무게(docs/260 § E) — 신규 배치와 같은 규칙. 관 등급은 이미 찍힌 DH_관종등급에서만 읽는다(없으면 직관 무게는 비움).
+            // 강관 이형관 종류(F12…)는 이 경로에서 알 수 없어 None으로 넘긴다 — 강관 밸브부관 무게는 비운다.
+            var weightPart = part.IsValveTee ? FittingWeightPart.ValveTee
+                : PipeJointCountWriter.IsAccessory(part.Instance) ? FittingWeightPart.Other
+                : FittingWeightResolver.PartOf(PipeMaterialSpecText.StripJointMark(part.Name));
+            PipeWeightParameterWriter.Write(part.Instance,
+                new FittingWeightInput(weightPart, material,
+                    connections.TryGetValue(part.Instance.Id, out var weightConnection) ? weightConnection
+                        : PipeJointCountWriter.ResolveConnection(part.Instance, BendConnection.Flanged),
+                    SteelFittingClass.None,
+                    part.Instance.LookupParameter(ValvePipingParameters.Grade)?.AsString(),
+                    part.DiameterMm, part.BranchDiameterMm, part.LengthMm, part.DeflectionDeg, part.WyeAngleDeg),
+                catalog, failed);
         }
+
+        // 개수 재계산(docs/267 § 1) — 이미 태깅된 부재도 규칙 값으로 다시 쓴다. 개수는 이웃 연결에 따라 바뀌어 문서 전체를 봐야 맞다.
+        var restoredIds = restored.Select(x => x.Instance.Id).ToHashSet();
+        var recounted = restored.Count + RecountTagged(document, restoredIds, failed, diagnostics);
+        // 직접 배치한 계획관로 가변 패밀리 자동입력(docs/267 § 2).
+        var adaptiveFilled = FillAdaptivePipes(document, warnings, failed);
+        // 연결 기준 개수(플랜지 접합 · 유입부 절단) — 부재별 기록이 슬롯을 다시 쓴 뒤에 돈다(docs/266 § 1).
+        PipeJointConnectionRecorder.Apply(document, warnings);
 
         if (diagnostics.Warning is { } jointWarning) warnings.Add(jointWarning);
 
@@ -137,7 +161,159 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             warnings.Add($"매개변수 {string.Join(", ", distinct)}에 값을 쓰지 못했습니다. " +
                 "배관 밸브류·배관 이음쇠 카테고리에 공유 매개변수가 바인딩됐는지 확인하세요.");
 
-        return new PipeMaterialBackfillResult(restored.Count, skipped, Compress(warnings));
+        return new PipeMaterialBackfillResult(restored.Count, skipped, Compress(warnings), recounted, adaptiveFilled);
+    }
+
+    /// <summary>이미 태깅된 배관 이음쇠·밸브류의 개수 값을 규칙(<see cref="PipeCountRules"/>)으로 다시 쓴다(docs/267 § 1).
+    /// 명칭·규격·번호는 건드리지 않는다. 압륜 플래그는 기록 전에 읽는다 — 기록이 슬롯을 덮는다(docs/170 § D-3).</summary>
+    private static int RecountTagged(Document document, IReadOnlySet<ElementId> skip, ICollection<string> failed, JointCountDiagnostics diagnostics)
+    {
+        var count = 0;
+        foreach (var instance in PipeMaterialPartCollector.AddinInstances(document))
+        {
+            if (skip.Contains(instance.Id)) continue;
+            var material = PipeAlignmentParameters.MaterialFromModelValue(instance.LookupParameter(ValvePipingParameters.Material)?.AsString());
+            var connection = PipeJointCountWriter.ResolveConnection(instance, BendConnection.Flanged);
+            var gland = PipeJointCountWriter.ReadRestraintGland(instance);
+            var flags = PipeJointCountWriter.ReadFlags(instance);
+            var endCount = PipeMaterialSpecText.EndCountFor(instance.LookupParameter(ValvePipingParameters.Part)?.AsString());
+            var composition = PipeJointCountWriter.ResolveComposition(instance, material, connection, gland, endCount, flags);
+            PipeJointCountWriter.Write(instance, material, connection, gland, composition, failed, diagnostics, flags);
+            count++;
+        }
+        return count;
+    }
+
+    /// <summary>값이 비어 있는 계획관로 가변 패밀리 — 일반 모델 Adaptive 중 `DH_Addin`이 비고 배치점이 2개(직관 계열)·5개(곡관)인 것(docs/267 § 2-1).
+    /// 선택 안에 후보가 있으면 그것만 본다(<see cref="Candidates"/>와 같은 태도).</summary>
+    private List<FamilyInstance> AdaptiveCandidates(Document document)
+    {
+        var selection = _uiDocument()?.Selection.GetElementIds().ToList() ?? [];
+        if (selection.Count > 0)
+        {
+            var selected = AdaptiveCandidatesIn(new FilteredElementCollector(document, selection));
+            if (selected.Count > 0) return selected;
+        }
+        return AdaptiveCandidatesIn(new FilteredElementCollector(document));
+    }
+
+    private static List<FamilyInstance> AdaptiveCandidatesIn(FilteredElementCollector collector)
+        => collector.OfCategory(BuiltInCategory.OST_GenericModel).OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>()
+            .Where(AdaptiveComponentInstanceUtils.IsAdaptiveComponentInstance)
+            .Where(x => string.IsNullOrWhiteSpace(x.LookupParameter(PipeAlignmentParameters.Addin)?.AsString()))
+            .Where(x => AdaptiveComponentInstanceUtils.GetInstancePlacementPointElementRefIds(x).Count is 2 or 5)
+            .OrderBy(x => x.Id.Value)
+            .ToList();
+
+    /// <summary>직접 배치한 계획관로 가변 패밀리에 값을 채운다(docs/267 § 2-2). 값의 출처는 패밀리 매개변수(이름 목록은 설정 파일) →
+    /// 없으면 배치점 기하다. 관종·호칭지름은 못 찾으면 비우고 경고한다 — 지어내지 않는다(docs/141 § 2 판단 5). 개수는 <see cref="PipeCountRules"/>.</summary>
+    private int FillAdaptivePipes(Document document, ICollection<string> warnings, ICollection<string> failed)
+    {
+        var candidates = AdaptiveCandidates(document);
+        if (candidates.Count == 0) return 0;
+        var names = AdaptivePipeParameterNamesStore.Load(out var nameWarning);
+        if (nameWarning is not null) warnings.Add(nameWarning);
+
+        var writer = new PipeParameterWriter();
+        int filled = 0, missingMaterial = 0, missingDiameter = 0, unknownSlot = 0;
+        foreach (var instance in candidates)
+        {
+            var points = AdaptiveComponentInstanceUtils.GetInstancePlacementPointElementRefIds(instance)
+                .Select(id => (document.GetElement(id) as ReferencePoint)?.Position).ToList();
+            if (points.Any(x => x is null)) continue;
+            var lengthMm = ReadLengthMm(instance, names.Length)
+                ?? (points.Count == 2 ? UC.FtToMm(points[0]!.DistanceTo(points[1]!)) : 0d);
+            if (PipeCountRules.AdaptivePartFor(points.Count, lengthMm) is not { } part) continue;
+
+            var rawMaterial = ReadText(instance, names.Material);
+            var materialCode = PipeAlignmentParameters.MaterialFromModelValue(rawMaterial) is { } material
+                ? PipeAlignmentParameters.Code(material) : rawMaterial;
+            var diameterText = ReadDiameterText(instance, names.NominalDiameter);
+            var composition = PipeJointFlagReader.Compose(PipeJointCountWriter.ReadFlags(instance), instance.Symbol?.Family?.Name, 2)
+                ?? PipeCountRules.DefaultPlannedComposition(part);
+            var counts = PipeCountRules.ForPlannedMember(part, composition, materialCode);
+
+            writer.Text(instance, PipeAlignmentParameters.Addin, PipeAlignmentParameters.AddinValue);
+            writer.Text(instance, PipeAlignmentParameters.Part, part);
+            if (!string.IsNullOrWhiteSpace(materialCode)) writer.Text(instance, PipeAlignmentParameters.Material, materialCode);
+            else missingMaterial++;
+            if (diameterText is not null) writer.Text(instance, PipeAlignmentParameters.NominalDiameter, diameterText);
+            else missingDiameter++;
+            if (points.Count == 2) writer.LengthM(instance, PipeAlignmentParameters.Length, lengthMm / 1000d);
+            else if ((ReadAngleDeg(instance, names.BendAngle) ?? BendAngleFromPoints(points[0]!, points[2]!, points[4]!)) is { } angleDeg)
+                writer.AngleDeg(instance, PipeAlignmentParameters.StandardAngle, angleDeg);
+            writer.Text(instance, PipeAlignmentParameters.JointComposition, composition);
+            writer.JointSlots(instance, counts.SocketSlots.Select(x => (x.Kind, x.Spec, x.Count)).ToList());
+            writer.Integer(instance, PipeAlignmentParameters.LayingCount, counts.LayingCount);
+            writer.Integer(instance, PipeAlignmentParameters.CutCount, counts.CutCount);
+            if (counts.MaterialUnknown) unknownSlot++;
+            filled++;
+        }
+
+        if (missingMaterial > 0)
+            warnings.Add($"계획관로 가변 패밀리 {missingMaterial:N0}개는 관종 매개변수({string.Join("·", names.Material)})를 찾지 못해 DH_관종을 비워 두었습니다.");
+        if (missingDiameter > 0)
+            warnings.Add($"계획관로 가변 패밀리 {missingDiameter:N0}개는 호칭지름 매개변수({string.Join("·", names.NominalDiameter)})를 찾지 못해 DH_호칭지름을 비워 두었습니다.");
+        if (unknownSlot > 0)
+            warnings.Add($"계획관로 가변 패밀리 {unknownSlot:N0}개는 관종을 몰라 소켓 접합 슬롯을 비워 두었습니다.");
+        if (missingMaterial + missingDiameter > 0)
+            warnings.Add($"매개변수 이름은 {AdaptivePipeParameterNamesStore.FilePath}에서 바꿀 수 있습니다.");
+        foreach (var name in writer.Missing) failed.Add(name);
+        return filled;
+    }
+
+    /// <summary>패밀리 매개변수(인스턴스 → 유형)를 이름 목록 순서로 찾는다.</summary>
+    private static Parameter? FindFamilyParameter(FamilyInstance instance, IReadOnlyList<string> names)
+    {
+        foreach (var name in names)
+            if ((instance.LookupParameter(name) ?? instance.Symbol?.LookupParameter(name)) is { HasValue: true } parameter) return parameter;
+        return null;
+    }
+
+    private static double? ReadLengthMm(FamilyInstance instance, IReadOnlyList<string> names)
+        => FindFamilyParameter(instance, names) is { StorageType: StorageType.Double } p && p.Definition.GetDataType() == SpecTypeId.Length
+           && UC.FtToMm(p.AsDouble()) is > 0 and var mm ? mm : null;
+
+    private static string? ReadText(FamilyInstance instance, IReadOnlyList<string> names)
+    {
+        if (FindFamilyParameter(instance, names) is not { } p) return null;
+        var text = p.StorageType == StorageType.String ? p.AsString() : p.AsValueString();
+        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+    }
+
+    /// <summary>호칭지름을 `DN300` 표기로 읽는다. 길이형은 mm로, 숫자·문자는 첫 숫자로. 이미 `DN`으로 시작하면 그대로.</summary>
+    private static string? ReadDiameterText(FamilyInstance instance, IReadOnlyList<string> names)
+    {
+        if (FindFamilyParameter(instance, names) is not { } p) return null;
+        double? mm = p.StorageType switch
+        {
+            StorageType.Double when p.Definition.GetDataType() == SpecTypeId.Length || p.Definition.GetDataType() == SpecTypeId.PipeSize => UC.FtToMm(p.AsDouble()),
+            StorageType.Double => p.AsDouble(),
+            StorageType.Integer => p.AsInteger(),
+            _ => null,
+        };
+        if (mm is > 0) return PipeAlignmentParameters.DiameterText(Math.Round(mm.Value, 2));
+        var text = p.AsString()?.Trim();
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        if (text.StartsWith("DN", StringComparison.OrdinalIgnoreCase)) return text;
+        var match = System.Text.RegularExpressions.Regex.Match(text, @"\d+(\.\d+)?");
+        return match.Success && double.TryParse(match.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+            ? PipeAlignmentParameters.DiameterText(parsed) : null;
+    }
+
+    private static double? ReadAngleDeg(FamilyInstance instance, IReadOnlyList<string> names)
+        => FindFamilyParameter(instance, names) is { StorageType: StorageType.Double } p
+            ? p.Definition.GetDataType() == SpecTypeId.Angle ? UnitUtils.ConvertFromInternalUnits(p.AsDouble(), UnitTypeId.Degrees) : p.AsDouble()
+            : null;
+
+    /// <summary>곡관 배치점 P1·P3·P5로 꺾임각을 잰다 — 유입(P1→P3)과 유출(P3→P5) 방향 사이 각. 점이 겹쳐 방향이 없으면 null.</summary>
+    private static double? BendAngleFromPoints(XYZ p1, XYZ p3, XYZ p5)
+    {
+        var inflow = p3 - p1;
+        var outflow = p5 - p3;
+        if (inflow.IsZeroLength() || outflow.IsZeroLength()) return null;
+        // DeflectionDeg는 "바깥 방향" 내적을 받는다(일직선 = −1). 흐름 방향은 일직선이 +1이라 부호를 뒤집어 넘긴다.
+        return PipeMaterialSpecText.DeflectionDeg(-inflow.Normalize().DotProduct(outflow.Normalize()));
     }
 
     /// <summary>건너뛴 부재가 많으면 결과 창이 폭주한다. 같은 사유는 한 줄로 접고 나머지는 건수만 남긴다.</summary>
@@ -189,7 +365,7 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             // 밸브부관 A(4포트)는 주관 x 분기 규격이다 — 신규 배치(RevitPipeSegmentCommandRepo)와 같은 `D1650xD300`(docs/227 § E).
             // 수직분기 커넥터도 분기 구경이므로 최대 = 주관, 최소 = 분기로 읽어도 같다.
             // 밸브부관 B는 자기 커넥터가 모두 바이패스 관경이라 본관 구경을 알 수 없다 — `D300` 표기를 유지한다(한계, docs/227 § E).
-            if (connectors.Count == PipeValveBend.ValveTeeConnectorCount && PipeValveBend.IsValveBendFamily(instance.Symbol.Family.Name))
+            if (PipeValveBend.IsValveTeeConnectorCount(connectors.Count) && PipeValveBend.IsValveBendFamily(instance.Symbol.Family.Name))
             {
                 var diameters = connectors.Select(PipeMaterialConnectorReader.DiameterMm).ToList();
                 if (diameters.Any(x => x is null))
@@ -200,7 +376,7 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
                 var mainMm = diameters.Max()!.Value;
                 var branchMm = diameters.Min()!.Value;
                 return new Restored(junctionId, instance, FittingName(instance),
-                    PipeMaterialSpecText.ValveBranch(mainMm, branchMm), mainMm, BranchDiameterMm: branchMm);
+                    PipeMaterialSpecText.ValveBranch(mainMm, branchMm), mainMm, BranchDiameterMm: branchMm, IsValveTee: true);
             }
             var accessoryDiameter = PipeMaterialConnectorReader.DiameterMm(connectors[0]);
             if (accessoryDiameter is null)
@@ -254,7 +430,7 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
                 return branchAngleDeg is not null && PipeWyeResolver.IsWyeBranchAngle(branchAngleDeg.Value)
                     ? new Restored(junctionId, instance, PipeMaterialSpecText.WyeName,
                         PipeMaterialSpecText.Wye(mainDiameter.Value, branchDiameter.Value, branchAngleDeg.Value),
-                        mainDiameter.Value, BranchDiameterMm: branchDiameter.Value)
+                        mainDiameter.Value, BranchDiameterMm: branchDiameter.Value, WyeAngleDeg: branchAngleDeg.Value)
                     : new Restored(junctionId, instance, PipeMaterialSpecText.TeeName,
                         PipeMaterialSpecText.Tee(mainDiameter.Value, branchDiameter.Value), mainDiameter.Value, BranchDiameterMm: branchDiameter.Value);
             }
@@ -351,20 +527,6 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             return;
         }
         if (!string.IsNullOrWhiteSpace(parameter.AsString())) return;
-        if (!parameter.Set(value)) failed.Add(parameterName);
-    }
-
-    /// <inheritdoc cref="SetOptionalTextIfEmpty"/>
-    private static void SetOptionalIntegerIfEmpty(FamilyInstance instance, string parameterName, int value, ICollection<string> failed)
-    {
-        var parameter = instance.LookupParameter(parameterName);
-        if (parameter is null || parameter.IsReadOnly || parameter.StorageType != StorageType.Integer)
-        {
-            failed.Add(parameterName);
-            return;
-        }
-        // Integer는 0도 뜻이 있는 값이라(자르지 않는다) 미태깅만 채운다.
-        if (parameter.HasValue) return;
         if (!parameter.Set(value)) failed.Add(parameterName);
     }
 

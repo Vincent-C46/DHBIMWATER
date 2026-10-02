@@ -21,7 +21,21 @@ internal sealed class PipeParameterWriter
     }
     public void LengthM(Element element, string name, double meters) => Write(element, name, p => p.Set(UC.MToFt(meters)), StorageType.Double, SpecTypeId.Length);
     public void AngleDeg(Element element, string name, double degrees) => Write(element, name, p => p.Set(UC.DegToRad(degrees)), StorageType.Double, SpecTypeId.Angle);
-    public void Number(Element element, string name, double value) => Write(element, name, p => p.Set(value), StorageType.Double, SpecTypeId.Number);
+    /// <summary>질량(kg). 질량 형식 매개변수에만 쓴다(docs/264).</summary>
+    public void MassKg(Element element, string name, double kilograms)
+        => Write(element, name, p => p.Set(UC.KgToInternal(kilograms)), StorageType.Double, SpecTypeId.Mass);
+    /// <summary>단위 길이당 질량(kg/m). 내부 단위가 kg/ft라 반드시 변환한다(docs/264).</summary>
+    public void MassPerLengthKgPerM(Element element, string name, double kilogramsPerMeter)
+        => Write(element, name, p => p.Set(UC.KgPerMToInternal(kilogramsPerMeter)), StorageType.Double, SpecTypeId.MassPerUnitLength);
+    /// <summary>측점·Z 오프셋(m). 길이 형식(`ZOffset`)이면 피트로 바꾸고, Number 형식(`StaStart(m)`·`StaEnd(m)`, 옛 `ZOffset`)이면 m 숫자를 그대로 쓴다(docs/264).
+    /// 매개변수가 없거나 둘 다 아니면 <see cref="Write"/>가 Missing/InvalidTypes로 처리한다.</summary>
+    public void StationM(Element element, string name, double meters)
+    {
+        if (FindParameter(element, name)?.Definition.GetDataType().Equals(SpecTypeId.Length) == true)
+            Write(element, name, p => p.Set(UC.MToFt(meters)), StorageType.Double, SpecTypeId.Length);
+        else
+            Write(element, name, p => p.Set(meters), StorageType.Double, SpecTypeId.Number);
+    }
     public void Integer(Element element, string name, int value) => Write(element, name, p => p.Set(value), StorageType.Integer, SpecTypeId.Int.Integer);
     public void YesNo(Element element, string name, bool value) => Write(element, name, p => p.Set(value ? 1 : 0), StorageType.Integer, SpecTypeId.Boolean.YesNo);
 
@@ -31,11 +45,18 @@ internal sealed class PipeParameterWriter
     /// <para>슬롯은 "있으면 적는" 칸이라 `종류`가 비면 그 자체로 없는 것이다. 개소 매개변수 넷이 0을 명시적으로 쓰던 규칙
     /// (빈칸 = 미태깅과 구분)은 칸이 <b>고정</b>이라 필요했던 것이다. 다만 <b>다시 기록</b>할 때 쓴 벌 뒤의 옛 슬롯은 비운다 —
     /// 남겨 두면 수량산출이 옛 `종류`·`수`까지 세어 접합이 과다 계상된다(docs/243 § A).</para>
-    /// <para>종류를 못 찾는 관종(PE·PVC 소켓)은 슬롯을 비우고 <see cref="UnmappedJointWarning"/>에 모은다.</para></summary>
+    /// <para>종류를 못 찾는 관종(PE·PVC 소켓)은 슬롯을 비우고 <see cref="UnmappedJointWarning"/>에 모은다.</para>
+    /// <para>플랜지는 슬롯을 비운다 — 플랜지 접합은 연결 패스(<c>PipeJointConnectionRecorder</c>)가 모델 연결 1건 = 1개소로 세어 따로 적는다(docs/265 § 2, docs/266 § 1).</para></summary>
     /// <param name="slots">슬롯 1벌 = (규격, 개수). 규격이 빈 문자열이면 수량산출이 요소 관경을 쓴다(docs/186 § 4-3).</param>
     public void JointSlots(Element element, PipeMaterial? material, BendConnection connection,
                            IReadOnlyList<(string Spec, int Count)> slots, bool useRestraintGland = false)
     {
+        if (connection == BendConnection.Flanged)
+        {
+            // 의도된 빈 슬롯이다 — 매핑 실패(_unmappedJointMaterials)로 세지 않는다. 빈 목록이 옛 슬롯을 비우고 DH_접합수 = 0을 쓴다.
+            JointSlots(element, Array.Empty<(string Kind, string Spec, int Count)>());
+            return;
+        }
         var kind = PipeAlignmentParameters.JointKindFor(material, connection, useRestraintGland);
         if (kind is null)
         {

@@ -2,6 +2,7 @@ using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Gis;
 using Xunit;
 using Xunit.Abstractions;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.UI.Tests.Gis;
 

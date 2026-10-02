@@ -8,6 +8,8 @@ using DHBIMWATER.Infrastructure.Helpers;
 using DHBIMWATER.Shared.Diagnostics;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
 using DHBIMWATER.Shared.Errors;
+using DHBIMWATER.Core.Piping;
+using PipeCountRules = DHBIMWATER.Core.Piping.PipeCountRules;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Gis;
 
@@ -146,7 +148,9 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
                 var startStationM = stationProfile!.StationAt(segment.DistanceFromStart);
                 var endStationM = stationProfile.StationAt(segment.DistanceFromStart + lengthM);
                 writer.Text(shape, PipeAlignmentParameters.Addin, PipeAlignmentParameters.AddinValue);
-                writer.Text(shape, PipeAlignmentParameters.Part, PipeAlignmentParameters.StraightPartValue);
+                // 6 m 정척 − 1 mm 미만 토막은 단관(부설 1 · 절단 1), 이상은 직관(부설 0 · 절단 0)이다(docs/266 R-1·R-6).
+                var segmentCounts = PipeCountRules.ForPlannedSegment(lengthM * 1000d);
+                writer.Text(shape, PipeAlignmentParameters.Part, segmentCounts.PartName);
                 writer.Text(shape, PipeAlignmentParameters.NominalDiameter, PipeAlignmentParameters.DiameterText(diameterMm));
                 writer.Text(shape, PipeAlignmentParameters.Material, MaterialCodeOf(alignment.PipeKind));
                 writer.Text(shape, PipeAlignmentParameters.Grade, alignment.PipeKind);
@@ -156,21 +160,22 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
                 // 무게 = 단위중량 × 연장 + 소켓 무게(docs/178 § A-2). 가변 패밀리 경로와 같은 규칙이다.
                 if (StraightPipeWeight.TotalKg(spec, lengthM, info.JointType) is { } weightKg)
                 {
-                    writer.Number(shape, PipeAlignmentParameters.UnitWeight, spec!.UnitWeightKgPerM);
-                    writer.Number(shape, PipeAlignmentParameters.Weight, weightKg);
+                    writer.MassPerLengthKgPerM(shape, PipeAlignmentParameters.UnitWeight, spec!.UnitWeightKgPerM);
+                    writer.MassKg(shape, PipeAlignmentParameters.Weight, weightKg);
                 }
                 // 패밀리 배치 경로와 같은 규칙이다 — 직관도 슬롯 1벌(규격 비움 · 1개소). 인스턴스 하나가 1본 = 접합 1개소다(docs/186 § 5, 2026-09-18 개정).
                 writer.JointSlots(shape, PipeKindCatalog.MaterialOf(alignment.PipeKind), info.BendConnection,
                     new[] { (Spec: string.Empty, Count: 1) }, info.UseRestraintGland);
-                writer.Integer(shape, PipeAlignmentParameters.LayingCount, 0);
+                writer.Integer(shape, PipeAlignmentParameters.LayingCount, segmentCounts.LayingCount);
+                writer.Integer(shape, PipeAlignmentParameters.CutCount, segmentCounts.CutCount);
                 writer.JointComposition(shape, info.BendConnection, endCount: 2, socketEnds: 1);   // 직관은 소켓 한쪽 → `1S`(docs/199 § 2)
                 // DirectShape는 측점편집 대상이 아니다(docs/214, 2026-09-22 사용자 확정). 갱신용 태그
                 // (SourceFile·Profile·ZOffset·Flip·VerticalBasis·ShapeKind·AlignmentId·SourceKind·SourceOptions)를
-                // 적지 않으므로 DHBoost 대상 수집(ShapeKind == "Cylinder")에서 자동으로 빠진다.
+                // 적지 않으므로 수량산출 대상 수집(ShapeKind == "Cylinder")에서 자동으로 빠진다.
                 // 수량산출이 읽는 셋(구간·측점시작·측점끝)만 남긴다.
                 writer.Text(shape, PlacementStationParameters.Alignment, alignment.RecordNumber);
-                writer.Number(shape, PlacementStationParameters.StaStart, startStationM);
-                writer.Number(shape, PlacementStationParameters.StaEnd, endStationM);
+                writer.StationM(shape, PlacementStationParameters.StaStart, startStationM);
+                writer.StationM(shape, PlacementStationParameters.StaEnd, endStationM);
             }
         }
 

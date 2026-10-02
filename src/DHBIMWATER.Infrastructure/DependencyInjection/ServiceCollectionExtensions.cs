@@ -44,6 +44,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IPipeMaterialScheduleRepo, RevitPipeMaterialScheduleRepo>();
         services.AddTransient<IPipeMaterialDraftingRepo, RevitPipeMaterialDraftingRepo>();
         services.AddTransient<IPipeMaterialBackfillRepo, RevitPipeMaterialBackfillRepo>();
+        services.AddTransient<IPipeJointConnectionRepo, RevitPipeJointConnectionRepo>();   // docs/266 § 1 연결 패스
         services.AddTransient<IBeamCommandRepo, RevitBeamCommandRepo>();
         services.AddTransient<IColumnCommandRepo, RevitColumnCommandRepo>();
         services.AddTransient<ISlabCommandRepo, RevitSlabCommandRepo>();
@@ -72,6 +73,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IAlignmentPipePlacementRepo, RevitAlignmentPipePlacementRepo>();
         services.AddTransient<IBendSettingsRepo, RevitBendSettingsRepo>();
         services.AddTransient<IPipeLayoutFamilySettingsRepo, RevitPipeLayoutFamilySettingsRepo>();
+        services.AddTransient<IConcreteSettingsRepo, RevitConcreteSettingsRepo>();
         services.AddSingleton<IBendSettingsFileStore, JsonFileBendSettingsFileStore>();
         services.AddTransient<IAdaptiveBendPlacementRepo, RevitAdaptiveBendPlacementRepo>();
         services.AddTransient<IBendDirectShapeRepo, RevitBendDirectShapeRepo>();
@@ -124,6 +126,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IPipeMaterialScheduleRepo, MockPipeMaterialScheduleRepo>();
         services.AddTransient<IPipeMaterialDraftingRepo, MockPipeMaterialDraftingRepo>();
         services.AddTransient<IPipeMaterialBackfillRepo, MockPipeMaterialBackfillRepo>();
+        services.AddTransient<IPipeJointConnectionRepo, MockPipeJointConnectionRepo>();
 
         services.AddTransient<ISetParameterRepo, MockSetParameterRepo>();
         services.AddTransient<ISharedParameterRepository, MockSharedParameterRepository>();
@@ -143,6 +146,7 @@ public static class ServiceCollectionExtensions
         // TODO: Mock 블록에 Revit Repo가 덮어쓰기 등록됨 — 별도 확인 필요
         services.AddTransient<IBendSettingsRepo, MockBendSettingsRepo>();
         services.AddTransient<IPipeLayoutFamilySettingsRepo, MockPipeLayoutFamilySettingsRepo>();
+        services.AddTransient<IConcreteSettingsRepo, MockConcreteSettingsRepo>();
         services.AddSingleton<IBendSettingsFileStore, JsonFileBendSettingsFileStore>();
         services.AddTransient<IAdaptiveBendPlacementRepo, MockAdaptiveBendPlacementRepo>();
         services.AddTransient<IBendDirectShapeRepo, MockBendDirectShapeRepo>();

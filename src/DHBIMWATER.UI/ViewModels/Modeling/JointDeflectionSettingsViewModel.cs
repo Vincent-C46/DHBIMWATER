@@ -1,8 +1,8 @@
 using System.Collections.ObjectModel;
 using System.Windows.Input;
-using DHBIMWATER.Core.Gis;
 using DHBIMWATER.UI.Base;
 using DHBIMWATER.UI.Commands;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.UI.ViewModels.Modeling;
 

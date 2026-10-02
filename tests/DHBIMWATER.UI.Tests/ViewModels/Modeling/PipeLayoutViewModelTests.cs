@@ -1,9 +1,6 @@
 ﻿using DHBIMWATER.Application.DTOs.Revit;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Core.Geometry;
-using BendConnection = DHBIMWATER.Core.Gis.BendConnection;
-using PipeAlignmentParameters = DHBIMWATER.Core.Gis.PipeAlignmentParameters;
-using PipeMaterial = DHBIMWATER.Core.Gis.PipeMaterial;
 using DHBIMWATER.Core.Piping;
 using DHBIMWATER.UI.ViewModels.Modeling;
 using System.Text.Json;
@@ -446,6 +443,52 @@ public sealed class PipeLayoutViewModelTests
         Assert.Equal(500, vm.StraightLengthMm);
     }
 
+    // docs/245: 정척 수직보조선 — 엣지 시작점부터 정척 길이마다, 끝점과 겹치는 눈금은 제외.
+    [Theory]
+    [InlineData(13000, 2)]
+    [InlineData(12000, 1)]
+    [InlineData(5000, 0)]
+    public void StraightTicks_CommittedEdge_DrawsTickEveryStraightLength(double lengthMm, int expected)
+    {
+        var vm = CreateDrawingViewModel();
+        DisableOsnap(vm);
+        vm.StraightLengthMm = 6000;
+
+        Draw(vm, new Point2D(0, 0), new Point2D(lengthMm, 0));
+
+        Assert.Equal(expected, CountTicks(Assert.Single(vm.Edges).StraightTicks));
+    }
+
+    [Fact]
+    public void StraightTicks_ChangingStraightLength_RedrawsCommittedEdge()
+    {
+        var vm = CreateDrawingViewModel();
+        DisableOsnap(vm);
+        vm.StraightLengthMm = 6000;
+        Draw(vm, new Point2D(0, 0), new Point2D(13000, 0));
+
+        vm.StraightLengthMm = 4000;
+
+        Assert.Equal(3, CountTicks(Assert.Single(vm.Edges).StraightTicks));
+    }
+
+    [Fact]
+    public void StraightTicks_Preview_FollowsCursor()
+    {
+        var vm = CreateDrawingViewModel();
+        DisableOsnap(vm);
+        vm.StraightLengthMm = 6000;
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(0, 0)));
+
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(13000, 0)));
+
+        Assert.True(vm.IsSubLineVisible);
+        Assert.Equal(2, CountTicks(vm.SubLineTicks));
+    }
+
+    private static int CountTicks(System.Windows.Media.Geometry? geometry)
+        => geometry is null ? 0 : System.Windows.Media.PathGeometry.CreateFromGeometry(geometry).Figures.Count;
+
     [Fact]
     public void Mode_DefaultsToDrawing()
     {
@@ -814,7 +857,7 @@ public sealed class PipeLayoutViewModelTests
         Assert.Equal(BendConnection.Socket, vm.JointConnection);
         Assert.Equal("소켓", vm.JointConnectionLabel);
 
-        vm.PipeMaterialLabel = PipeAlignmentParameters.Label(PipeMaterial.Steel);
+        vm.IsSteelSelected = true;
 
         Assert.Equal(["플랜지", "용접"], vm.JointConnectionLabels);
         Assert.Equal("용접", vm.JointConnectionLabel);
@@ -825,7 +868,7 @@ public sealed class PipeLayoutViewModelTests
         vm.JointConnectionLabel = "용접";
         Assert.Equal(BendConnection.Socket, vm.JointConnection);
 
-        vm.PipeMaterialLabel = PipeAlignmentParameters.Label(PipeMaterial.DuctileIron);
+        vm.IsDuctileIronSelected = true;
         Assert.Equal("소켓", vm.JointConnectionLabel);
     }
 
@@ -2127,21 +2170,16 @@ public sealed class PipeLayoutViewModelTests
     }
 
     [Fact]
-    public void BypassValveTypeDiameter_TracksBypassDiameter()
+    public void BypassValve_UsesFamilyFirstType_AsRepresentative()
     {
+        // docs/244 § D-2 — 바이패스 관경 입력·유형 직경 대조가 없어졌다. 대표 유형은 패밀리 첫 유형이고(직경 파라미터 후보용),
+        // 실제 유형은 모델 생성 때 DN으로 고른다.
         var vm = CreateTypeDiameterViewModel();
         vm.BypassValveFamilyName = "밸브";
-        vm.BypassValveTypeName = "밸브 : DN100";
-
-        Assert.Equal("Nominal pipe size", vm.BypassValveTypeDiameterParameterName);
-        Assert.True(vm.IsBypassValveTypeDiameterMismatch);   // 기본 바이패스 관경 300 ≠ 유형 100
-        Assert.Contains("300", vm.BypassValveTypeDiameterText);
-
-        vm.BypassDiameterMm = 100;
 
         Assert.Equal("밸브 : DN100", vm.BypassValveTypeName);
-        Assert.False(vm.IsBypassValveTypeDiameterMismatch);
-        Assert.Contains("✓", vm.BypassValveTypeDiameterText);
+        Assert.Equal(["DN"], vm.BypassValveParameterNames);
+        Assert.DoesNotContain("바이패스 밸브 유형 직경", vm.ValidationSummary);
     }
 
     [Fact]
@@ -2276,6 +2314,23 @@ public sealed class PipeLayoutViewModelTests
         var edge = Assert.Single(vm.Edges);
         Assert.NotEqual(drawnId, edge.Id);
         Assert.Equal(1200, vm.Elevation, 6);
+    }
+
+    [Fact]
+    public void ElevationM_IsMeterViewOfMillimeterElevation()
+    {
+        // 관 중심 높이(EL) 입력은 m, 내부·Revit 배치는 mm다(docs/251 § C).
+        var vm = CreateViewModel();
+        var changed = new List<string?>();
+        vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        vm.ElevationM = 0.214;
+
+        Assert.Equal(214, vm.Elevation, 6);
+        Assert.Contains(nameof(PipeLayoutViewModel.ElevationM), changed);
+
+        vm.ApplyPickedPiping(CreateImport());
+        Assert.Equal(1.2, vm.ElevationM, 6);
     }
 
     [Fact]

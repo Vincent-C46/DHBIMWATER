@@ -79,13 +79,6 @@ public static class PipeMaterialSpecText
             ? PipeAlignmentParameters.Code(material.Value)
             : string.Empty;
 
-    /// <summary>현장 절단 대상인가 &mdash; 관과 이형관만이다(`직관`·`단관`·`곡관`·`T형`·`Y형`·`십자`).
-    /// <para>밸브·이음관은 완제품이라 자르지 않는다. 패밀리 이름이 그대로 부재명이 되는 부속을 걸러내려고
-    /// <b>우리가 짓는 부재명만</b> 열거한다 &mdash; 목록에 없는 이름은 절단수를 받지 않는다.</para></summary>
-    public static bool IsCutTarget(string? partName)
-        => StripJointMark(partName) is var name
-           && (name == StraightName || name == ShortName || name == BendName || name == TeeName || name == CrossName || name == WyeName);
-
     /// <summary>부재의 단부(접합) 개수. 부재명 표기 앞의 숫자가 이 값이다.
     /// <para>T형·Y형 3구(docs/187), 십자 4구(docs/175), 나머지(직관·단관·곡관·이음관)는 2구다. 이경티는 현재 배치 범위 밖이다(docs/130 § A).</para></summary>
     public static int EndCountFor(string? partName) => StripJointMark(partName) switch { TeeName => 3, WyeName => 3, CrossName => 4, _ => 2 };

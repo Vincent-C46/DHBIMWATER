@@ -1,6 +1,9 @@
 using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Gis;
+using DHBIMWATER.Core.Piping;
 using Xunit;
+// NodeKind가 Core.Gis와 Core.Piping 양쪽에 있다. 이 테스트는 관로(Gis) 노드 종류를 쓴다.
+using NodeKind = DHBIMWATER.Core.Gis.NodeKind;
 
 namespace DHBIMWATER.UI.Tests.Gis;
 

@@ -23,6 +23,7 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
         private readonly IElementTypeCommandRepo _elementTypeCmdRepo;
         private readonly ISharedParameterRepository _sharedParameterRepo;
         private readonly ClassifyExteriorWallsUseCase _classifyWallsUseCase;
+        private readonly IConcreteSettingsRepo _concreteSettingsRepo;
         #endregion
 
         #region Constructor
@@ -37,7 +38,8 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
             IColumnCommandRepo columnCmdRepo,
             IGenericModelCommandRepo genericModelCmdRepo, IElementTypeCommandRepo elementTypeCmdRepo,
             ISharedParameterRepository sharedParameterRepo,
-            ClassifyExteriorWallsUseCase classifyWallsUseCase)
+            ClassifyExteriorWallsUseCase classifyWallsUseCase,
+            IConcreteSettingsRepo concreteSettingsRepo)
         {
             _tx = tx;
             _dialogService = dialogService;
@@ -51,6 +53,7 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
             _elementTypeCmdRepo = elementTypeCmdRepo;
             _sharedParameterRepo = sharedParameterRepo;
             _classifyWallsUseCase = classifyWallsUseCase;
+            _concreteSettingsRepo = concreteSettingsRepo;
         }
         #endregion
 
@@ -91,21 +94,17 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                     #region 2. 슬래브 생성
                     var slabDefs = ReservoirGeometryCalculator.CalculateSlabs(dto).ToList();
                     var slabLevels = _levelQueryRepo.GetLevelIds(slabDefs.Select(s => s.LevelName));
-                    var slabConcrete = new Core.Structures.ConcreteSpec(25, 30, 150);
-                    var slabMaterial = _elementTypeCmdRepo.FindOrCreateConcreteMaterial(slabConcrete);
-                    var slabTypes = slabDefs.Select(s => s.Thickness).Distinct().ToDictionary(t => t, t => _elementTypeCmdRepo.FindOrCreateSlabType(new Core.Structures.FloorTypeSpec(t, $"일반 - {t}mm", slabConcrete), slabMaterial));
-                    foreach (var slabDef in slabDefs)
-                        _slabCmdRepo.CreateSlab(slabDef, slabLevels[slabDef.LevelName], slabTypes[slabDef.Thickness]);
+                    // 부재별 콘크리트는 문서 공용 설정을 쓴다(docs/249 § D). 기초·버림·슬래브(덧침 포함)는 Part로 나뉜다.
+                    var concrete = new ConcreteTypeResolver(_elementTypeCmdRepo, _concreteSettingsRepo.Load() ?? Core.Structures.ConcreteSettings.Default);
+                    var slabTypes = concrete.ResolveSlabTypes(slabDefs);
+                    for (var i = 0; i < slabDefs.Count; i++)
+                        _slabCmdRepo.CreateSlab(slabDefs[i], slabLevels[slabDefs[i].LevelName], slabTypes[i].TypeId);
                     #endregion
 
                     #region 3. 벽체 생성
                     var wallDefs = ReservoirGeometryCalculator.CalculateLinearWalls(dto).ToList();
                     var levelIds = _levelQueryRepo.GetLevelIds(wallDefs.Select(w => w.LevelName));
-                    var concrete = new Core.Structures.ConcreteSpec(25, 27, 120);
-                    var materialId = _elementTypeCmdRepo.FindOrCreateConcreteMaterial(concrete);
-                    var wallTypeIds = wallDefs.Select(w => w.Thickness).Distinct().ToDictionary(
-                        thickness => thickness,
-                        thickness => _elementTypeCmdRepo.FindOrCreateWallType(new Core.Structures.WallTypeSpec(thickness, $"일반 - {thickness}mm", concrete), materialId));
+                    var wallTypeIds = concrete.ResolveWallTypes(wallDefs.Select(w => w.Thickness)).ToDictionary(kv => kv.Key, kv => kv.Value.TypeId);
                     foreach (var wallDef in wallDefs)
                         _wallCmdRepo.CreateLinearWall(wallDef, levelIds[wallDef.LevelName], wallTypeIds[wallDef.Thickness]);
                     _classifyWallsUseCase.Execute();
@@ -115,6 +114,8 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                     var columnDefs = ReservoirGeometryCalculator.CalculateColumns(dto).ToList();
                     var columnLevels = _levelQueryRepo.GetLevelIds(columnDefs.SelectMany(c => new[] { c.BaseLevelName, c.TopLevelName }));
                     var columnTypes = columnDefs.Select(c => c.TypeName).Distinct().ToDictionary(name => name, _elementTypeCmdRepo.FindColumnSymbol);
+                    foreach (var columnTypeId in columnTypes.Values.Distinct())
+                        concrete.ApplyTo(columnTypeId, Core.Structures.ConcreteMember.Column);
                     foreach (var colDef in columnDefs)
                         _columnCmdRepo.CreateColumn(colDef, columnLevels[colDef.BaseLevelName], columnLevels[colDef.TopLevelName], columnTypes[colDef.TypeName]);
                     #endregion
@@ -123,6 +124,8 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                     var beamDefs = ReservoirGeometryCalculator.CalculateBeams(dto).ToList();
                     var beamLevels = _levelQueryRepo.GetLevelIds(beamDefs.Select(b => b.LevelName));
                     var beamTypes = beamDefs.GroupBy(b => b.Part == "HAUNCH" ? "HAUNCH" : b.TypeName ?? $"{b.Width} x {b.Height}").ToDictionary(g => g.Key, g => g.Key == "HAUNCH" ? _elementTypeCmdRepo.FindHaunchBeamSymbol() : !string.IsNullOrEmpty(g.First().TypeName) ? _elementTypeCmdRepo.FindBeamSymbol(g.First().TypeName) : _elementTypeCmdRepo.FindOrCreateBeamType(new Core.Structures.BeamTypeSpec(g.First().Width, g.First().Height, g.Key)));
+                    foreach (var beamTypeId in beamTypes.Values.Distinct())
+                        concrete.ApplyTo(beamTypeId, Core.Structures.ConcreteMember.Beam);
                     foreach (var beamDef in beamDefs)
                         _beamCmdRepo.CreateBeam(beamDef, beamLevels[beamDef.LevelName], beamTypes[beamDef.Part == "HAUNCH" ? "HAUNCH" : beamDef.TypeName ?? $"{beamDef.Width} x {beamDef.Height}"]);
                     #endregion

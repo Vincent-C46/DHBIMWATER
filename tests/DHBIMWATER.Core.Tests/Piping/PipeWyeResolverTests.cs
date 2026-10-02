@@ -99,8 +99,7 @@ public sealed class PipeWyeResolverTests
     {
         Assert.Equal("D300x300 45°", PipeMaterialSpecText.Wye(300, 300, 45));
         Assert.Equal(3, PipeMaterialSpecText.EndCountFor(PipeMaterialSpecText.WyeName));
-        Assert.Equal("3F Y형", PipeMaterialSpecText.WithJointMark(PipeMaterialSpecText.WyeName, DHBIMWATER.Core.Gis.BendConnection.Flanged));
-        Assert.True(PipeMaterialSpecText.IsCutTarget("3F Y형"));
+        Assert.Equal("3F Y형", PipeMaterialSpecText.WithJointMark(PipeMaterialSpecText.WyeName, DHBIMWATER.Core.Piping.BendConnection.Flanged));
     }
 
     private static Point2D P(double x, double y) => new(x, y);

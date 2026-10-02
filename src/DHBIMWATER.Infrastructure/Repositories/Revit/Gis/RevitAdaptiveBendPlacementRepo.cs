@@ -8,6 +8,8 @@ using DHBIMWATER.Infrastructure.Helpers;
 using DHBIMWATER.Shared.Diagnostics;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
 using DHBIMWATER.Shared.Errors;
+using DHBIMWATER.Core.Piping;
+using PipeCountRules = DHBIMWATER.Core.Piping.PipeCountRules;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Gis;
 
@@ -119,17 +121,19 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
                 writer.JointSlots(instance, PipeKindCatalog.MaterialOf(plan.PipeKind), info.BendConnection,
                     new[] { (Spec: string.Empty, Count: socketEnds) },
                     info.UseRestraintGland);
-                writer.Integer(instance, PipeAlignmentParameters.LayingCount, 1);
+                writer.Integer(instance, PipeAlignmentParameters.LayingCount, PipeCountRules.PlannedBendLayingCount);
+                // 곡관은 자르지 않는다 — 0과 미기록을 구분하려고 명시한다(docs/266 § 2-4).
+                writer.Integer(instance, PipeAlignmentParameters.CutCount, PipeCountRules.PlannedBendCutCount);
                 // 접합 구성은 소켓 단부 수로 적는다 — A형(양쪽 소켓) `2S`, B형(한쪽 소켓) `1S`. 위 슬롯 개소와 같은 축이다(docs/199 § 2).
                 writer.JointComposition(instance, info.BendConnection, endCount: 2, socketEnds: socketEnds);
                 // 곡관은 곡관표의 한 개 무게(소켓 포함)를 그대로 적는다(docs/178 § A-2). 단위중량은 직관에만 있다.
-                writer.Number(instance, PipeAlignmentParameters.Weight, plan.WeightKg);
+                writer.MassKg(instance, PipeAlignmentParameters.Weight, plan.WeightKg);
                 writer.Text(instance, PlacementStationParameters.SourceFile, plan.SourceFile);
                 writer.Text(instance, PlacementStationParameters.Alignment, plan.RecordNumber);
                 writer.Text(instance, PlacementStationParameters.Profile, string.Empty);
-                writer.Number(instance, PlacementStationParameters.StaStart, plan.StaStartM);
-                writer.Number(instance, PlacementStationParameters.StaEnd, plan.StaEndM);
-                writer.Number(instance, PlacementStationParameters.ZOffset, plan.ZOffsetM);
+                writer.StationM(instance, PlacementStationParameters.StaStart, plan.StaStartM);
+                writer.StationM(instance, PlacementStationParameters.StaEnd, plan.StaEndM);
+                writer.StationM(instance, PlacementStationParameters.ZOffset, plan.ZOffsetM);
                 writer.YesNo(instance, PlacementStationParameters.Flip, false);
                 writer.Text(instance, PlacementStationParameters.VerticalBasis, "GlobalZ");
             }

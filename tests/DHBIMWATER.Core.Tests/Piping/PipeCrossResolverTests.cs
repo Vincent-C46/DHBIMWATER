@@ -52,7 +52,7 @@ public sealed class PipeCrossResolverTests
         Assert.NotEqual(PipeMaterialSpecText.Tee(300, 300), PipeMaterialSpecText.Cross(300, 300));
         Assert.Equal(4, PipeMaterialSpecText.EndCountFor(PipeMaterialSpecText.CrossName));
         Assert.Equal(3, PipeMaterialSpecText.EndCountFor(PipeMaterialSpecText.TeeName));
-        Assert.Equal("4F 십자", PipeMaterialSpecText.WithJointMark(PipeMaterialSpecText.CrossName, DHBIMWATER.Core.Gis.BendConnection.Flanged));
+        Assert.Equal("4F 십자", PipeMaterialSpecText.WithJointMark(PipeMaterialSpecText.CrossName, DHBIMWATER.Core.Piping.BendConnection.Flanged));
         Assert.Equal(4, PipeMaterialSpecText.EndCountFor("4F 십자"));
     }
 

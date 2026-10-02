@@ -16,6 +16,8 @@ public sealed class ConcreteMaterialRowViewModel : ViewModelBase
     }
 
     public string MemberName { get; }
+    /// <summary>공용 설정창에서 어느 부재 행인지(docs/249 § E).</summary>
+    public ConcreteMember Member { get; init; }
     public int MaxAggregateSize { get => _maxAggregateSize; set { _maxAggregateSize = value; OnPropertyChanged(nameof(MaxAggregateSize)); OnPropertyChanged(nameof(MaterialName)); } }
     public int CompressiveStrength { get => _compressiveStrength; set { _compressiveStrength = value; OnPropertyChanged(nameof(CompressiveStrength)); OnPropertyChanged(nameof(MaterialName)); } }
     public int Slump { get => _slump; set { _slump = value; OnPropertyChanged(nameof(Slump)); OnPropertyChanged(nameof(MaterialName)); } }

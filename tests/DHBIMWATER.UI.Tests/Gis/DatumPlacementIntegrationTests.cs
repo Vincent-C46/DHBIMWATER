@@ -6,6 +6,7 @@ using DHBIMWATER.Application.UseCases.Gis;
 using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Gis;
 using Xunit;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.UI.Tests.Gis;
 
@@ -195,6 +196,7 @@ public class DatumPlacementIntegrationTests
                     case "GetTrueNorthToProjectNorthClockwiseDegrees": return 0d;
                     case "GetFamilyTypeCategoryId": return null;
                     case "FindMissingSymbols": return Array.Empty<(string FamilyName, string TypeName)>();
+                    case "RecordConnectionJoints": return Array.Empty<string>();   // 연결 기준 접합(docs/266 § 1) — 배치 검증과 무관
                     case "PlaceAlong":
                         Alignments = (IReadOnlyList<PipeAlignment>)args[0]!;
                         Origin = (AlignmentPlacementOrigin)args[3]!;

@@ -31,14 +31,25 @@ public sealed record ImportedFitting(int EdgeIndex, string FamilyTypeName, doubl
 /// <param name="BypassDiameterMm">바이패스 관경(mm). B 커넥터 → A 분기 커넥터 순으로 읽는다.</param>
 /// <param name="Normal">본관에서 바이패스 쪽을 향하는 평면 단위벡터. 캔버스가 엣지 방향과 비교해 Side를 정한다.</param>
 /// <param name="ElementIds">세트를 이루던 부재 전부(A·B·밸브·채움관). [Revit에서 보기]가 세트를 통째로 고른다.</param>
-public sealed record ImportedBypass(string BypassValveFamilyTypeName, double BypassDiameterMm, Point2D Normal, IReadOnlyList<long> ElementIds);
+public sealed record ImportedBypass(string BypassValveFamilyTypeName, double BypassDiameterMm, Point2D Normal, IReadOnlyList<long> ElementIds)
+{
+    /// <summary>밸브 2개 세트면 두 번째 밸브("패밀리명 : 유형명", docs/255). 1개 세트면 null.
+    /// 이 단계에서는 체인 순서일 뿐이다 — V1(엣지 시작 쪽)은 캔버스가 <see cref="ValvePositions"/>로 정한다.</summary>
+    public string? SecondValveFamilyTypeName { get; init; }
+
+    /// <summary>두 밸브 사이 관 길이 합(mm). 1개 세트이거나 두 밸브가 직결이면 0.</summary>
+    public double SpoolLengthMm { get; init; }
+
+    /// <summary>두 밸브 원점(프로젝트 mm). [0] = <see cref="BypassValveFamilyTypeName"/>, [1] = <see cref="SecondValveFamilyTypeName"/>. 1개 세트면 빈 목록.</summary>
+    public IReadOnlyList<Point2D> ValvePositions { get; init; } = [];
+}
 
 /// <summary>재구성된 절점 부속(곡관·T형·Y형·십자) 1개(docs/216 § A-1).
 /// ViewModel이 <paramref name="Position"/>에 가장 가까운 캔버스 절점 Guid에 <paramref name="ElementId"/>를 건다 —
 /// 모델 생성 경로(PlaceNodeFittings)와 같은 키라서 [Revit에서 보기]의 절점 부속 선택이 가져온 배관에서도 동작한다.</summary>
 /// <param name="Position">절점 좌표. <see cref="ImportedEdge"/>와 같은 Revit 프로젝트 mm.</param>
 /// <param name="FittingKind">밸브부관 A·B면 그 종류(docs/225 § E, docs/227 § E). 캔버스가 그 절점의 부속 종류를 바꾼다.</param>
-/// <param name="ValveSideDirection">밸브부관 B의 밸브 쪽 커넥터(최소 Id)의 평면 방향. 캔버스 밸브 쪽 지정으로 되살린다.</param>
+/// <param name="ValveSideDirection">밸브부관 B의 밸브 쪽 커넥터(긴 레그, docs/247)의 평면 방향. 캔버스 밸브 쪽 지정으로 되살린다.</param>
 public sealed record ImportedNodeFitting(Point2D Position, long ElementId,
     PipeNodeFittingKind FittingKind = PipeNodeFittingKind.Bend, Point2D? ValveSideDirection = null);
 

@@ -2,14 +2,16 @@ using DHBIMWATER.Core.Parameters;
 
 namespace DHBIMWATER.Core.Gis;
 
-/// <summary>연동 애드인 배치 태그 계약. 이름·타입 변경 금지.</summary>
+/// <summary>연동 애드인 배치 태그 계약. 이름·타입은 연동 애드인의 <c>PlacementSourceTagger</c>와 같이 바꾼다.
+/// <para>2026-10-02 계약 개정(docs/264): 측점은 m 숫자(Number)이고 이름에 단위를 붙였다(`StaStart(m)`·`StaEnd(m)`, 새 GUID).
+/// 프로젝트 길이 단위(보통 mm)로 보이면 측점을 읽기 어려워서다. Z 오프셋은 길이 형식이며 옛 모델의 Number도 쓴다.</para></summary>
 public static class PlacementStationParameters
 {
     public const string SourceFile = "SourceFile";
     public const string Alignment = "Alignment";
     public const string Profile = "Profile";
-    public const string StaStart = "StaStart";
-    public const string StaEnd = "StaEnd";
+    public const string StaStart = "StaStart(m)";
+    public const string StaEnd = "StaEnd(m)";
     public const string ZOffset = "ZOffset";
     public const string Flip = "Flip";
     public const string VerticalBasis = "VerticalBasis";
@@ -23,8 +25,9 @@ public static class PlacementStationParameters
         [SourceFile] = new("53dfa8cd-0583-4a4b-90a9-31762c06eb2c"),
         [Alignment] = new("bdd5ffa3-97ed-4617-a8fe-7bc1bbd824a2"),
         [Profile] = new("993b83c5-17a0-4de0-af07-d262d6f8ccc1"),
-        [StaStart] = new("cb041b23-f945-4e3d-a3fe-0f74ff49ae94"),
-        [StaEnd] = new("39479abc-5fbc-4024-8b86-3e89204f9df7"),
+        // 이름을 바꿔 새 GUID를 받았다(docs/264). 옛 `StaStart` cb041b23-… · `StaEnd` 39479abc-…
+        [StaStart] = new("26a4c229-638c-4e3e-89de-21fb23211344"),
+        [StaEnd] = new("02dc4315-38ef-4197-9ed5-ff61feebefef"),
         [ZOffset] = new("2f1fd1d2-eb40-49c5-8b4e-bc3bb4df7554"),
         [Flip] = new("7989ea02-926a-43c0-a688-2bdf65c74c47"),
         [VerticalBasis] = new("adcc3144-7be1-4ae2-9f8b-67074c3cee22"),
@@ -41,7 +44,7 @@ public static class PlacementStationParameters
         Def(Profile, ParameterSpecType.Text),
         Def(StaStart, ParameterSpecType.Number),
         Def(StaEnd, ParameterSpecType.Number),
-        Def(ZOffset, ParameterSpecType.Number),
+        Def(ZOffset, ParameterSpecType.Length),
         Def(Flip, ParameterSpecType.YesNo),
         Def(VerticalBasis, ParameterSpecType.Text),
         Def(ShapeKind, ParameterSpecType.Text),

@@ -110,9 +110,12 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping
         {
             var connectors = PipeMaterialConnectorReader.EndConnectors(instance);
             var (role, skipReason) = Classify(instance, connectors);
-            // 밸브부관은 비대칭이라 어느 커넥터가 밸브 쪽인지가 곧 방향이다. 배치 경계와 같은 규약(최소 Id = 밸브 쪽)으로
+            // 모델에 놓인 A의 파라미터·커넥터를 남긴다 — 배치 프로브(BypassSet.ProbeFailure)의 로그와 나란히 비교한다(docs/241).
+            if (PipeValveBend.IsValveTeeConnectorCount(connectors.Count) && PipeValveBend.IsValveBendFamily(instance.Symbol.Family.Name))
+                LogValveTeeDiagnostics(instance, connectors, role, skipReason);
+            // 밸브부관은 비대칭이라 어느 커넥터가 밸브 쪽인지가 곧 방향이다. 배치 경계와 같은 규약(긴 레그 = 밸브 쪽, docs/247)으로
             // 순서를 고정해 Connectors[0]을 밸브 쪽으로 넘긴다(docs/225 § E).
-            if (role == PipePartRole.ValveBend) connectors = connectors.OrderBy(x => x.Id).ToList();
+            if (role == PipePartRole.ValveBend) connectors = PipeMaterialConnectorReader.ValveBendValveSideFirst(connectors);
             // 밸브부관 A는 수직분기 커넥터가 가시성과 무관하게 남는다. 캔버스는 평면이라 수평 3개(주관 2·수평분기)만 넘겨
             // T형과 같은 절점 계산을 쓴다(docs/227 § E). 수직분기 A는 범위 밖이다.
             if (role == PipePartRole.ValveTee) connectors = connectors.Where(x => !IsVerticalConnector(x)).ToList();
@@ -146,7 +149,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping
                 return (PipePartRole.ValveBend, null);
             // 밸브부관 A — 같은 키워드에 커넥터 4개(주관 2·수평분기·수직분기, docs/227 § 0-6). 수평 커넥터가 3개가 아니면
             // 수직분기로 쓰인 것이라 평면 캔버스로 되돌릴 수 없다.
-            if (connectors.Count == PipeValveBend.ValveTeeConnectorCount && PipeValveBend.IsValveBendFamily(instance.Symbol.Family.Name))
+            if (PipeValveBend.IsValveTeeConnectorCount(connectors.Count) && PipeValveBend.IsValveBendFamily(instance.Symbol.Family.Name))
                 return connectors.Count(x => !IsVerticalConnector(x)) == 3
                     ? (PipePartRole.ValveTee, null)
                     : (PipePartRole.Unknown, "밸브부관 A의 수평 커넥터가 3개가 아닙니다(수직분기는 지원하지 않습니다)");
@@ -183,6 +186,49 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping
                 PipeMaterialConnectorReader.OutwardDot(connectors[main.Branch], connectors[main.A]),
                 PipeMaterialConnectorReader.OutwardDot(connectors[main.Branch], connectors[main.B]));
             return PipeWyeResolver.IsWyeBranchAngle(branchAngleDeg);
+        }
+
+        /// <summary>되가져오기 진단(docs/241). 밸브부관 A의 유형·분기/구경 관련 파라미터와 커넥터를 로그 `BYPASS_DIAG`에 남긴다.
+        /// 커넥터 좌표는 인스턴스 로컬 좌표(mm)라 배치 프로브(원점·회전 0) 로그와 그대로 비교된다. 로깅 실패는 가져오기를 막지 않는다.</summary>
+        private static void LogValveTeeDiagnostics(FamilyInstance instance, IReadOnlyList<Connector> connectors, PipePartRole role, string? skipReason)
+        {
+            try
+            {
+                var log = new System.Text.StringBuilder();
+                log.AppendLine($"BYPASS_DIAG 되가져오기 밸브부관 A '{instance.Symbol.Family.Name} : {instance.Symbol.Name}' (ID {instance.Id.Value}) — 판정 {role}"
+                    + (skipReason is null ? string.Empty : $", {skipReason}"));
+                foreach (var (scope, parameters) in new[] { ("인스턴스", instance.Parameters), ("유형", instance.Symbol.Parameters) })
+                {
+                    foreach (var parameter in parameters.Cast<Parameter>()
+                                 .Where(x => x.Definition?.Name is { } name && (name.Contains("분기") || name.Contains("구경") || name.Contains("주관")))
+                                 .OrderBy(x => x.Definition.Name))
+                        log.AppendLine($"{scope} '{parameter.Definition.Name}' = {DiagnosticValue(parameter)}");
+                }
+                var toLocal = instance.GetTransform().Inverse;
+                log.AppendLine($"배관 커넥터 {connectors.Count}개(인스턴스 로컬 mm, 바깥 방향):");
+                foreach (var connector in connectors.OrderBy(x => x.Id))
+                {
+                    var o = toLocal.OfPoint(connector.Origin);
+                    var d = toLocal.OfVector(connector.CoordinateSystem.BasisZ);
+                    log.AppendLine(FormattableString.Invariant(
+                        $"  #{connector.Id} 위치({UC.FtToMm(o.X):0.#}, {UC.FtToMm(o.Y):0.#}, {UC.FtToMm(o.Z):0.#}) 방향({d.X:0.###}, {d.Y:0.###}, {d.Z:0.###})")
+                        + (IsVerticalConnector(connector) ? " [수직]" : "")
+                        + (connector.IsConnected ? " [연결됨]" : ""));
+                }
+                DHBIMWATER.Infrastructure.Logging.LogManager.Logger.Warn(log.ToString().TrimEnd());
+            }
+            catch
+            {
+                // 진단 로그는 부가 기능이다 — 실패해도 가져오기는 계속한다.
+            }
+        }
+
+        private static string DiagnosticValue(Parameter parameter)
+        {
+            if (parameter.StorageType == StorageType.Integer && parameter.Definition.GetDataType() == SpecTypeId.Boolean.YesNo)
+                return parameter.AsInteger() == 1 ? "예" : "아니오";
+            var value = parameter.AsValueString() ?? parameter.AsString() ?? "(값 없음)";
+            return parameter.IsReadOnly ? $"{value} (읽기 전용)" : value;
         }
 
         /// <summary>커넥터가 위·아래를 향하는지(밸브부관 A의 수직분기, docs/227 § E). 배치 경계와 같은 기준(|Z| ≥ 0.7)이다.</summary>

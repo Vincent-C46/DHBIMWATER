@@ -56,14 +56,22 @@ public class JunctionDetailCommand : CommandBase
     private static PipeMaterialBackfillResult? OfferBackfill(BackfillPipeMaterialParametersUseCase useCase)
     {
         var scan = useCase.ScanCandidates();
-        if (scan.CandidateCount == 0) return null;
+        if (!scan.HasWork) return null;
 
         var scopeText = scan.FromSelection ? "선택한 요소 중 " : "";
+        // 값이 없는 부재가 없어도 개수(접합·부설·절단)는 문서 전체를 다시 계산한다(docs/267 § 1) — 그래서 태깅된 부재만 있어도 묻는다.
+        var found = new List<string>();
+        if (scan.CandidateCount > 0) found.Add($"재료표 값이 없는 배관 부재 {scan.CandidateCount:N0}개");
+        if (scan.AdaptiveCandidateCount > 0) found.Add($"값이 없는 계획관로 가변 패밀리 {scan.AdaptiveCandidateCount:N0}개");
         var dialog = new TaskDialog("배관재료표")
         {
-            MainInstruction = $"{scopeText}재료표 값이 없는 배관 부재 {scan.CandidateCount:N0}개를 찾았습니다.",
-            MainContent = "이 부재의 명칭·규격·번호를 실측해 기록한 뒤 재료표를 만듭니다. " +
-                "이미 값이 있는 부재는 건드리지 않습니다." + Environment.NewLine + Environment.NewLine +
+            MainInstruction = found.Count > 0
+                ? $"{scopeText}{string.Join(", ", found)}를 찾았습니다."
+                : $"배관 부재 {scan.RecountCount:N0}개의 접합·부설·절단 수를 다시 계산합니다.",
+            MainContent = "값이 없는 부재는 명칭·규격·번호를 실측해 기록한 뒤 재료표를 만듭니다. " +
+                "이미 값이 있는 부재의 명칭·규격·번호는 건드리지 않습니다." + Environment.NewLine + Environment.NewLine +
+                "접합·부설·절단 수는 문서 전체를 규칙으로 다시 계산합니다(플랜지 접합은 연결 기준). " +
+                "손으로 고친 개수는 규칙 값으로 바뀝니다." + Environment.NewLine + Environment.NewLine +
                 "DHBIMWATER가 만들지 않은 배관 이음쇠·밸브류가 이 문서에 있다면 [아니오]를 누르고, " +
                 "대상 부재만 선택한 뒤 다시 실행하세요.",
             CommonButtons = TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No,
@@ -111,6 +119,10 @@ public class JunctionDetailCommand : CommandBase
             if (backfill.SkippedCount > 0)
                 backfillLine += $" 판정할 수 없어 건너뛴 부재 {backfill.SkippedCount:N0}개.";
             lines.Add(backfillLine);
+            if (backfill.AdaptiveFilledCount > 0)
+                lines.Add($"[값 재기록] 직접 배치한 계획관로 가변 패밀리 {backfill.AdaptiveFilledCount:N0}개에 값을 채웠습니다.");
+            if (backfill.RecountedCount > 0)
+                lines.Add($"[개수 재계산] 개수 값 {backfill.RecountedCount:N0}개 부재를 다시 계산했습니다 — 손으로 고친 접합·부설·절단 수는 규칙 값으로 바뀝니다.");
             lines.AddRange(backfill.Warnings);
         }
         lines.Add($"배관 밸브류·이음쇠 부재 {schedule.Scan.TotalPartCount:N0}개를 확인했습니다.");

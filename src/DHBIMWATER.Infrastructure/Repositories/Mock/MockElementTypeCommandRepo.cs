@@ -15,5 +15,6 @@ namespace DHBIMWATER.Infrastructure.Repositories.Mock
         public int FindColumnSymbol(string typeName) => 1;
         public int FindColumnSymbolByFamilyType(string familyTypeName) => 1;
         public int FindGenericModelSymbol(string symbolName) => 1;
+        public bool ApplyStructuralMaterial(int elementOrTypeId, int materialId) => true;
     }
 }

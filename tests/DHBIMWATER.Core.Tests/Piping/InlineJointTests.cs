@@ -111,6 +111,29 @@ public sealed class InlineJointTests
         Assert.DoesNotContain(import.Warnings, x => x.Contains("인접한 밸브가 없어", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void Build_JointDirectlyOnTeeConnector_KeepsItsActualPosition()
+    {
+        // T형 ─(커넥터 직결)─ 이음관 ─ 관. 생성 시 이음관을 T 커넥터에 밀착시킨 결과(docs/250)를 되가져오면
+        // 그 실제 자리(커넥터 중점)가 그대로 캔버스 T가 되어야 한다 — 재생성 때 같은 규칙으로 다시 밀착된다.
+        var import = PipeNetworkReconstructor.Build(
+        [
+            Tee(1, P(0, 0)),
+            Joint(2, P(200, 0), P(400, 0)),
+            Segment(3, P(400, 0), P(3000, 0)),
+            Segment(4, P(-200, 0), P(-3000, 0)),
+            Segment(5, P(0, 200), P(0, 3000)),
+        ]);
+
+        Assert.Equal(3, import.Edges.Count);
+        var joint = Assert.Single(import.Fittings);
+        Assert.True(joint.IsJoint);
+        var edge = import.Edges[joint.EdgeIndex];
+        // 엣지는 T 절점(0,0) ~ (3000,0). 이음관 중점 300mm → T 0.1(엣지 방향은 어느 쪽이든 될 수 있다).
+        var fromTee = Math.Abs(edge.Start.X) < 1e-6 ? joint.T : 1 - joint.T;
+        Assert.Equal(300.0 / 3000, fromTee, 3);
+    }
+
     [Theory]
     [InlineData("DH_이음관 : DN100", true)]
     [InlineData("신축이음관 : 300", true)]
@@ -142,6 +165,15 @@ public sealed class InlineJointTests
 
     private static PickedPipePart Joint(long id, Point2D start, Point2D end)
         => Inline(id, PipePartRole.Joint, JointFamily, start, end);
+
+    /// <summary>T형 1개. 주관은 ±X, 분기는 +Y, 레그 200mm(PipeNetworkReconstructorTests.Tee와 같은 꼴).</summary>
+    private static PickedPipePart Tee(long id, Point2D corner)
+        => new(id, PipePartRole.Tee, "T형 : DN100", corner, 0,
+        [
+            new PickedConnector(new Point2D(corner.X - 200, corner.Y), 0, P(-1, 0), 100, []),
+            new PickedConnector(new Point2D(corner.X + 200, corner.Y), 0, P(1, 0), 100, []),
+            new PickedConnector(new Point2D(corner.X, corner.Y + 200), 0, P(0, 1), 100, [])
+        ]);
 
     private static PickedPipePart Inline(long id, PipePartRole role, string familyTypeName, Point2D start, Point2D end)
         => new(id, role, familyTypeName, new Point2D((start.X + end.X) / 2, (start.Y + end.Y) / 2), 0,

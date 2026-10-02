@@ -10,6 +10,7 @@ public sealed class BypassSetReconstructionTests
 {
     private const string Butterfly = "DH_버터플라이 밸브 : 1650A";
     private const string Gate = "DH_게이트 밸브 : 300A";
+    private const string Check = "DH_역지 밸브 : 300A";
 
     [Fact]
     public void SetWithMainValveAndMainPipes_BecomesOneEdge_SetPlusOrdinaryMainValve()
@@ -61,17 +62,81 @@ public sealed class BypassSetReconstructionTests
     }
 
     [Fact]
-    public void BypassWithTwoValves_IsNotCollapsed()
+    public void BypassWithTwoAdjacentValves_IsCollapsed_WithZeroSpool()
     {
+        // docs/255 — 밸브 2개 세트를 인정한다(종전엔 묶지 않았다). 두 밸브가 맞붙어 있으면 단관 0(직결)이다.
         var parts = SetParts(withMainValve: true).ToList();
-        // 바이패스 관 하나를 밸브로 바꿔 밸브가 2개가 되게 한다.
         var index = parts.FindIndex(x => x.ElementId == 21);
+        parts[index] = parts[index] with { Role = PipePartRole.Accessory, FamilyTypeName = Check };
+
+        var import = PipeNetworkReconstructor.Build(parts);
+
+        var bypass = Assert.Single(import.Fittings, x => x.Bypass is not null).Bypass!;
+        Assert.Equal(Check, bypass.BypassValveFamilyTypeName);
+        Assert.Equal(Gate, bypass.SecondValveFamilyTypeName);
+        Assert.Equal(0, bypass.SpoolLengthMm, 3);
+        Assert.Equal(2, bypass.ValvePositions.Count);
+    }
+
+    [Fact]
+    public void BypassWithTwoValvesAndSpool_IsCollapsed_WithSpoolLength()
+    {
+        var import = PipeNetworkReconstructor.Build([.. TwoValveSetParts(), .. MainPipes()]);
+
+        var fitting = Assert.Single(import.Fittings, x => x.Bypass is not null);
+        var bypass = fitting.Bypass!;
+        Assert.Equal(Gate, bypass.BypassValveFamilyTypeName);
+        Assert.Equal(Check, bypass.SecondValveFamilyTypeName);
+        Assert.Equal(400, bypass.SpoolLengthMm, 3);
+        Assert.Equal(600, bypass.ValvePositions[0].X, 3);
+        Assert.Equal(1400, bypass.ValvePositions[1].X, 3);
+        // A 2 · B 2 · 채움관 2 · 밸브 2 · 단관 1 = 9
+        Assert.Equal(9, bypass.ElementIds.Count);
+        Assert.DoesNotContain(import.Warnings, x => x.Contains("바이패스 세트로 묶지 못해"));
+    }
+
+    [Fact]
+    public void BypassWithThreeValves_IsNotCollapsed()
+    {
+        var parts = TwoValveSetParts().ToList();
+        // 단관을 밸브로 바꿔 밸브가 3개가 되게 한다 — 세트가 아니다.
+        var index = parts.FindIndex(x => x.ElementId == 24);
         parts[index] = parts[index] with { Role = PipePartRole.Accessory, FamilyTypeName = Gate };
 
         var import = PipeNetworkReconstructor.Build(parts);
 
         Assert.DoesNotContain(import.Fittings, x => x.Bypass is not null);
+        Assert.Contains(import.Warnings, x => x.Contains("바이패스 세트로 묶지 못해"));
     }
+
+    [Fact]
+    public void BypassValveNotPicked_WarnsLooseValveTees()
+    {
+        // 세트 부재 일부(바이패스 밸브)를 선택하지 않으면 체인이 끊겨 세트로 묶이지 않는다 — 조용히 풀리지 않게 알린다.
+        var parts = SetParts(withMainValve: true).Where(x => x.ElementId != 22).ToList();
+
+        var import = PipeNetworkReconstructor.Build(parts);
+
+        Assert.DoesNotContain(import.Fittings, x => x.Bypass is not null);
+        var warning = Assert.Single(import.Warnings, x => x.Contains("바이패스 세트로 묶지 못해"));
+        Assert.Contains("밸브부관 A 2개", warning);
+    }
+
+    [Fact]
+    public void CompleteSet_HasNoLooseValveTeeWarning()
+    {
+        var import = PipeNetworkReconstructor.Build([.. SetParts(withMainValve: true), .. MainPipes()]);
+
+        Assert.DoesNotContain(import.Warnings, x => x.Contains("바이패스 세트로 묶지 못해"));
+    }
+
+    [Theory]
+    [InlineData(2, false)]
+    [InlineData(3, true)]
+    [InlineData(4, true)]
+    [InlineData(5, false)]
+    public void ValveTeeConnectorCount_AcceptsThreeAndFourPorts(int count, bool expected)
+        => Assert.Equal(expected, PipeValveBend.IsValveTeeConnectorCount(count));
 
     private static IEnumerable<PickedPipePart> SetParts(bool withMainValve)
     {
@@ -87,6 +152,20 @@ public sealed class BypassSetReconstructionTests
         yield return Segment(31, P(200, 0), P(900, 0), 1650);
         yield return Valve(32, P(900, 0), P(1100, 0), Butterfly, 1650);
         yield return Segment(33, P(1100, 0), P(1800, 0), 1650);
+    }
+
+    /// <summary>밸브 2개 세트(docs/255) — B ─ 관(21) ─ 게이트(22) ─ 단관 400(24) ─ 역지(25) ─ 관(23) ─ B. 본관 밸브 없음.</summary>
+    private static IEnumerable<PickedPipePart> TwoValveSetParts()
+    {
+        yield return Tee(1, P(0, 0));
+        yield return Tee(2, P(2000, 0));
+        yield return Bend(3, P(200, 700), P(1, 0), P(0, 300), P(0, -1));
+        yield return Bend(4, P(1800, 700), P(-1, 0), P(2000, 300), P(0, -1));
+        yield return Segment(21, P(200, 700), P(500, 700), 300);
+        yield return Valve(22, P(500, 700), P(700, 700), Gate, 300);
+        yield return Segment(24, P(700, 700), P(1100, 700), 300);
+        yield return Valve(25, P(1100, 700), P(1700, 700), Check, 300);
+        yield return Segment(23, P(1700, 700), P(1800, 700), 300);
     }
 
     private static IEnumerable<PickedPipePart> MainPipes()

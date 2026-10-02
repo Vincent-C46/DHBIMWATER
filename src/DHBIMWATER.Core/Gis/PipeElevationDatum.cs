@@ -1,3 +1,5 @@
+using DHBIMWATER.Core.Piping;
+
 namespace DHBIMWATER.Core.Gis;
 
 /// <summary>원본 Z를 관 중심선 Z로 환산하는 오프셋(mm)을 계산한다.</summary>

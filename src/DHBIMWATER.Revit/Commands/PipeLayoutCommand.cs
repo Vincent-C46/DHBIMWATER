@@ -46,7 +46,7 @@ public class PipeLayoutCommand : CommandBase
         };
 
         // 캔버스에서 고른 배관·부속을 Revit에서 선택하고 해당 뷰로 옮긴다(docs/179 § F-4).
-        // DHBoost QuantityCommand.cs:60-65와 같은 모양이다.
+        // 수량산출 애드인 QuantityCommand.cs:60-65와 같은 모양이다.
         viewModel.SelectInRevitAction = ids =>
         {
             handler.ElementIdsToSelect = ids;

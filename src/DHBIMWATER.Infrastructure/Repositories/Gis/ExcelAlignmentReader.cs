@@ -199,7 +199,13 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
     /// </summary>
     private static XLWorkbook OpenWorkbook(string filePath)
     {
-        if (!IsCsv(filePath)) return new XLWorkbook(filePath);
+        if (!IsCsv(filePath))
+        {
+            // Excel에 열려 있는 파일도 읽도록 공유 모드를 직접 지정한다(docs/252). 경로 생성자는 Excel의 쓰기 핸들과 충돌한다.
+            // ClosedXML은 생성자에서 통합 문서를 모두 읽으므로 반환 전에 스트림을 닫아도 된다.
+            using var xlsx = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            return new XLWorkbook(xlsx);
+        }
 
         using var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         using var reader = ExcelReaderFactory.CreateCsvReader(stream, new ExcelReaderConfiguration { FallbackEncoding = DetectFallbackEncoding(filePath) });

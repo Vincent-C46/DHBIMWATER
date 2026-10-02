@@ -1,6 +1,13 @@
 using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Gis;
 using Xunit;
+// Core.Piping을 통째로 열면 NodeKind가 Core.Gis와 충돌한다. 카탈로그 형식만 별칭으로 가져온다.
+using BendConnection = DHBIMWATER.Core.Piping.BendConnection;
+using BendSettings = DHBIMWATER.Core.Piping.BendSettings;
+using JointTypeCatalog = DHBIMWATER.Core.Piping.JointTypeCatalog;
+using PipeKindCatalog = DHBIMWATER.Core.Piping.PipeKindCatalog;
+using PipeMaterial = DHBIMWATER.Core.Piping.PipeMaterial;
+using SteelFittingClass = DHBIMWATER.Core.Piping.SteelFittingClass;
 
 namespace DHBIMWATER.Core.Tests.Gis;
 

@@ -26,5 +26,9 @@ namespace DHBIMWATER.Infrastructure.Converters
         // 각도
         public static double DegToRad(double degree) => UnitUtils.ConvertToInternalUnits(degree, UnitTypeId.Degrees);
         public static double RadToDeg(double radian) => UnitUtils.ConvertFromInternalUnits(radian, UnitTypeId.Degrees);
+
+        // 질량(docs/264). 질량 내부 단위는 kg라 값이 같지만, 단위 길이당 질량은 kg/ft라 반드시 변환한다.
+        public static double KgToInternal(double kilograms) => UnitUtils.ConvertToInternalUnits(kilograms, UnitTypeId.Kilograms);
+        public static double KgPerMToInternal(double kilogramsPerMeter) => UnitUtils.ConvertToInternalUnits(kilogramsPerMeter, UnitTypeId.KilogramsPerMeter);
     }
 }

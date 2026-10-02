@@ -6,6 +6,7 @@ using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.UI.ViewModels.Modeling;
 using Xunit;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.UI.Tests.ViewModels.Modeling;
 

@@ -1,4 +1,4 @@
-namespace DHBIMWATER.Core.Gis;
+namespace DHBIMWATER.Core.Piping;
 
 /// <summary>직관 전용 규격. 곡관 벽두께와 허용굴곡에는 관여하지 않는다.</summary>
 /// <param name="DiameterMm">호칭지름 DN. 조회는 Exact Match다.</param>

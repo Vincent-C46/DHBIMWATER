@@ -209,18 +209,7 @@
                                                          Width="100" Margin="10,0" VerticalAlignment="Center" Height="25"/>
                                         <TextBlock Text="m" Style="{StaticResource LabelTextBlockStyle}" VerticalAlignment="Center"/>
                                     </StackPanel>
-                                    <Separator Margin="0,0,0,10"/>
-                                    <TextBlock Text="부재별 콘크리트 재료" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,6"/>
-                                    <DataGrid Style="{StaticResource PrimaryDataGridStyle}" ItemsSource="{Binding ConcreteMaterials}" AutoGenerateColumns="False" CanUserAddRows="False"
-                                              HeadersVisibility="Column" Width="570" MinHeight="165" Margin="0,0,0,10">
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="부재" Binding="{Binding MemberName, Mode=OneWay}" IsReadOnly="True" Width="80"/>
-                                            <DataGridTextColumn Header="최대골재 (mm)" Binding="{Binding MaxAggregateSize, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="110"/>
-                                            <DataGridTextColumn Header="강도 (MPa)" Binding="{Binding CompressiveStrength, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
-                                            <DataGridTextColumn Header="슬럼프 (mm)" Binding="{Binding Slump, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="105"/>
-                                            <DataGridTextColumn Header="재료명" Binding="{Binding MaterialName, Mode=OneWay}" IsReadOnly="True" Width="*"/>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
+                                    <!-- 부재별 콘크리트 재료 표는 공용 [콘크리트 강도] 창으로 옮겼다(docs/249 § E). 하단 버튼. -->
                                 </StackPanel>
                             </ScrollViewer>
                             <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="20,0,0,0">
@@ -991,6 +980,14 @@ Tag="HH1" Text="{Binding HH1}" Width="100" Margin="10,0" VerticalAlignment="Cent
         </ContentControl>
 
         <Grid Grid.Row="3" Height="Auto">
+            <!-- 펌프장·토출조 공용 — 모드와 관계없이 보인다(docs/249 § E). -->
+            <Button Content="콘크리트 강도"
+                    Style="{StaticResource PrimaryButtonStyle}"
+                    Width="120" Height="40"
+                    HorizontalAlignment="Left"
+                    Margin="20,0,0,20"
+                    ToolTip="펌프장·토출조·배수지·밸브실 공용 부재별 콘크리트 강도를 지정합니다. 다음 생성부터 적용됩니다."
+                    Command="{Binding ConcreteLauncher.OpenCommand}"/>
             <Button Content="펌프장 작성"
                     Style="{StaticResource PrimaryButtonStyle}"
                     Width="150" Height="40"

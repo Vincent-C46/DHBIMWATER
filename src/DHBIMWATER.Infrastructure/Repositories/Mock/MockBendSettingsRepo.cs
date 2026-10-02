@@ -1,5 +1,5 @@
 using DHBIMWATER.Application.Interfaces.Gis;
-using DHBIMWATER.Core.Gis;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Mock;
 

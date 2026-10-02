@@ -1,5 +1,6 @@
 using Autodesk.Revit.DB;
 using DHBIMWATER.Core.Piping;
+using DHBIMWATER.Infrastructure.Logging;
 using DHBIMWATER.Shared.Errors;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
 
@@ -15,19 +16,31 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
 /// </summary>
 internal sealed partial class RevitPipeSegmentCommandRepo
 {
-    /// <summary>실측 캐시 키. 같은 밸브·관경 조합이면 세트 치수가 같다.</summary>
-    private readonly record struct BypassLayoutKey(string BypassValve, double MainDiameterMm, double BypassDiameterMm);
+    /// <summary>실측 캐시 키. 바이패스 관경은 핸드북 규격표가 본관 구경에서 정한다(docs/256) — 밸브 패밀리·본관·지관이 같으면 세트 치수가 같다.
+    /// 밸브 2개 세트는 V2 패밀리·단관 길이도 치수를 바꾸므로 키에 넣는다(docs/255 § B-1). 1개 세트는 (null, 0)이다.</summary>
+    private readonly record struct BypassLayoutKey(string BypassValveFamily, double MainDiameterMm, double BranchDiameterMm,
+        string? SecondValveFamily = null, double SpoolLengthMm = 0);
 
-    /// <summary>프로브로 잰 세트 치수(mm).</summary>
+    /// <summary>프로브로 잰 세트 치수(mm)와 생성 때 정한 값.</summary>
     /// <param name="TeeCenterOffsetMm">세트 중심 → 밸브부관 A 중심(주관 축 위) 거리 d.</param>
     /// <param name="TeeMainHalfMm">A 중심 → 주관 커넥터 거리.</param>
     /// <param name="TeeBranchMm">A 중심 → 수평분기 커넥터 거리.</param>
-    /// <param name="BendTeeLegMm">B 코너 → A쪽 커넥터(Id 큰 쪽) 거리.</param>
-    /// <param name="BendValveLegMm">B 코너 → 밸브쪽 커넥터(Id 작은 쪽) 거리.</param>
+    /// <param name="BendTeeLegMm">B 코너 → A쪽 커넥터(짧은 레그) 거리.</param>
+    /// <param name="BendValveLegMm">B 코너 → 밸브쪽 커넥터(긴 레그) 거리.</param>
+    /// <param name="BypassDiameterMm">핸드북 규격표의 지관 관경 = 바이패스 관경(docs/256). 밸브부관 B 커넥터 지름은 이 값과 같은지 검증만 한다.</param>
+    /// <param name="BypassValveSymbol">바이패스 관경과 DN이 같은 바이패스 밸브 유형(docs/244 § A-4). 2개 세트면 V1(엣지 시작 쪽)이다.</param>
+    /// <param name="SecondValveSymbol">밸브 2개 세트의 V2(엣지 끝 쪽) 유형. V1과 같은 규칙으로 고른다(docs/255). 1개 세트면 null.</param>
+    /// <param name="SecondValveWidthMm">V2 커넥터 간 폭(mm). 1개 세트면 0.</param>
+    /// <param name="SpoolLengthMm">V1–V2 사이 단관 길이(mm). 0 = 직결. 1개 세트면 0.</param>
     private sealed record BypassLayout(
         double TeeCenterOffsetMm, double TeeMainHalfMm, double TeeBranchMm,
-        double BendTeeLegMm, double BendValveLegMm, double BypassValveWidthMm)
+        double BendTeeLegMm, double BendValveLegMm, double BypassValveWidthMm,
+        double BypassDiameterMm, FamilySymbol BypassValveSymbol,
+        FamilySymbol? SecondValveSymbol = null, double SecondValveWidthMm = 0, double SpoolLengthMm = 0)
     {
+        /// <summary>B–B 사이 밸브 묶음 폭(mm, docs/255 § B-2). 1개 = W1, 2개 = W1 + 단관 + W2.</summary>
+        public double ValveRunWidthMm => SecondValveSymbol is null ? BypassValveWidthMm : BypassValveWidthMm + SpoolLengthMm + SecondValveWidthMm;
+
         /// <summary>본관에서 A 하나가 차지하는 구간(세트 중심 기준 축 거리). <paramref name="sign"/> -1 = 엣지 시작 쪽 A.</summary>
         public OccupiedSpan TeeSpan(double centerMm, int sign)
             => new(centerMm + sign * TeeCenterOffsetMm - TeeMainHalfMm, centerMm + sign * TeeCenterOffsetMm + TeeMainHalfMm);
@@ -43,7 +56,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo
     private sealed record TeeGeometry(XYZ Center, XYZ MainAxis, XYZ BranchDirection, double MainHalfMm, double BranchMm,
         XYZ Main1, XYZ Main2, XYZ Branch, IReadOnlyList<XYZ> Verticals);
 
-    /// <summary>밸브부관 B 실측 결과(월드 좌표). [0] = 밸브 쪽(최소 Id), [1] = A 쪽.</summary>
+    /// <summary>밸브부관 B 실측 결과(월드 좌표). [0] = 밸브 쪽(긴 레그), [1] = A 쪽(짧은 레그) — docs/247.</summary>
     private sealed record BendGeometry(XYZ Corner, XYZ ValveSide, XYZ TeeSide, XYZ ValveDirection, XYZ TeeDirection,
         double ValveLegMm, double TeeLegMm);
 
@@ -51,7 +64,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo
 
     /// <summary>엣지 위 바이패스 세트의 본관 점유 구간을 예약한다. 실측에 실패한 세트는 건너뛰기로 기록하고 예약하지 않는다 —
     /// 그러면 본관 직관이 그 자리를 연속으로 채운다(밸브 실측 실패와 같은 규칙, docs/145 § 4-5).</summary>
-    private static List<OccupiedSpan> BypassSetSpans(
+    private static List<(Guid Id, OccupiedSpan Span)> BypassSetSpans(
         Document document, FamilySymbolCache symbols, PipeEdgeDefinition edge, PipeNetworkDefinition network,
         PipeSegmentFamilySelection families, SkipPlan skipPlan, XYZ startAnchor, XYZ direction,
         IDictionary<string, string> unusableValves, ICollection<PipeConnectionFailure> skipped,
@@ -59,36 +72,49 @@ internal sealed partial class RevitPipeSegmentCommandRepo
         IDictionary<Guid, BypassLayout> layouts, IDictionary<BypassLayoutKey, BypassLayout> cache, ICollection<string> warnings)
     {
         var axis = new EdgeAxis(startAnchor, direction);
-        var spans = new List<OccupiedSpan>();
+        // 구간마다 세트 Id를 단다 — 위치 오류면 세트 통째로 건너뛴다(docs/251 § B).
+        var spans = new List<(Guid Id, OccupiedSpan Span)>();
         foreach (var fitting in network.InlineFittings.Where(x => x.EdgeId == edge.Id && x.IsBypassSet))
         {
             var spec = fitting.Bypass!;
             var canvasPoint = ToXyz(fitting.Position, fitting.Elevation, network.ReferencePoint);
+            // 새 세트는 패밀리명만, 되가져온 세트는 "패밀리 : 유형"을 든다 — 유형은 생성 때 다시 고르므로 패밀리로 모은다(docs/244 § A-5).
+            var valveFamily = BypassValveFamilyOf(spec.BypassValveFamilyTypeName);
+            // 밸브 2개 세트의 V2(docs/255). 1개 세트면 null.
+            var secondFamily = spec.HasTwoValves ? BypassValveFamilyOf(spec.SecondValveFamilyTypeName) : null;
+            // 지관 관경은 핸드북 규격표가 정한다(docs/256). 표에 없는 주관·관종이면 세트를 만들지 않는다.
+            var branchMm = ValveBypassSpecTable.BranchDiameterMm(network.Material, network.SteelFittingClass, edge.DiameterMm);
             var reason = skipPlan.BypassSetReason
-                ?? (string.IsNullOrWhiteSpace(spec.BypassValveFamilyTypeName) ? "바이패스 밸브가 선택되지 않았습니다." : null)
-                ?? (unusableValves.TryGetValue(spec.BypassValveFamilyTypeName, out var bypassReason) ? bypassReason : null);
+                ?? (branchMm is null ? BypassSpecMissingReason(network, edge.DiameterMm) : null)
+                ?? (string.IsNullOrWhiteSpace(valveFamily) ? "바이패스 밸브가 선택되지 않았습니다." : null)
+                ?? (unusableValves.TryGetValue(valveFamily, out var bypassReason) ? bypassReason : null)
+                ?? (secondFamily is not null && unusableValves.TryGetValue(secondFamily, out var secondReason) ? secondReason : null)
+                ?? (secondFamily is not null && !BypassSet.IsValidSpoolLength(spec.SpoolLengthMm)
+                    ? FormattableString.Invariant($"바이패스 밸브 사이 단관 {spec.SpoolLengthMm:0.#}mm는 쓸 수 없습니다(0 = 직결, 또는 {PipeSegmentPlan.MinSegmentMm:0}mm 이상).")
+                    : null);
             if (reason is not null)
             {
-                skipped.Add(CreateFailure(canvasPoint, BypassSet.TypeKey, spec.BypassValveFamilyTypeName, 0, reason, network));
+                skipped.Add(CreateFailure(canvasPoint, BypassSet.TypeKey, valveFamily, 0, reason, network));
                 droppedFittings.Add(fitting.Id);
                 continue;
             }
             try
             {
-                var key = new BypassLayoutKey(spec.BypassValveFamilyTypeName, edge.DiameterMm, spec.BypassDiameterMm);
+                var key = new BypassLayoutKey(valveFamily, edge.DiameterMm, branchMm!.Value,
+                    secondFamily, secondFamily is null ? 0 : spec.SpoolLengthMm);
                 if (!cache.TryGetValue(key, out var layout))
                     cache[key] = layout = MeasureBypassLayout(document, symbols, families, key);
                 var center = AxisDistanceMm(canvasPoint, axis);
                 axisCenters[fitting.Id] = center;
                 layouts[fitting.Id] = layout;
                 // A 두 구간만 예약한다 — 그 사이는 관 분할이 관·일반 밸브로 채운다(docs/230 § A).
-                spans.Add(layout.TeeSpan(center, -1));
-                spans.Add(layout.TeeSpan(center, 1));
+                spans.Add((fitting.Id, layout.TeeSpan(center, -1)));
+                spans.Add((fitting.Id, layout.TeeSpan(center, 1)));
                 if (layout.HasTinyInnerGap && layout.InnerGapMm > 0)
                 {
                     // 관 최소 조각보다 짧은 틈에는 관을 넣지 않는다(2026-09-28 사용자 결정, docs/230 § E) — 틈을 비워 두는 구간으로 잡아
                     // 관 분할이 "관 조각이 너무 짧다"로 모델 생성 전체를 멈추지 않게 하고, 1mm를 넘으면 경고만 남긴다.
-                    spans.Add(new OccupiedSpan(center - layout.InnerGapMm / 2, center + layout.InnerGapMm / 2));
+                    spans.Add((fitting.Id, new OccupiedSpan(center - layout.InnerGapMm / 2, center + layout.InnerGapMm / 2)));
                     if (layout.InnerGapMm > ConnectionToleranceMm)
                         warnings.Add(FormattableString.Invariant(
                             $"바이패스 세트: 밸브부관 A 사이 틈이 {layout.InnerGapMm:N1}mm라 관을 넣지 않았습니다(관 최소 {PipeSegmentPlan.MinSegmentMm:N0}mm). ") +
@@ -97,7 +123,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo
             }
             catch (Exception ex)
             {
-                skipped.Add(CreateFailure(canvasPoint, BypassSet.TypeKey, spec.BypassValveFamilyTypeName, 0,
+                skipped.Add(CreateFailure(canvasPoint, BypassSet.TypeKey, valveFamily, 0,
                     $"세트 치수를 잴 수 없습니다: {ex.Message}", network));
                 droppedFittings.Add(fitting.Id);
             }
@@ -107,7 +133,10 @@ internal sealed partial class RevitPipeSegmentCommandRepo
 
     // ── § C-1 실측 ─────────────────────────────────────────────────────────────
 
-    /// <summary>원점 프로브로 A·B·바이패스 밸브를 재서 세트 치수를 정한다.
+    /// <summary>원점 프로브로 B·A·바이패스 밸브를 재서 세트 치수를 정한다.
+    /// <para>바이패스 관경은 핸드북 규격표가 정하고(<see cref="BypassLayoutKey.BranchDiameterMm"/>, docs/256) B는 검증만 한다 —
+    /// B의 <c>부관_구경</c>은 붙는 본관 구경을 고르는 조회 키라(docs/244 § A-2) 본관 구경을 넣고, 커넥터 지름이 표 값과 다르면
+    /// 패밀리 조회표가 핸드북과 어긋난 것이므로 세트를 건너뛴다. 그다음 표 값으로 A 분기와 바이패스 밸브 유형을 정한다.</para>
     /// <para>A 중심 간격은 바이패스 쪽(바이패스 밸브 + B 밸브쪽 레그 ×2)이 정한다(docs/230 § A). 두 A가 겹치지 않도록
     /// A 주관 반폭보다는 작아지지 않는다. A–A 사이 본관은 관 분할이 채우고, 거기 놓인 일반 밸브가 너무 크면 PL-301로 막힌다.</para></summary>
     private static BypassLayout MeasureBypassLayout(
@@ -115,35 +144,111 @@ internal sealed partial class RevitPipeSegmentCommandRepo
     {
         var teeSymbol = symbols.Resolve(families.ValveTeeFamilyTypeName, PipeValveBend.PartNameA);
         var bendSymbol = symbols.Resolve(families.ValveBendFamilyTypeName, PipeValveBend.PartNameB);
-        var bypassValveSymbol = symbols.Resolve(key.BypassValve, "바이패스 밸브");
-        var ignored = new List<string>();   // 프로브 구동 경고는 실배치에서 다시 나오므로 여기서는 버린다.
+        // 프로브 구동 경고 — 실측이 성공하면 실배치에서 다시 나오므로 버리고, 실패하면 원인 단서로 사유에 붙인다(docs/241).
+        var probeWarnings = new List<string>();
+        if (string.IsNullOrWhiteSpace(families.ValveTeeHorizontalBranchParameterName))
+            probeWarnings.Add($"{PipeValveBend.PartNameA}의 수평분기 예/아니오 파라미터를 찾지 못해 값을 넣지 않았습니다(패밀리 기본값 그대로).");
 
+        // 1) B — 본관 구경을 넣고 커넥터 지름이 핸드북 지관 관경과 같은지 본다(docs/256). 여기서 실패하면 A는 재지 않는다.
+        BendGeometry bend;
+        var bypassMm = key.BranchDiameterMm;
+        var bendProbe = PlaceAt(document, bendSymbol, XYZ.Zero, 0, null);
+        try
+        {
+            // 구동 전 상태를 떠 둔다 — 실패 시 "값을 넣은 뒤 커넥터가 사라짐/접힘"을 로그만으로 가른다(docs/241).
+            document.Regenerate();
+            var before = ProbeSnapshot(bendProbe);
+            DriveValveBend(bendProbe, families, key.MainDiameterMm, probeWarnings);
+            document.Regenerate();
+            try
+            {
+                bend = MeasureBend(bendProbe);
+                var measuredMm = ValveBendBranchDiameterMm(bendProbe, key.MainDiameterMm);
+                if (Math.Abs(measuredMm - bypassMm) > 0.5)
+                    throw new DhbimwaterException(ErrorCodes.PL_ConnectorSpanMismatch, FormattableString.Invariant(
+                        $"{PipeValveBend.PartNameB}가 본관 {key.MainDiameterMm:0.#}mm에서 부관 {measuredMm:0.#}mm를 만들었지만 핸드북 규격은 {bypassMm:0.#}mm입니다. 패밀리의 '부관_구경' 조회표를 확인하세요."));
+            }
+            catch (Exception ex) { throw ProbeFailure(ex, bendProbe, PipeValveBend.PartNameB, families, key, null, probeWarnings, before); }
+        }
+        finally { document.Delete(bendProbe.Id); document.Regenerate(); }
+
+        // 2) A — 주관 = 본관, 수평분기 = 핸드북 지관 관경(B 검증 통과값).
         TeeGeometry tee;
         var teeProbe = PlaceAt(document, teeSymbol, XYZ.Zero, 0, null);
         try
         {
-            DriveValveTee(teeProbe, families, key.MainDiameterMm, key.BypassDiameterMm, ignored);
             document.Regenerate();
-            tee = MeasureTee(teeProbe);
+            var before = ProbeSnapshot(teeProbe);
+            DriveValveTee(teeProbe, families, key.MainDiameterMm, bypassMm, probeWarnings);
+            document.Regenerate();
+            try { tee = MeasureTee(teeProbe); }
+            catch (Exception ex) { throw ProbeFailure(ex, teeProbe, PipeValveBend.PartNameA, families, key, bypassMm, probeWarnings, before); }
         }
         finally { document.Delete(teeProbe.Id); document.Regenerate(); }
 
-        BendGeometry bend;
-        var bendProbe = PlaceAt(document, bendSymbol, XYZ.Zero, 0, null);
-        try
-        {
-            DriveValveBend(bendProbe, families, key.BypassDiameterMm, ignored);
-            document.Regenerate();
-            bend = MeasureBend(bendProbe);
-        }
-        finally { document.Delete(bendProbe.Id); document.Regenerate(); }
-
+        // 3) 바이패스 밸브 — 같은 DN 유형을 골라 폭을 잰다.
+        var bypassValveSymbol = ResolveBypassValveType(symbols, key.BypassValveFamily, bypassMm, key.MainDiameterMm);
         var bypassWidth = InlineConnectorSpanMm(document, bypassValveSymbol, ValveDiameterParameterNameFor(families, bypassValveSymbol),
-            key.BypassDiameterMm, "바이패스 밸브").WidthMm
+            bypassMm, "바이패스 밸브").WidthMm
             ?? throw new DhbimwaterException(ErrorCodes.PL_ConnectorCountMismatch, "바이패스 밸브는 2포트 인라인 패밀리여야 합니다.");
 
-        var offset = Math.Max(bypassWidth / 2 + bend.ValveLegMm, tee.MainHalfMm);
-        return new BypassLayout(offset, tee.MainHalfMm, tee.BranchMm, bend.TeeLegMm, bend.ValveLegMm, bypassWidth);
+        // 3-2) 밸브 2개 세트의 V2 — V1과 같은 규칙(같은 DN 유형)으로 고르고 폭을 잰다(docs/255 § B-3).
+        FamilySymbol? secondSymbol = null;
+        var secondWidth = 0.0;
+        if (!string.IsNullOrWhiteSpace(key.SecondValveFamily))
+        {
+            secondSymbol = ResolveBypassValveType(symbols, key.SecondValveFamily, bypassMm, key.MainDiameterMm);
+            secondWidth = InlineConnectorSpanMm(document, secondSymbol, ValveDiameterParameterNameFor(families, secondSymbol),
+                bypassMm, "바이패스 밸브 2").WidthMm
+                ?? throw new DhbimwaterException(ErrorCodes.PL_ConnectorCountMismatch, "바이패스 밸브 2는 2포트 인라인 패밀리여야 합니다.");
+        }
+
+        var layout = new BypassLayout(0, tee.MainHalfMm, tee.BranchMm, bend.TeeLegMm, bend.ValveLegMm, bypassWidth, bypassMm, bypassValveSymbol,
+            secondSymbol, secondWidth, secondSymbol is null ? 0 : key.SpoolLengthMm);
+        // 1개 세트면 밸브 묶음 폭 = 밸브 폭이라 종전 식(bypassWidth / 2 + B 레그)과 같다.
+        return layout with { TeeCenterOffsetMm = Math.Max(layout.ValveRunWidthMm / 2 + bend.ValveLegMm, tee.MainHalfMm) };
+    }
+
+    /// <summary>세트 스펙의 바이패스 밸브 값에서 패밀리명만 뽑는다. 새 세트는 패밀리명, 되가져온 세트는 "패밀리 : 유형"이다(docs/244 § A-4).</summary>
+    private static string BypassValveFamilyOf(string? specValue)
+    {
+        if (string.IsNullOrWhiteSpace(specValue)) return string.Empty;
+        var separator = specValue.LastIndexOf(" : ", StringComparison.Ordinal);
+        return separator > 0 ? specValue[..separator] : specValue;
+    }
+
+    /// <summary>핸드북 밸브부관 규격이 없을 때의 건너뛰기 사유(docs/256 § C-1). PE·PVC는 관종 자체에 규격이 없다.</summary>
+    private static string BypassSpecMissingReason(PipeNetworkDefinition network, double mainMm)
+    {
+        var label = DHBIMWATER.Core.Gis.PipeAlignmentParameters.Label(network.Material);
+        if (!ValveBypassSpecTable.HasSpec(network.Material))
+            return $"{label}은 핸드북 밸브부관 규격이 없어 바이패스 세트를 만들지 않았습니다.";
+        var grade = network.Material == DHBIMWATER.Core.Piping.PipeMaterial.Steel
+            ? $" {ValveBypassSpecTable.NormalizeSteelClass(network.SteelFittingClass)}" : "";
+        return FormattableString.Invariant(
+            $"핸드북 밸브부관 규격에 없는 주관입니다({label}{grade} DN{mainMm:0.#}, 규격 범위 {ValveBypassSpecTable.RangeText(network.Material, network.SteelFittingClass)}). 바이패스 세트를 만들지 않았습니다.");
+    }
+
+    /// <summary>바이패스 관경과 유형명 DN이 같은 바이패스 밸브 유형(docs/244 § A-4). 없으면 세트를 건너뛰도록 예외.</summary>
+    private static FamilySymbol ResolveBypassValveType(FamilySymbolCache symbols, string familyName, double bypassMm, double mainMm)
+        => symbols.FindByNominalDiameter(familyName, bypassMm)
+           ?? throw new DhbimwaterException(ErrorCodes.PL_FamilyNotFound, FormattableString.Invariant(
+               $"바이패스 밸브 '{familyName}'에 {bypassMm:0}A 유형이 없습니다. 본관 {mainMm:0.#}mm의 핸드북 바이패스 관경은 {bypassMm:0.#}mm입니다 — 그 규격의 유형을 프로젝트에 로드하세요."));
+
+    /// <summary>밸브부관 B의 부관 관경 = 두 배관 커넥터 지름(docs/244 § A-2). 파라미터명 의존을 피하려고 커넥터를 읽는다(§ F-1).
+    /// 소수 첫째 자리로 반올림해 ft↔mm 왕복 오차를 없앤다.</summary>
+    private static double ValveBendBranchDiameterMm(FamilyInstance instance, double mainMm)
+    {
+        var diameters = GetMepConnectors(instance).Select(PipeMaterialConnectorReader.DiameterMm).ToList();
+        if (diameters.Count == 0 || diameters.Any(x => x is null or <= 0))
+            throw new DhbimwaterException(ErrorCodes.PL_ConnectorSpanMismatch, FormattableString.Invariant(
+                $"{PipeValveBend.PartNameB}의 부관 관경을 읽을 수 없습니다(커넥터가 원형이 아니거나 지름이 0). '부관_구경'에 본관 {mainMm:0.#}mm를 넣었을 때 패밀리가 부관을 만드는지 확인하세요."));
+        var min = diameters.Min(x => x!.Value);
+        var max = diameters.Max(x => x!.Value);
+        if (max - min > 0.5)
+            throw new DhbimwaterException(ErrorCodes.PL_ConnectorSpanMismatch, FormattableString.Invariant(
+                $"{PipeValveBend.PartNameB}의 두 커넥터 지름이 다릅니다({diameters[0]:0.#}/{diameters[^1]:0.#}mm)."));
+        return Math.Round(diameters[0]!.Value, 1);
     }
 
     /// <summary>밸브부관 A 파라미터 구동 — 주관 = 본관, 분기 = 바이패스, 수평분기 예, 수직분기 아니오(docs/227 § D).</summary>
@@ -155,9 +260,9 @@ internal sealed partial class RevitPipeSegmentCommandRepo
         SetOptionalFlagParameter(instance, families.ValveTeeVerticalBranchParameterName, false, PipeValveBend.PartNameA, warnings);
     }
 
-    /// <summary>밸브부관 B 파라미터 구동 — 자기 관경 = 바이패스만 구동한다. 본관 구경은 규격 매개변수에만 적는다(docs/229 § A).</summary>
-    private static void DriveValveBend(FamilyInstance instance, PipeSegmentFamilySelection families, double bypassMm, List<string> warnings)
-        => SetOptionalDiameterParameter(instance, families.ValveBendDiameterParameterName, bypassMm, PipeValveBend.PartNameB, warnings);
+    /// <summary>밸브부관 B 파라미터 구동 — <c>부관_구경</c>(본관 구경 키)에 본관 구경을 넣는다. 부관 관경은 패밀리가 조회표로 정한다(docs/244, docs/229 § A 번복).</summary>
+    private static void DriveValveBend(FamilyInstance instance, PipeSegmentFamilySelection families, double mainMm, List<string> warnings)
+        => SetOptionalDiameterParameter(instance, families.ValveBendDiameterParameterName, mainMm, PipeValveBend.PartNameB, warnings);
 
     /// <summary>A의 수평 커넥터 3개에서 주관(마주보는 쌍)·분기·중심을 구한다. 수직분기 커넥터는 뺀다.</summary>
     private static TeeGeometry MeasureTee(FamilyInstance instance)
@@ -185,10 +290,10 @@ internal sealed partial class RevitPipeSegmentCommandRepo
             main1, main2, branch, all.Where(IsVerticalConnector).Select(x => x.Origin).ToList());
     }
 
-    /// <summary>B의 두 커넥터 축 교점(코너)과 레그 길이를 구한다. [0] = 최소 Id = 밸브 쪽(docs/225 § 0-5).</summary>
+    /// <summary>B의 두 커넥터 축 교점(코너)과 레그 길이를 구한다. [0] = 긴 레그 = 밸브 쪽(docs/247).</summary>
     private static BendGeometry MeasureBend(FamilyInstance instance)
     {
-        var connectors = GetMepConnectors(instance).OrderBy(x => x.Id).ToList();
+        var connectors = PipeMaterialConnectorReader.ValveBendValveSideFirst(GetMepConnectors(instance));
         if (connectors.Count != 2)
             throw new DhbimwaterException(ErrorCodes.PL_ConnectorCountMismatch,
                 $"{PipeValveBend.PartNameB} '{instance.Symbol.Family.Name} : {instance.Symbol.Name}'의 배관 커넥터가 {connectors.Count}개입니다(2개여야 합니다).");
@@ -206,6 +311,121 @@ internal sealed partial class RevitPipeSegmentCommandRepo
             UC.FtToMm(Flat(p0 - corner).GetLength()), UC.FtToMm(Flat(p1 - corner).GetLength()));
     }
 
+    /// <summary>프로브 실측 실패를 진단 정보와 함께 다시 던진다(docs/241). 안내 텍스트에는 원인 단서(수평분기 값·구동 경고)를,
+    /// 로그에는 커넥터 전체(좌표·방향)와 구동 파라미터 값을 남긴다. 프로브는 원점에 놓이므로 좌표가 곧 패밀리 원점 기준이다.</summary>
+    private static DhbimwaterException ProbeFailure(
+        Exception ex, FamilyInstance probe, string role, PipeSegmentFamilySelection families, BypassLayoutKey key, double? bypassMm,
+        IReadOnlyList<string> probeWarnings, ProbeState before)
+    {
+        var isTee = role == PipeValveBend.PartNameA;
+        var after = ProbeSnapshot(probe);
+        var hints = new List<string>();
+        // 구동 전에는 있던 커넥터가 구동 뒤 줄었으면 패밀리가 이 구경에서 형상을 만들지 못한 것이다(docs/241 — D형 B 200mm 사례).
+        // B는 본관 구경을, A는 B가 정한 바이패스 관경을 분기에 넣는다(docs/244 § A-6).
+        var drivenText = isTee
+            ? FormattableString.Invariant($"수평분기_구경 {bypassMm ?? 0:0.#}mm")
+            : FormattableString.Invariant($"부관_구경(본관) {key.MainDiameterMm:0.#}mm");
+        if (after.PipingEndCount < before.PipingEndCount)
+            hints.Add(
+                $"파라미터를 넣기 전에는 배관 커넥터가 {before.PipingEndCount}개였으나 넣은 뒤 {after.PipingEndCount}개입니다 — 패밀리가 {drivenText}에서 형상을 만들지 못하는지 확인하세요");
+        if (isTee)
+        {
+            var horizontal = DescribeParameter(probe, families.ValveTeeHorizontalBranchParameterName);
+            hints.Add($"현재 수평분기 = {horizontal}");
+            if (ex.Message.Contains("주관 축 위", StringComparison.Ordinal))
+                hints.Add($"{drivenText}에서 분기 커넥터가 주관 옆(측면)으로 나오는지 패밀리를 확인하세요");
+        }
+        hints.AddRange(probeWarnings);
+
+        var log = new System.Text.StringBuilder();
+        log.AppendLine($"BYPASS_DIAG {role} '{probe.Symbol.Family.Name} : {probe.Symbol.Name}' 실측 실패 — {ex.Message}");
+        var bypassText = bypassMm is { } b ? FormattableString.Invariant($"{b:0.#}mm") : "미결정";
+        log.AppendLine(FormattableString.Invariant(
+            $"세트: 바이패스 밸브 패밀리 '{key.BypassValveFamily}', 본관 {key.MainDiameterMm:0.#}mm, 바이패스 {bypassText}"));
+        if (isTee)
+        {
+            log.AppendLine($"주관 직경 '{families.ValveTeeMainDiameterParameterName}' = {DescribeParameter(probe, families.ValveTeeMainDiameterParameterName)}");
+            log.AppendLine($"분기 직경 '{families.ValveTeeBranchDiameterParameterName}' = {DescribeParameter(probe, families.ValveTeeBranchDiameterParameterName)}");
+            log.AppendLine($"수평분기 '{families.ValveTeeHorizontalBranchParameterName}' = {DescribeParameter(probe, families.ValveTeeHorizontalBranchParameterName)}");
+            log.AppendLine($"수직분기 '{families.ValveTeeVerticalBranchParameterName}' = {DescribeParameter(probe, families.ValveTeeVerticalBranchParameterName)}");
+        }
+        else
+        {
+            log.AppendLine($"직경 '{families.ValveBendDiameterParameterName}' = {DescribeParameter(probe, families.ValveBendDiameterParameterName)}");
+        }
+        // 구동 전 → 구동 후. 파라미터는 되가져오기 진단(RevitValveRoomPipingPickRepo.LogValveTeeDiagnostics)과 같은 필터다.
+        log.AppendLine("[구동 전 — 패밀리 기본값]");
+        foreach (var line in before.Lines) log.AppendLine(line);
+        log.AppendLine("[구동 후]");
+        foreach (var line in after.Lines) log.AppendLine(line);
+        foreach (var warning in probeWarnings) log.AppendLine($"구동 경고: {warning}");
+        LogManager.Logger.Warn(log.ToString().TrimEnd());
+
+        var code = ex is DhbimwaterException dh ? dh.Code : ErrorCodes.PL_ConnectorSpanMismatch;
+        var message = ex.Message.TrimEnd('.', ' ') + ". " + string.Join(" / ", hints)
+            + $". 커넥터 좌표 등 상세는 로그({LogManager.LogFilePath})의 BYPASS_DIAG 항목을 보세요.";
+        return new DhbimwaterException(code, message, ex);
+    }
+
+    /// <summary>프로브 한 시점의 진단 상태. <paramref name="PipingEndCount"/>는 실측이 쓰는 배관 End 커넥터 수다.</summary>
+    private sealed record ProbeState(int PipingEndCount, IReadOnlyList<string> Lines);
+
+    /// <summary>프로브의 분기·구경·주관·부관 파라미터와 커넥터 전체를 뜬다(docs/241). 커넥터는 도메인·종류를 가리지 않고 모두 적되,
+    /// 실측에서 빠지는 것(배관 아님·End 아님)은 표시한다 — "커넥터 0개"가 사라진 것인지 종류가 다른 것인지 가르기 위해서다.</summary>
+    private static ProbeState ProbeSnapshot(FamilyInstance probe)
+    {
+        var lines = new List<string>();
+        try
+        {
+            foreach (var parameter in probe.Parameters.Cast<Parameter>()
+                         .Where(x => x.Definition?.Name is { } name
+                                     && (name.Contains("분기") || name.Contains("구경") || name.Contains("주관") || name.Contains("부관")))
+                         .OrderBy(x => x.Definition.Name))
+                lines.Add($"인스턴스 '{parameter.Definition.Name}' = {DescribeParameter(probe, parameter.Definition.Name)}");
+
+            var all = probe.MEPModel?.ConnectorManager?.Connectors.Cast<Connector>().OrderBy(x => x.Id).ToList() ?? [];
+            var pipingEnd = all.Count(x => x.Domain == Domain.DomainPiping && x.ConnectorType == ConnectorType.End);
+            lines.Add(probe.MEPModel?.ConnectorManager is null
+                ? "커넥터 관리자 없음(MEPModel 없음)"
+                : $"커넥터 {all.Count}개 · 그중 배관 End {pipingEnd}개(원점 기준 mm, 바깥 방향):");
+            foreach (var connector in all)
+            {
+                var isPipingEnd = connector.Domain == Domain.DomainPiping && connector.ConnectorType == ConnectorType.End;
+                var text = $"  #{connector.Id}";
+                if (connector.ConnectorType is ConnectorType.End or ConnectorType.Curve or ConnectorType.Physical)
+                {
+                    var o = connector.Origin;
+                    var d = connector.CoordinateSystem.BasisZ;
+                    text += FormattableString.Invariant(
+                        $" 위치({UC.FtToMm(o.X):0.#}, {UC.FtToMm(o.Y):0.#}, {UC.FtToMm(o.Z):0.#}) 방향({d.X:0.###}, {d.Y:0.###}, {d.Z:0.###})");
+                    if (isPipingEnd && IsVerticalConnector(connector)) text += " [수직]";
+                }
+                if (!isPipingEnd) text += $" [실측 제외: {connector.Domain}/{connector.ConnectorType}]";
+                lines.Add(text);
+            }
+            return new ProbeState(pipingEnd, lines);
+        }
+        catch (Exception ex)
+        {
+            // 진단은 부가 기능이다 — 뜨다 실패해도 배치·원래 실측 오류를 막지 않는다. 개수 -1 = 모름(커넥터 감소 힌트를 내지 않는다).
+            lines.Add($"(진단 수집 실패: {ex.Message})");
+            return new ProbeState(-1, lines);
+        }
+    }
+
+    /// <summary>진단용 파라미터 값 문자열. 이름이 비었거나 없는 파라미터·유형 파라미터를 구분해 알려 준다.</summary>
+    private static string DescribeParameter(FamilyInstance instance, string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "(파라미터 미지정)";
+        var parameter = instance.LookupParameter(name);
+        if (parameter is null)
+            return instance.Symbol.LookupParameter(name) is null ? "(파라미터 없음)" : "(유형 파라미터 — 인스턴스에서 바꿀 수 없음)";
+        var value = parameter.StorageType == StorageType.Integer && parameter.Definition.GetDataType() == SpecTypeId.Boolean.YesNo
+            ? (parameter.AsInteger() == 1 ? "예" : "아니오")
+            : parameter.AsValueString() ?? parameter.AsString() ?? "(값 없음)";
+        return parameter.IsReadOnly ? $"{value} (읽기 전용)" : value;
+    }
+
     // ── § C-3 배치 ─────────────────────────────────────────────────────────────
 
     /// <summary>세트 하나를 놓는다. 도중에 실패하면 이 세트에서 만든 부재를 모두 지우고 건너뛰기로 기록한다 —
@@ -220,7 +440,9 @@ internal sealed partial class RevitPipeSegmentCommandRepo
     {
         var spec = fitting.Bypass!;
         var mainMm = edge.DiameterMm;
-        var bypassMm = spec.BypassDiameterMm;
+        // 바이패스 관경·밸브 유형은 핸드북 규격표 값(docs/256)과 그에 맞춰 고른 유형이다 — 캔버스 스펙 값은 쓰지 않는다(docs/244 § A-5).
+        var bypassMm = layout.BypassDiameterMm;
+        var bypassValveSymbol = layout.BypassValveSymbol;
         var u = axis.Direction;
         var n = new XYZ(-u.Y, u.X, 0) * spec.NormalizedSide;
         var center = axis.PointAt(centerMm);
@@ -233,7 +455,6 @@ internal sealed partial class RevitPipeSegmentCommandRepo
         {
             var teeSymbol = symbols.Resolve(families.ValveTeeFamilyTypeName, PipeValveBend.PartNameA);
             var bendSymbol = symbols.Resolve(families.ValveBendFamilyTypeName, PipeValveBend.PartNameB);
-            var bypassValveSymbol = symbols.Resolve(spec.BypassValveFamilyTypeName, "바이패스 밸브");
 
             // 1) 밸브부관 A 두 개 — 세트 중심 ∓ d. [0]이 엣지 시작 쪽이다.
             var tees = new List<TeeGeometry>();
@@ -259,7 +480,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo
                     opens.Add(Nearest(new[] { geometry.Main1, geometry.Main2 }, center));
                 parts.Add(new PlacedPart(tee, PipeValveBend.PartNameA));
                 materials.Add(new MaterialPart(tee, FittingNameOf(tee), PipeMaterialSpecText.ValveBranch(mainMm, bypassMm), mainMm,
-                    BranchDiameterMm: bypassMm));
+                    BranchDiameterMm: bypassMm, ValveFitting: ValveFittingKind.Tee));
             }
 
             // A–A 사이 본관은 세트가 아니다 — 관 분할(2단계)이 이미 관·일반 밸브를 놓았다(docs/230 § A).
@@ -271,8 +492,13 @@ internal sealed partial class RevitPipeSegmentCommandRepo
                 var towardCenter = i == 0 ? u : -u;
                 var bend = PlaceAt(document, bendSymbol, tees[i].Branch, 0, hostLevel, elevationFixes);
                 created.Add(bend);
-                DriveValveBend(bend, families, bypassMm, warnings);
+                DriveValveBend(bend, families, mainMm, warnings);
                 document.Regenerate();
+                // 프로브와 실배치가 다를 이유는 없지만, 다르면 A 분기·밸브·채움관이 틀어지므로 세트를 되돌린다(docs/244 § A-5).
+                var placedBypassMm = ValveBendBranchDiameterMm(bend, mainMm);
+                if (Math.Abs(placedBypassMm - bypassMm) > 0.5)
+                    throw new DhbimwaterException(ErrorCodes.PL_ConnectorSpanMismatch, FormattableString.Invariant(
+                        $"{PipeValveBend.PartNameB}의 부관 관경이 실측({bypassMm:0.#}mm)과 실배치({placedBypassMm:0.#}mm)에서 다릅니다."));
                 var geometry = MeasureBend(bend);
                 RotateAboutZ(document, bend, geometry.Corner, SignedAngle(geometry.TeeDirection, -n));
                 geometry = MeasureBend(bend);
@@ -291,19 +517,48 @@ internal sealed partial class RevitPipeSegmentCommandRepo
                 bendValveEnds.Add(geometry.ValveSide);
                 parts.Add(new PlacedPart(bend, PipeValveBend.PartNameB));
                 materials.Add(new MaterialPart(bend, FittingNameOf(bend), PipeMaterialSpecText.ValveBranch(mainMm, bypassMm), mainMm,
-                    BranchDiameterMm: bypassMm));
+                    BranchDiameterMm: bypassMm, ValveFitting: ValveFittingKind.Bend));
             }
 
             // 3) 바이패스 밸브 — 두 B 밸브쪽 커넥터의 중점. 틈은 바이패스 관경 단관으로 채운다.
             var bypassCenter = (bendValveEnds[0] + bendValveEnds[1]) / 2;
-            var (bypassValve, bypassValveEnds) = PlaceSetValve(document, bypassValveSymbol, families, bypassCenter, u, bypassMm, "바이패스 밸브",
-                hostLevel, warnings, elevationFixes);
-            created.Add(bypassValve);
-            parts.Add(new PlacedPart(bypassValve, "배관부속"));
-            materials.Add(new MaterialPart(bypassValve, FittingNameOf(bypassValve), ValvePipingParameters.DiameterText(bypassMm), bypassMm));
-            foreach (var end in bendValveEnds)
-                PlaceSetFiller(document, segment, families, end, Nearest(bypassValveEnds, end), bypassMm,
+            if (layout.SecondValveSymbol is not { } secondValveSymbol)
+            {
+                var (bypassValve, bypassValveEnds) = PlaceSetValve(document, bypassValveSymbol, families, bypassCenter, u, bypassMm, "바이패스 밸브",
+                    hostLevel, warnings, elevationFixes);
+                created.Add(bypassValve);
+                parts.Add(new PlacedPart(bypassValve, "배관부속"));
+                materials.Add(new MaterialPart(bypassValve, FittingNameOf(bypassValve), ValvePipingParameters.DiameterText(bypassMm), bypassMm));
+                foreach (var end in bendValveEnds)
+                    PlaceSetFiller(document, segment, families, end, Nearest(bypassValveEnds, end), bypassMm,
+                        hostLevel, elevationFixes, created, parts, materials);
+            }
+            else
+            {
+                // 밸브 2개(docs/255 § B-5) — B ─ 채움관 ─ V1 ─ 단관 ─ V2 ─ 채움관 ─ B. 묶음 폭 W를 두 B 중점에 맞춘다.
+                // bendValveEnds[0]은 엣지 시작 쪽 A(sign −1)에서 나왔으므로 V1을 −u 쪽에 두면 V1 = 엣지 시작 쪽이다.
+                var halfRun = layout.ValveRunWidthMm / 2;
+                var v1Center = bypassCenter + u * UC.MmToFt(-halfRun + layout.BypassValveWidthMm / 2);
+                var v2Center = bypassCenter + u * UC.MmToFt(halfRun - layout.SecondValveWidthMm / 2);
+                var (valve1, valve1Ends) = PlaceSetValve(document, bypassValveSymbol, families, v1Center, u, bypassMm, "바이패스 밸브",
+                    hostLevel, warnings, elevationFixes);
+                created.Add(valve1);
+                var (valve2, valve2Ends) = PlaceSetValve(document, secondValveSymbol, families, v2Center, u, bypassMm, "바이패스 밸브 2",
+                    hostLevel, warnings, elevationFixes);
+                created.Add(valve2);
+                foreach (var valve in new[] { valve1, valve2 })
+                {
+                    parts.Add(new PlacedPart(valve, "배관부속"));
+                    materials.Add(new MaterialPart(valve, FittingNameOf(valve), ValvePipingParameters.DiameterText(bypassMm), bypassMm));
+                }
+                PlaceSetFiller(document, segment, families, bendValveEnds[0], Nearest(valve1Ends, bendValveEnds[0]), bypassMm,
                     hostLevel, elevationFixes, created, parts, materials);
+                // 단관 0(직결)이면 PlaceSetFiller가 접합 허용치 이하로 보고 놓지 않는다.
+                PlaceSetFiller(document, segment, families, Nearest(valve1Ends, v2Center), Nearest(valve2Ends, v1Center), bypassMm,
+                    hostLevel, elevationFixes, created, parts, materials);
+                PlaceSetFiller(document, segment, families, Nearest(valve2Ends, bendValveEnds[1]), bendValveEnds[1], bypassMm,
+                    hostLevel, elevationFixes, created, parts, materials);
+            }
         }
         catch (Exception ex)
         {
@@ -320,7 +575,9 @@ internal sealed partial class RevitPipeSegmentCommandRepo
                 openPoints.Add(axis.PointAt(span.StartMm));
                 openPoints.Add(axis.PointAt(span.EndMm));
             }
-            skipped.Add(CreateFailure(center, BypassSet.TypeKey, spec.BypassValveFamilyTypeName, 0, ex.Message, network));
+            var failedName = $"{bypassValveSymbol.FamilyName} : {bypassValveSymbol.Name}";
+            if (layout.SecondValveSymbol is { } failedSecond) failedName += $" / {failedSecond.FamilyName} : {failedSecond.Name}";
+            skipped.Add(CreateFailure(center, BypassSet.TypeKey, failedName, 0, ex.Message, network));
             return;
         }
 

@@ -255,9 +255,14 @@
                             <TextBox Text="{Binding IntervalM}" Width="150" HorizontalAlignment="Left" ToolTip="직관 분절 간격. 곡관 자리는 제외">
                                 <TextBox.Style><Style TargetType="TextBox" BasedOn="{StaticResource PrimaryTextBoxStyle}"><Style.Triggers><DataTrigger Binding="{Binding IsIntervalHighlighted}" Value="True"><Setter Property="BorderBrush" Value="#E67E22"/><Setter Property="BorderThickness" Value="2"/></DataTrigger></Style.Triggers></Style></TextBox.Style>
                             </TextBox>
-                            <TextBlock Text="이경관 길이(mm)" Margin="0,8,0,3"/>
+                            <TextBlock Text="편락관 형식 (주철 소켓)" Margin="0,8,0,3"/>
+                            <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Width="150" HorizontalAlignment="Left"
+                                      ItemsSource="{Binding ReducerFormOptions, Mode=OneWay}"
+                                      SelectedItem="{Binding ReducerFormOption, Mode=TwoWay}"
+                                      ToolTip="핸드북 소켓 편락관 형식. A형: 테이퍼 L · B형: 소경 쪽 직관부 200 · C형: 대경 쪽 직관부 200. 플랜지·강관에는 영향 없음"/>
+                            <TextBlock Text="이경관 길이(카탈로그 없을 때, mm)" Margin="0,8,0,3"/>
                             <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding ReducerBodyLengthMm}" Width="150" HorizontalAlignment="Left"
-                                     ToolTip="DN 변경 지점 이경관 몸통 길이 (임시값)"/>
+                                     ToolTip="핸드북 편락관 표(주철·강관)에 없는 대·소경 조합에만 쓰입니다. 이때 무게는 비웁니다."/>
                             </StackPanel>
                             </Border>
                             <Grid Margin="0,0,0,12">

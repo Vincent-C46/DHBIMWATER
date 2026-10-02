@@ -1,10 +1,10 @@
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Application.UseCases.Gis;
-using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Infrastructure.Services.Mock;
 using DHBIMWATER.UI.ViewModels.Modeling;
 using Xunit;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.UI.Tests.ViewModels.Modeling;
 

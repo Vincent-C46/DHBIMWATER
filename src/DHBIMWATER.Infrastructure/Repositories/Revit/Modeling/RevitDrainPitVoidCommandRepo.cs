@@ -12,11 +12,18 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling;
 /// 실물 피트 패밀리면 절단 없이 배치만 한다(docs/153 § E-3).</summary>
 public sealed class RevitDrainPitVoidCommandRepo : IDrainPitVoidCommandRepo
 {
+    // 밸브실 기초·버림 두께를 받는 DH_배수지피트 인스턴스 매개변수(docs/246 추가수정).
+    // TODO: 매핑 UI(DrainPitVoidFamilyMappingDto)로 옮길지 결정 전까지 이름을 코드에 고정한다.
+    private const string FoundationThicknessParameterName = "밸브실_바닥슬라브두께";
+    private const string PlainConcreteThicknessParameterName = "드레인피트_버림콘크리트_두께";
+    private const string ValveRoomPitFamilyName = "DH_배수지피트";
+
     private readonly Func<Document?> _doc;
     public RevitDrainPitVoidCommandRepo(Func<Document?> doc) => _doc = doc;
 
     public DrainPitPlacementResult CreateDrainPitVoid(IReadOnlyList<int> hostElementIds, long levelId,
-        DrainPitDefinition definition, DrainPitVoidFamilyMappingDto mapping)
+        DrainPitDefinition definition, DrainPitVoidFamilyMappingDto mapping,
+        double foundationThickness, double plainConcreteThickness)
     {
         var doc = _doc() ?? throw new DhbimwaterException(ErrorCodes.NoActiveDocument, "활성 Revit 문서가 없습니다.");
         if (hostElementIds.Count == 0) throw new DhbimwaterException(ErrorCodes.VR_NoCutHost, "드레인 피트 절단 대상이 없습니다.");
@@ -49,12 +56,20 @@ public sealed class RevitDrainPitVoidCommandRepo : IDrainPitVoidCommandRepo
         Set(instance, mapping.LengthParameterName, definition.LengthX);
         Set(instance, mapping.WidthParameterName, definition.WidthY);
         Set(instance, mapping.DepthParameterName, definition.Depth);
+        // 기초·버림 두께(docs/246 추가수정). 매개변수가 있으면 어느 패밀리든 기록하고,
+        // 없을 때 경고는 DH_배수지피트에서만 낸다 — 다른 피트 패밀리는 이 매개변수가 없는 것이 정상이다.
+        var requireThickness = familyName == ValveRoomPitFamilyName;
+        var thicknessWarnings = new[]
+        {
+            TrySet(instance, FoundationThicknessParameterName, foundationThickness, requireThickness),
+            TrySet(instance, PlainConcreteThicknessParameterName, plainConcreteThickness, requireThickness),
+        }.OfType<string>().ToList();
         instance.LookupParameter("DH_Addin")?.Set("DHBIMWATER");
         instance.LookupParameter("DH_Category")?.Set(isVoidCutting ? "개구부" : "드레인피트");
         instance.LookupParameter("DH_Part")?.Set("드레인피트");
         doc.Regenerate();
 
-        var warnings = new List<string>();
+        var warnings = new List<string>(thicknessWarnings);
         if (isVoidCutting)
         {
             foreach (var hostId in hostElementIds)
@@ -101,6 +116,18 @@ public sealed class RevitDrainPitVoidCommandRepo : IDrainPitVoidCommandRepo
         // 길이(실수형) 매개변수만 받는다 — 문자·정수형이면 Set(double)이 false를 돌려주고 피트 치수가 조용히 빠졌다(docs/238 § E).
         if (parameter.StorageType != StorageType.Double || !parameter.Set(UC.MmToFt(value)))
             throw new DhbimwaterException(ErrorCodes.VR_VoidParameterUnwritable, $"드레인 피트 매개변수 '{name}'에 길이 값을 쓰지 못했습니다. 길이(실수형) 인스턴스 매개변수를 고르세요.");
+    }
+
+    /// <summary>길이 인스턴스 매개변수를 쓰되, 쓸 수 없으면 예외 대신 경고 문구를 돌려준다(docs/246 추가수정).
+    /// 매개변수가 아예 없으면 <paramref name="required"/>일 때만 경고한다.</summary>
+    private static string? TrySet(FamilyInstance instance, string name, double value, bool required)
+    {
+        var parameter = instance.LookupParameter(name);
+        if (parameter == null)
+            return !required ? null : $"드레인 피트 패밀리에 인스턴스 매개변수 '{name}'이(가) 없어 {value}mm를 기록하지 못했습니다.";
+        if (parameter.IsReadOnly || parameter.StorageType != StorageType.Double || !parameter.Set(UC.MmToFt(value)))
+            return $"드레인 피트 매개변수 '{name}'에 {value}mm를 쓰지 못했습니다. 쓰기 가능한 길이(실수형) 인스턴스 매개변수인지 확인하세요.";
+        return null;
     }
 
     private static double Volume(Element host)

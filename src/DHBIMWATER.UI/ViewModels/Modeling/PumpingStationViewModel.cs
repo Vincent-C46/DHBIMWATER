@@ -141,10 +141,8 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         public IReadOnlyList<string> EntranceTypes => _selectedPumpingStationType == "Type1"
             ? new List<string> { "좌안부", "우안부", "측면부" }
             : new List<string> { "측면부" };
-        public ObservableCollection<ConcreteMaterialRowViewModel> ConcreteMaterials { get; } = new()
-        {
-            new("벽체"), new("슬래브"), new("기초"), new("버림콘크리트", 18), new("거더"), new("계단")
-        };
+        /// <summary>[콘크리트 강도] 버튼 — 펌프장·토출조 공용(docs/249 § E). 창 안 강도 표를 대체했다.</summary>
+        public ConcreteSettingsLauncher ConcreteLauncher { get; }
         public string SelectedEntranceType
         {
             get => _selectedEntranceType;
@@ -985,7 +983,8 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         #endregion
 
         #region Constructor
-        public PumpingStationViewModel(CreatePumpingStationUseCase useCase, IDialogService dialogService, IElementTypeQueryRepo elementTypeQueryRepo, IUsageLogger usageLogger, IExcelReader excelReader, IFileDialogService fileDialogService, DischargeBasinViewModel dischargeBasinViewModel)
+        public PumpingStationViewModel(CreatePumpingStationUseCase useCase, IDialogService dialogService, IElementTypeQueryRepo elementTypeQueryRepo, IUsageLogger usageLogger, IExcelReader excelReader, IFileDialogService fileDialogService, DischargeBasinViewModel dischargeBasinViewModel,
+            IConcreteSettingsRepo? concreteSettingsRepo = null, SaveConcreteSettingsUseCase? saveConcreteSettings = null)
         {
             _createPumpingStationUseCase = useCase;
             _dialogService = dialogService;
@@ -993,6 +992,7 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
             _excelReader = excelReader;
             _fileDialogService = fileDialogService;
             DischargeBasin = dischargeBasinViewModel;
+            ConcreteLauncher = new ConcreteSettingsLauncher(concreteSettingsRepo, saveConcreteSettings, dialogService);
             // 토출조 배치 기준 — 펌프장 최우측 벽 외면 X, 1번 펌프 중심 Y.
             // 종단제원(B1~B7·T3·T4)은 setter 가 많아 밀어 넣지 않고 필요할 때 당겨 가게 한다.
             DischargeBasin.StationPlacementProvider = () => (
@@ -1086,11 +1086,10 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
             profileSpecDto = new PumpProfileSpecDto(B1, B3, B4, B6, B7, H1, H5, H6, SelectedTheta, L1, L2, L3, L4, H3, H4, H7, OB1, OH1, HB1, HH1, NS, HS, NS1, HS1, T1, T2, T3, T4, T5Prime, GB1, GH1, B2, IsRectangularOpening, B5);
             planSpecDto = new PumpPlanSpecDto(B8, B9, L5, B10, T5, T6);
             //typeSelectionDto = new PumpTypeSelectionDto(T1, T2, T3, T4, T5, T6, GB1, GH1);
-            // ConcreteMaterials 순서: 벽체, 슬래브, 기초, 버림콘크리트, 거더, 계단
+            // 부재별 콘크리트는 문서 공용 설정(없으면 기본값)을 쓴다(docs/249 § E). 거더 = 보(거더·헌치) 행.
+            var concrete = ConcreteLauncher.LoadOrDefault();
             var materials = new PumpMaterialSpecDto(
-                ConcreteMaterials[0].ToConcreteSpec(), ConcreteMaterials[1].ToConcreteSpec(),
-                ConcreteMaterials[2].ToConcreteSpec(), ConcreteMaterials[4].ToConcreteSpec(),
-                ConcreteMaterials[5].ToConcreteSpec(), ConcreteMaterials[3].ToConcreteSpec());
+                concrete.Wall, concrete.Slab, concrete.Foundation, concrete.Beam, concrete.Stair, concrete.LeanConcrete);
             creationRequestDto = new PumpCreationRequestDto(designConditionDto, planSpecDto, profileSpecDto, _selectedValveBase, materials);
 
             _ = _usageLogger.LogAsync();

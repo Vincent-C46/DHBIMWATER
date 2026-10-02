@@ -2,6 +2,7 @@ using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Application.DTOs.Gis;
 using Xunit;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.UI.Tests.Gis;
 
@@ -104,6 +105,44 @@ public class ReducerTrimPlannerTests
 
         Assert.Equal(expectedUpstreamOuter, profiles.Upstream.OuterDiameterMm);
         Assert.Equal(expectedDownstreamOuter, profiles.Downstream.OuterDiameterMm);
+    }
+
+    [Fact]
+    public void Catalog_source_uses_handbook_length_form_and_weight()
+    {
+        // 주철 소켓 편락관 300×200: L=250, B형은 소경 쪽 직관부 200 → 몸통 450, KP B형 38.0kg(docs/260 § G).
+        var source = new CatalogReducerSpecSource(BendConnection.Socket, JointTypeCatalog.KpMechanical, ReducerForm.BType, 250d, ReducerAlignment.Eccentric);
+        var plan = Plan(source, new double?[] { 300d, 200d, 200d });
+
+        var placement = Assert.Single(plan.Placements);
+        Assert.Equal(450d, placement.BodyLengthMm);
+        Assert.Equal(200d, placement.SmallStraightMm);
+        Assert.Equal(0d, placement.LargeStraightMm);
+        Assert.Equal(38.0d, placement.WeightKg);
+        Assert.Empty(plan.Warnings);
+    }
+
+    [Fact]
+    public void Catalog_source_falls_back_to_input_length_with_warning_and_no_weight()
+    {
+        // 500×300은 소켓 편락관 표에 없다(대경 500은 소경 350·400만) → 입력 길이 250, 무게 없음, 경고 1줄.
+        var source = new CatalogReducerSpecSource(BendConnection.Socket, JointTypeCatalog.KpMechanical, ReducerForm.BType, 250d, ReducerAlignment.Eccentric);
+        var plan = Plan(source, new double?[] { 300d, 500d, 500d });
+
+        var placement = Assert.Single(plan.Placements);
+        Assert.Equal(250d, placement.BodyLengthMm);
+        Assert.Null(placement.WeightKg);
+        Assert.Contains("카탈로그에 없는 대·소경 조합 1곳", Assert.Single(plan.Warnings));
+    }
+
+    private static ReducerTrimPlan Plan(IReducerSpecSource source, IReadOnlyList<double?> vertexDiameters)
+    {
+        var alignment = new PipeAlignment(
+            new[] { new Point3D(0, 0, 0), new Point3D(10, 0, 0), new Point3D(20, 0, 0) },
+            PipeKindCatalog.Water1, 300d, "test.xlsx", "도수1-3", new Dictionary<string, string>(),
+            VertexDiameterMm: vertexDiameters,
+            VertexStationM: new double?[] { 124.56d, 134.56d, 144.56d });
+        return ReducerTrimPlanner.Plan(new[] { alignment }, source, null, 0.001d);
     }
 
     private static ReducerTrimPlan Plan(double bodyLengthMm, BendTrimPlan? bends = null, IReadOnlyList<double?>? vertexDiameters = null,

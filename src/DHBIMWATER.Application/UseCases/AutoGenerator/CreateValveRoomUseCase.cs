@@ -29,20 +29,24 @@ public sealed class CreateValveRoomUseCase
     private readonly ISharedParameterRepository _sharedParameter;
     private readonly IElementParameterCommandRepo _elementParameterCommand;
     private readonly IProjectInformationCommandRepo _projectInformationCommand;
+    private readonly IViewCommandRepo _viewCommand;
     private readonly IDialogService _dialog;
+    private readonly IConcreteSettingsRepo _concreteSettings;
 
     public CreateValveRoomUseCase(ITransactionContext transaction, ILevelQueryRepo levelQuery, ILevelCommandRepo levelCommand,
         IProjectLocationCommandRepo projectLocationCommand,
         ISlabCommandRepo slabCommand, IFoundationCommandRepo foundationCommand, IAirValveVoidCommandRepo airValveVoidCommand, IDrainPitVoidCommandRepo drainPitVoidCommand, IWallCommandRepo wallCommand, IBeamCommandRepo beamCommand,
         IColumnCommandRepo columnCommand, IElementTypeCommandRepo elementTypeCommand, IElementTypeQueryRepo elementTypeQuery,
         ISharedParameterRepository sharedParameter, IElementParameterCommandRepo elementParameterCommand,
-        IProjectInformationCommandRepo projectInformationCommand, IDialogService dialog)
+        IProjectInformationCommandRepo projectInformationCommand, IViewCommandRepo viewCommand, IDialogService dialog,
+        IConcreteSettingsRepo concreteSettings)
     {
         _transaction = transaction; _levelQuery = levelQuery; _levelCommand = levelCommand; _projectLocationCommand = projectLocationCommand; _slabCommand = slabCommand; _foundationCommand = foundationCommand; _airValveVoidCommand = airValveVoidCommand; _drainPitVoidCommand = drainPitVoidCommand;
         _wallCommand = wallCommand; _beamCommand = beamCommand; _columnCommand = columnCommand; _elementTypeCommand = elementTypeCommand;
         _elementTypeQuery = elementTypeQuery;
         _sharedParameter = sharedParameter; _elementParameterCommand = elementParameterCommand;
-        _projectInformationCommand = projectInformationCommand; _dialog = dialog;
+        _projectInformationCommand = projectInformationCommand; _viewCommand = viewCommand; _dialog = dialog;
+        _concreteSettings = concreteSettings;
     }
 
     public void Execute(ValveRoomRequestDto request)
@@ -85,15 +89,18 @@ public sealed class CreateValveRoomUseCase
                     request.TrueNorthToProjectNorthClockwiseDegrees);
                 var slabs = ValveRoomGeometryCalculator.CalculateSlabs(dto).ToList();
                 var slabLevels = _levelQuery.GetLevelIds(slabs.Select(s => s.LevelName));
-                var slabConcrete = new DHBIMWATER.Core.Structures.ConcreteSpec(25, 30, 150);
-                var slabMaterial = Require(_elementTypeCommand.FindOrCreateConcreteMaterial(slabConcrete), ErrorCodes.VR_ConcreteMaterialNotFound, ConcreteMaterialMessage);
-                var slabTypes = slabs.Select(s => s.Thickness).Distinct().ToDictionary(t => t, t => Require(
-                    _elementTypeCommand.FindOrCreateSlabType(new DHBIMWATER.Core.Structures.FloorTypeSpec(t, $"일반 - {t}mm", slabConcrete), slabMaterial),
-                    ErrorCodes.VR_BaseTypeNotFound, $"바닥 유형 '일반 - {t}mm'을 만들 수 없습니다. 복제할 바닥 유형이 프로젝트에 있어야 합니다."));
+                // 부재별 콘크리트는 문서 공용 설정을 쓴다(docs/249 § D). 기초·버림·슬래브는 Part로 나뉘고,
+                // 같은 두께에 강도가 섞이면 유형 이름에 "_{강도}MPa"가 붙는다.
+                var concrete = new ConcreteTypeResolver(_elementTypeCommand, _concreteSettings.Load() ?? DHBIMWATER.Core.Structures.ConcreteSettings.Default);
+                var slabTypes = concrete.ResolveSlabTypes(slabs);
                 var slabIds = new Dictionary<string, int>();
-                foreach (var slab in slabs)
+                for (var i = 0; i < slabs.Count; i++)
                 {
-                    slabIds[slab.Part] = _slabCommand.CreateSlab(slab, slabLevels[slab.LevelName], slabTypes[slab.Thickness]);
+                    var slab = slabs[i];
+                    Require(slabTypes[i].MaterialId, ErrorCodes.VR_ConcreteMaterialNotFound, ConcreteMaterialMessage);
+                    var slabTypeId = Require(slabTypes[i].TypeId,
+                        ErrorCodes.VR_BaseTypeNotFound, $"바닥 유형 '{slabTypes[i].TypeName}'을 만들 수 없습니다. 복제할 바닥 유형이 프로젝트에 있어야 합니다.");
+                    slabIds[slab.Part] = _slabCommand.CreateSlab(slab, slabLevels[slab.LevelName], slabTypeId);
                     createdIds.Add(slabIds[slab.Part]);
                 }
                 var pitWarnings = new List<string>();
@@ -108,7 +115,8 @@ public sealed class CreateValveRoomUseCase
                         if (pit.Depth > dto.ProfileSpecDto.FoundationThickness && slabIds.TryGetValue("버림콘크리트", out var leanId))
                             hosts.Add(leanId);
                         var placement = _drainPitVoidCommand.CreateDrainPitVoid(
-                            hosts, slabLevels[ValveRoomGeometryCalculator.BaseLevelName], pit, mapping);
+                            hosts, slabLevels[ValveRoomGeometryCalculator.BaseLevelName], pit, mapping,
+                            dto.ProfileSpecDto.FoundationThickness, dto.ProfileSpecDto.PlainConcreteThickness);
                         if (placement.Warning != null) pitWarnings.Add(placement.Warning);
                         // 실물 피트 패밀리는 구조부재이므로 DH_Zone 기록 대상에 넣는다. 절단용 Void는 제외한다(docs/153 § E-4).
                         if (!placement.IsVoidCutting && placement.InstanceId != 0) createdIds.Add(placement.InstanceId);
@@ -119,16 +127,16 @@ public sealed class CreateValveRoomUseCase
                     var foundationId = Require(_foundationCommand.CreateFoundationFromFirstInstance(foundation),
                         ErrorCodes.VR_FoundationTypeNotFound, "공기밸브실 독립기초를 만들 수 없습니다. 독립기초 패밀리 유형을 하나 이상 로드하세요.");
                     createdIds.Add(foundationId);
+                    concrete.ApplyTo(foundationId, DHBIMWATER.Core.Structures.ConcreteMember.Foundation);
                     if (request.AirSpec is { } air)
                         _airValveVoidCommand.CreateAirValveFoundationVoid(foundationId, ValveRoomGeometryCalculator.CalculateAirValveVoid(dto, air));
                 }
                 var walls = ValveRoomGeometryCalculator.CalculateWalls(dto).ToList();
                 var wallLevelIds = _levelQuery.GetLevelIds(walls.Select(w => w.LevelName));
-                var concrete = new DHBIMWATER.Core.Structures.ConcreteSpec(25, 27, 120);
-                var materialId = Require(_elementTypeCommand.FindOrCreateConcreteMaterial(concrete), ErrorCodes.VR_ConcreteMaterialNotFound, ConcreteMaterialMessage);
-                var wallTypeIds = walls.Select(w => w.Thickness).Distinct().ToDictionary(thickness => thickness,
-                    thickness => Require(_elementTypeCommand.FindOrCreateWallType(new DHBIMWATER.Core.Structures.WallTypeSpec(thickness, $"일반 - {thickness}mm", concrete), materialId),
-                        ErrorCodes.VR_BaseTypeNotFound, $"벽 유형 '일반 - {thickness}mm'을 만들 수 없습니다. 복제할 벽 유형이 프로젝트에 있어야 합니다."));
+                Require(concrete.MaterialId(DHBIMWATER.Core.Structures.ConcreteMember.Wall), ErrorCodes.VR_ConcreteMaterialNotFound, ConcreteMaterialMessage);
+                var wallTypeIds = concrete.ResolveWallTypes(walls.Select(w => w.Thickness)).ToDictionary(kv => kv.Key,
+                    kv => Require(kv.Value.TypeId,
+                        ErrorCodes.VR_BaseTypeNotFound, $"벽 유형 '{kv.Value.TypeName}'을 만들 수 없습니다. 복제할 벽 유형이 프로젝트에 있어야 합니다."));
                 foreach (var wall in walls)
                     createdIds.Add(Require(_wallCommand.CreateLinearWall(wall, wallLevelIds[wall.LevelName], wallTypeIds[wall.Thickness]),
                         ErrorCodes.VR_WallCreateFailed, $"벽체 '{wall.ElementCode}'를 만들지 못했습니다. 벽 높이·두께·위치를 확인하세요."));
@@ -141,6 +149,9 @@ public sealed class CreateValveRoomUseCase
                 var beamTypes = beams.GroupBy(b => b.Part == "HAUNCH" ? "HAUNCH" : b.TypeName ?? $"{b.Width} x {b.Height}").ToDictionary(g => g.Key, g => Require(
                     g.Key == "HAUNCH" ? ResolveHaunchSymbol(g.First().TypeName) : !string.IsNullOrEmpty(g.First().TypeName) ? _elementTypeCommand.FindStructuralFramingSymbolByFamilyType(g.First().TypeName) : _elementTypeCommand.FindOrCreateBeamType(new DHBIMWATER.Core.Structures.BeamTypeSpec(g.First().Width, g.First().Height, g.Key)),
                     ErrorCodes.VR_BeamTypeNotFound, BeamTypeNotFoundMessage(g.Key, g.First().TypeName)));
+                // 보·헌치 유형의 구조 재료를 보 강도로 바꾼다 — 유형 매개변수라 문서 전체에 반영된다(docs/249 § 0).
+                foreach (var beamTypeId in beamTypes.Values.Distinct())
+                    concrete.ApplyTo(beamTypeId, DHBIMWATER.Core.Structures.ConcreteMember.Beam);
                 // 헌치는 레벨(ElementCode = VR-H1/H2/H3)별로 모아 두었다가 형상 결합한다.
                 // "같은 레벨끼리만" 결합하는 그룹 판정은 도메인 지식이라 Repo가 아니라 여기서 한다(docs/162 § C-4).
                 var haunchIdsByLevel = new Dictionary<string, List<int>>();
@@ -162,9 +173,13 @@ public sealed class CreateValveRoomUseCase
                 // 기둥도 콤보가 "패밀리명 : 타입명"을 넘긴다(docs/159 § C-3).
                 var columnTypes = columns.Select(c => c.TypeName).Distinct().ToDictionary(name => name, name => Require(_elementTypeCommand.FindColumnSymbolByFamilyType(name),
                     ErrorCodes.VR_ColumnTypeNotFound, $"기둥 유형 '{name}'을 찾을 수 없습니다. 유형이 삭제·개명됐으면 창을 다시 열어 선택하세요."));
+                foreach (var columnTypeId in columnTypes.Values.Distinct())
+                    concrete.ApplyTo(columnTypeId, DHBIMWATER.Core.Structures.ConcreteMember.Column);
                 foreach (var column in columns)
                     createdIds.Add(Require(_columnCommand.CreateColumn(column, columnLevels[column.BaseLevelName], columnLevels[column.TopLevelName], columnTypes[column.TypeName]),
                         ErrorCodes.VR_ColumnCreateFailed, $"기둥 '{column.ElementCode}'를 만들지 못했습니다."));
+                // 평면도(기초 상부) · 단면도 A-A/B-B 작성(docs/246). 실패해도 모델은 커밋하고 확인 필요 목록에 싣는다.
+                var viewWarnings = CreateViews(dto);
                 // DH_Zone에는 라디오에서 고른 실제 유형명이 들어간다(타이밸브실이면 "타이밸브실").
                 // 정의 기반 기록(ValveRoomGeometryCalculator의 Zone)만으로는 드레인 피트 실물이 빠지므로
                 // 여기서 한 번에 덮어쓴다 — RevitDrainPitVoidCommandRepo는 Zone을 쓰지 않는다(docs/155 § C).
@@ -173,7 +188,7 @@ public sealed class CreateValveRoomUseCase
                 _elementParameterCommand.SetTextParameter(createdIds, "DH_Zone", request.RoomType);
                 _transaction.Commit();
                 // 트랜잭션 도중 모달을 띄우던 경고(보 맞춤·결합, Void 절단)를 드레인 피트 경고와 함께 한 번에 보여준다(docs/238 § C).
-                var warnings = pitWarnings.Concat(_beamCommand.TakeWarnings()).Concat(_airValveVoidCommand.TakeWarnings()).ToList();
+                var warnings = pitWarnings.Concat(viewWarnings).Concat(_beamCommand.TakeWarnings()).Concat(_airValveVoidCommand.TakeWarnings()).ToList();
                 var warningMessage = warnings.Count == 0 ? string.Empty : $"\n\n확인 필요 {warnings.Count}건:\n- {string.Join("\n- ", warnings)}";
                 _dialog.Info("모델 생성", $"{request.RoomType} 모델 생성을 완료했습니다.{warningMessage}");
             }
@@ -216,6 +231,38 @@ public sealed class CreateValveRoomUseCase
         foreach (var level in ValveRoomGeometryCalculator.CalculateLevels(dto))
             if (levels.Contains(level.Name)) _levelCommand.UpdateLevel(level.Name, level.Elevation);
             else _levelCommand.CreateLevel(level.Name, level.Elevation);
+    }
+
+    /// <summary>기초 상부 구조 평면도와 단면도 A-A/B-B를 만든다(docs/246). 뷰마다 실패를 모아 돌려주고 모델 생성은 계속한다.
+    /// <para>평면도는 이미 있으면 건너뛰고(펌프장과 같음), 단면도는 Repo가 같은 이름을 지우고 다시 만든다.
+    /// 공기밸브실은 기초 슬래브가 없어 slabLevels에 기초 상부 레벨이 없을 수 있으므로 레벨 ID를 따로 조회한다.</para></summary>
+    private List<string> CreateViews(ValveRoomGeometryRequestDto dto)
+    {
+        var warnings = new List<string>();
+        var planName = ValveRoomGeometryCalculator.BaseLevelName;
+        try
+        {
+            var existingPlans = _levelQuery.GetExistingPlanNames().ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (!existingPlans.Contains(planName))
+                _levelCommand.CreatePlan(_levelQuery.GetLevelIds(new[] { planName })[planName]);
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"{planName} 평면도 작성 실패: {ex.Message}");
+        }
+
+        foreach (var cut in ValveRoomGeometryCalculator.CalculateSections(dto))
+        {
+            try
+            {
+                _viewCommand.CreateSectionView(cut);
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"{cut.Name} 단면도 작성 실패: {ex.Message}");
+            }
+        }
+        return warnings;
     }
 
     /// <summary>제수밸브실 보의 단면 폭(mm). 보가 없거나 유형에 단면폭 파라미터가 없으면 0이고,

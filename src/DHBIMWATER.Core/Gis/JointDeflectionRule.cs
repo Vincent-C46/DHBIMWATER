@@ -1,4 +1,5 @@
 using DHBIMWATER.Shared.Errors;
+using DHBIMWATER.Core.Piping;
 namespace DHBIMWATER.Core.Gis;
 
 /// <summary>
@@ -77,6 +78,10 @@ public sealed class JointDeflectionRule : IBendingRule
         if (settings.ActiveBendConnection == BendConnection.Socket
             && BendFittingCatalog.TryGetHandbookWeight(node.MaxDiameterMm, selectedAngle, form, out var kpKg, out var tytonKg))
             weightKg = jointType == JointTypeCatalog.Tyton ? tytonKg : kpKg;
+        // 플랜지곡관은 조인트 무관 한 개 무게다. 저장본 플랜지 행은 무게가 0이라 형식(A/B)에 맞춰 핸드북에서 찾는다(docs/260 § A).
+        if (settings.ActiveBendConnection == BendConnection.Flanged)
+            weightKg = BendFittingCatalog.TryGetFlangedHandbookWeight(node.MaxDiameterMm, selectedAngle, form, out var flangedKg)
+                ? flangedKg : fitting.WeightKg;
         return new BendResolution(
             node.NodeId, kind, actual, selectedAngle, singleAllowable, residual,
             fitting.LayingLengthMm, fitting.CenterlineRadiusMm, tangent, true,

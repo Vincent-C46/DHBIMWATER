@@ -10,9 +10,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
 // Core.Gis를 통째로 열면 NodeKind가 Core.Piping과 충돌한다. 필요한 형식만 별칭으로 끌어온다.
-using PipeMaterial = DHBIMWATER.Core.Gis.PipeMaterial;
 using PipeAlignmentParameters = DHBIMWATER.Core.Gis.PipeAlignmentParameters;
-using BendConnection = DHBIMWATER.Core.Gis.BendConnection;
 
 namespace DHBIMWATER.UI.ViewModels.Modeling;
 
@@ -107,9 +105,16 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     private bool _isPlacingBypassSet;
     // 본관 밸브는 세트가 아니다(docs/230) — A–A 사이에 일반 밸브로 놓는다. 여기에는 바이패스 밸브만 둔다.
     private string? _bypassValveFamilyName, _bypassValveTypeName;
+    // 파라미터 후보 갱신 지연(docs/258 § B). 0보다 크면 갱신을 미루고 "대기"만 표시한다 — 생성자 추정·저장값 적용 중에
+    // 패밀리 세터마다 전체 후보를 다시 읽어(최대 44회) 추정했다가 버릴 패밀리까지 EditFamily로 열던 것을 막는다.
+    private int _parameterRefreshDeferral;
+    private bool _pendingSegmentRefresh, _pendingFittingRefresh, _pendingBypassRefresh;
+    // 밸브 2개 세트 입력(docs/255 § D-1). 1개 세트면 V2·단관은 세트에 싣지 않는다.
+    private int _bypassValveCount = 1;
+    private string? _bypassSecondValveFamilyName;
+    private double _bypassSpoolLengthMm = BypassSet.DefaultSpoolLengthMm;
     /// <summary>바이패스 밸브 직경 파라미터(docs/232 § C). 4번 섹션 밸브와 같은 패밀리별 사전에 기억한다.</summary>
     private string? _bypassValveDiameterParameterName;
-    private double _bypassDiameterMm = 300;
     /// <summary>마지막 미리보기 커서(모델 mm). 세트를 본관 어느 쪽으로 뺄지 정한다.</summary>
     private DHBIMWATER.Core.Geometry.Point2D? _fittingPreviewCursor;
     private System.Windows.Media.Geometry? _bypassPreviewLine, _bypassPreviewMarkers;
@@ -125,6 +130,9 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     /// <summary>배치할 배관 부재에 기록할 밸브실 유형(`DH_Zone`). 외곽 벽체에서 읽어 채운다(docs/161).</summary>
     private string _valveRoomZone = string.Empty;
     private PipeMaterial _pipeMaterial = PipeMaterial.DuctileIron;
+    private SteelFittingClass _steelFittingClass = SteelFittingClass.F12;
+    /// <summary>관 등급(docs/260 § C). 빈 문자열은 강관 "DN별 기본 등급"이다.</summary>
+    private string _pipeKind = PipeKindCatalog.Water1;
     /// <summary>이 배치의 기본 접합 방식(docs/170 § E). 기본값이 플랜지인 이유는
     /// 원장에서 밸브실이 실당 용접 1개소를 빼면 전량 플랜지이기 때문이다(docs/168 § 5-3).</summary>
     private BendConnection _jointConnection = BendConnection.Flanged;
@@ -162,7 +170,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     /// <summary>유형별 길이형 유형 매개변수 조회 캐시(docs/233 § B-3). 검증 문구가 자주 재계산되므로 Revit 조회를 유형당 한 번으로 줄인다.
     /// <see cref="RefreshFamilyTypeNames"/>에서 비운다.</summary>
     private readonly Dictionary<string, IReadOnlyList<PipeAccessoryTypeParameterDto>> _typeLengthParameterCache = new(StringComparer.Ordinal);
-    private string? _valveTypeDiameterParameterName, _bypassValveTypeDiameterParameterName;
+    private string? _valveTypeDiameterParameterName;
     private string? _jointDiameterParameterName;
     private bool _jointDiameterParameterPinned;
     /// <summary>관 길이 파라미터를 사용자가 직접 골랐는지. true면 관 패밀리를 바꿔도 자동 추정으로 덮어쓰지 않는다.</summary>
@@ -184,6 +192,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     private double _previewX1, _previewY1, _previewX2, _previewY2, _previewLengthX, _previewLengthY, _snapMarkerX, _snapMarkerY, _cursorX, _cursorY;
     private double _subLineAX1, _subLineAY1, _subLineAX2, _subLineAY2, _subLineBX1, _subLineBY1, _subLineBX2, _subLineBY2;
     private bool _isSubLineVisible;
+    private System.Windows.Media.Geometry? _subLineTicks;
     private double _splitMarkerX1, _splitMarkerY1, _splitMarkerX2, _splitMarkerY2;
     private bool _isSplitMarkerVisible;
     private Point? _selectionBoxStart;
@@ -263,7 +272,6 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         ValveTeeBranchParameterNames = [];
         BypassValveTypeNames = [];
         BypassValveParameterNames = [];
-        BypassValveTypeParameterNames = [];
         ValveTypeParameterNames = [];
         BypassSetItems = [];
         ReducerLargeParameterNames = [];
@@ -293,6 +301,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         RemoveFittingCommand = new RelayCommand(x => RemoveFitting(x as InlineFittingItem));
         ToggleBypassPlacementCommand = new RelayCommand(_ => IsPlacingBypassSet = !IsPlacingBypassSet, _ => !IsCreating);
         FlipBypassSetCommand = new RelayCommand(x => FlipBypassSet(x as InlineFittingItem));
+        SwapBypassValvesCommand = new RelayCommand(x => SwapBypassValves(x as InlineFittingItem));
         ApplyBypassValvesCommand = new RelayCommand(x => ApplyBypassValves(x as InlineFittingItem));
         ClearCommand = new RelayCommand(_ => Clear(), _ => !IsCreating);
         CancelDrawingCommand = new RelayCommand(_ => CancelDrawing(), _ => IsDrawing);
@@ -315,9 +324,13 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         OpenFamilySettingsCommand = new RelayCommand(_ => OpenFamilySettingsAction?.Invoke(), _ => OpenFamilySettingsAction is not null && !IsCreating);
         // 설정 창 숫자 칸(정척 길이·격자·기준점)에 변환 오류가 남아 있으면 VM은 옛 값이라 그 값이 저장된다 — 막는다(docs/239 § A).
         SaveFamilySettingsCommand = new RelayCommand(_ => SaveFamilySettings(), _ => SaveFamilySettingsAction is not null && !IsCreating && SettingsInputErrorCount == 0);
-        RefreshFamilyTypeNames();
+        // 추정 단계의 후보 갱신은 미룬다(docs/258 § B) — 저장값이 있으면 ApplyFamilySettings가 패밀리를 다 넣은 뒤 한 번만 읽는다.
+        _parameterRefreshDeferral++;
+        try { RefreshFamilyTypeNames(); }
+        finally { _parameterRefreshDeferral--; }
         // 저장값은 이름 추정 위에 덮어쓴다 — 추정은 저장값이 없는 칸에만 남는다(docs/175 D6).
         if (_settingsRepo?.Load() is { } saved) ApplyFamilySettings(saved, fromStorage: true);
+        FlushDeferredParameterRefresh();
     }
 
     public CanvasModelTransform Transform { get; } = new();
@@ -402,9 +415,11 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     public ICommand ToggleBypassPlacementCommand { get; }
     /// <summary>세트 목록의 [방향 뒤집기] — 바이패스를 본관 반대쪽으로 옮긴다.</summary>
     public ICommand FlipBypassSetCommand { get; }
-    /// <summary>세트 목록의 [밸브 적용] — 지금 고른 바이패스 밸브 유형과 관경을 그 세트에 넣는다(docs/229 § D, docs/230 § C).</summary>
+    /// <summary>세트 목록의 [순서 바꾸기] — 밸브 2개 세트의 V1·V2를 맞바꾼다(docs/255 § D-4).</summary>
+    public ICommand SwapBypassValvesCommand { get; }
+    /// <summary>세트 목록의 [밸브 적용] — 지금 고른 바이패스 밸브 개수·패밀리·단관 길이를 그 세트에 넣는다. 유형·관경은 모델 생성 때 정한다(docs/244 § D-2, docs/255 § D-3).</summary>
     public ICommand ApplyBypassValvesCommand { get; }
-    /// <summary>바이패스 밸브(B–B 사이) 유형 후보.</summary>
+    /// <summary>바이패스 밸브(B–B 사이) 유형 후보. 화면에는 없다(docs/244 § D-1) — 인스턴스 직경 파라미터 후보를 읽을 대표 유형을 고르는 내부용이다.</summary>
     public ObservableCollection<string> BypassValveTypeNames { get; }
     /// <summary>캔버스에 놓인 바이패스 세트 목록(오른쪽 패널 5번).</summary>
     public ObservableCollection<InlineFittingItem> BypassSetItems { get; }
@@ -412,8 +427,60 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     public string? BypassValveFamilyName
     {
         get => _bypassValveFamilyName;
-        set { if (SetProperty(ref _bypassValveFamilyName, value)) RefreshBypassValveTypeNames(); }
+        set
+        {
+            if (!SetProperty(ref _bypassValveFamilyName, value)) return;
+            RefreshBypassValveTypeNames();
+            // V2 기본값은 V1과 같은 패밀리다(docs/255 § 0).
+            if (string.IsNullOrWhiteSpace(_bypassSecondValveFamilyName)) BypassSecondValveFamilyName = value;
+        }
     }
+
+    /// <summary>B–B 사이 밸브 개수(1 또는 2, docs/255 § D-1). 배치 패널과 [밸브 적용]이 쓴다.</summary>
+    public int BypassValveCount
+    {
+        get => _bypassValveCount;
+        set
+        {
+            if (!SetProperty(ref _bypassValveCount, value == 2 ? 2 : 1)) return;
+            OnPropertyChanged(nameof(IsBypassSingleValve));
+            OnPropertyChanged(nameof(IsBypassTwoValves));
+        }
+    }
+    /// <summary>라디오 버튼 바인딩용(밸브 1개).</summary>
+    public bool IsBypassSingleValve { get => _bypassValveCount == 1; set { if (value) BypassValveCount = 1; } }
+    /// <summary>라디오 버튼 바인딩용(밸브 2개 + 사이 단관). 켜지면 V2·단관 칸이 보인다.</summary>
+    public bool IsBypassTwoValves { get => _bypassValveCount == 2; set { if (value) BypassValveCount = 2; } }
+
+    /// <summary>밸브 2개 세트의 V2(엣지 끝 쪽) 패밀리(docs/255). 직경 파라미터는 4번 섹션과 같은 패밀리별 사전을 쓴다(G-4).</summary>
+    public string? BypassSecondValveFamilyName
+    {
+        get => _bypassSecondValveFamilyName;
+        set => SetProperty(ref _bypassSecondValveFamilyName, value);
+    }
+
+    /// <summary>밸브 2개 세트의 V1–V2 사이 단관 길이(mm). 0 = 직결, 아니면 관 최소 조각 이상(docs/255 G-2).</summary>
+    public double BypassSpoolLengthMm
+    {
+        get => _bypassSpoolLengthMm;
+        set
+        {
+            if (!BypassSet.IsValidSpoolLength(value))
+                throw new ArgumentOutOfRangeException(nameof(value), FormattableString.Invariant(
+                    $"단관 길이는 0(직결) 또는 {PipeSegmentPlan.MinSegmentMm:0}mm 이상이어야 합니다."));
+            SetProperty(ref _bypassSpoolLengthMm, value);
+        }
+    }
+
+    /// <summary>패널 값으로 만든 밸브 구성(docs/255 § D-3). 2개인데 V2가 비었으면 오류 문구를 돌려준다.</summary>
+    private (string? Second, double SpoolMm, string? Error) BypassValvePanelConfig()
+    {
+        if (_bypassValveCount != 2) return (null, 0, null);
+        if (string.IsNullOrWhiteSpace(_bypassSecondValveFamilyName)) return (null, 0, "바이패스 밸브 2 패밀리 선택 필요");
+        return (_bypassSecondValveFamilyName, _bypassSpoolLengthMm, null);
+    }
+    /// <summary>바이패스 밸브 대표 유형(패밀리 첫 유형). 내부용 — 직경 파라미터 후보를 읽고, 세트 배치 모드의 "놓을 대상 있음" 판단
+    /// (<see cref="PlacingFamilyTypeName"/>)에 쓴다. 세트에는 패밀리명만 싣고 실제 유형은 모델 생성 때 DN으로 고른다(docs/244).</summary>
     public string? BypassValveTypeName
     {
         get => _bypassValveTypeName;
@@ -434,33 +501,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             NotifyValidationChanged();
         }
     }
-    /// <summary>바이패스 밸브 유형의 길이형 <b>유형 매개변수</b> 후보(docs/233 § B-3). 확인용 — 값을 쓰지 않는다.</summary>
-    public ObservableCollection<string> BypassValveTypeParameterNames { get; }
-    /// <summary>바이패스 밸브 유형 직경 매개변수(docs/233 § B-3). 4번 섹션과 같은 패밀리별 사전(<see cref="_valveTypeDiameterParameterByFamily"/>)을 공유한다.</summary>
-    public string? BypassValveTypeDiameterParameterName
-    {
-        get => _bypassValveTypeDiameterParameterName;
-        set
-        {
-            if (!SetProperty(ref _bypassValveTypeDiameterParameterName, value)) return;
-            if (!_isRefreshingParameterNames && !string.IsNullOrWhiteSpace(BypassValveTypeName)) RememberValveTypeDiameterParameter(BypassValveTypeName, value);
-            NotifyTypeDiameterChanged();
-        }
-    }
-    /// <summary>바이패스 밸브 유형 직경 매개변수 값과 바이패스 관경의 대조 결과 문구(docs/233 § B-3).</summary>
-    public string BypassValveTypeDiameterText => TypeDiameterText(BypassValveTypeName, _bypassValveTypeDiameterParameterName, _bypassDiameterMm, out _);
-    public bool IsBypassValveTypeDiameterMismatch { get { TypeDiameterText(BypassValveTypeName, _bypassValveTypeDiameterParameterName, _bypassDiameterMm, out var mismatch); return mismatch; } }
-    /// <summary>다음에 놓을 세트의 바이패스 관경(mm). 본관 관경보다 작아야 한다.</summary>
-    public double BypassDiameterMm
-    {
-        get => _bypassDiameterMm;
-        set
-        {
-            if (!double.IsFinite(value) || value <= 0)
-                throw new ArgumentOutOfRangeException(nameof(value), $"[{ErrorCodes.PL_InvalidDiameter}] 바이패스 관경은 0보다 큰 숫자여야 합니다.");
-            if (SetProperty(ref _bypassDiameterMm, value)) RefreshBypassValveTypeNames();
-        }
-    }
+    // 바이패스 관경 입력·바이패스 밸브 유형 직경 대조는 없앴다(docs/244 § D) — 관경은 모델 생성 때 밸브부관 B가 본관 구경으로 정하고,
+    // 밸브 유형은 그 관경과 DN이 같은 것을 고른다.
 
     /// <summary>바이패스 세트 배치 모드. 켜면 그리기 모드로 바꾸고 밸브·이음관 배치 선택을 비운다 — 배치 대상은 하나다.</summary>
     public bool IsPlacingBypassSet
@@ -539,7 +581,9 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     public bool HasImportedSource => _importedSourceIds.Count > 0;
     /// <summary>생성 시 지우고 다시 만들 부재(가져온 원본 또는 직전 생성분)가 있는가 — 하단 안내 문구(docs/235 § C).</summary>
     public bool HasReplaceTarget => _importedSourceIds.Count > 0 || _createdElementIds.Count > 0;
-    public double Elevation { get => _elevation; set { if (SetProperty(ref _elevation, value)) { _network.Elevation = value; NotifyValidationChanged(); } } }
+    public double Elevation { get => _elevation; set { if (SetProperty(ref _elevation, value)) { _network.Elevation = value; OnPropertyChanged(nameof(ElevationM)); NotifyValidationChanged(); } } }
+    /// <summary>관 중심 높이(EL) 입력 칸 — m 단위(docs/251 § C). 내부·저장·Revit 배치는 <see cref="Elevation"/>(mm) 그대로다.</summary>
+    public double ElevationM { get => Elevation / 1000d; set => Elevation = value * 1000d; }
     /// <summary>격점상세도 배관재료표에 쓰는 격점 식별자(docs/131 § B-1). 필수 입력이 아니다.
     /// <para>이 setter는 창의 TextBox(TwoWay)만 부른다 — 값이 들어오면 사용자 편집으로 본다.
     /// 자동 채움은 setter를 거치지 않고 <see cref="ApplyDefaultJunctionId"/>가 백킹 필드에 직접 넣는다(docs/177 § B-3).
@@ -553,33 +597,100 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     public PipeMaterial PipeMaterial
     {
         get => _pipeMaterial;
-        set { if (SetProperty(ref _pipeMaterial, value)) NotifyJointConnectionLabels(); }
+        set
+        {
+            if (!SetProperty(ref _pipeMaterial, value)) return;
+            OnPropertyChanged(nameof(IsDuctileIronSelected));
+            OnPropertyChanged(nameof(IsSteelSelected));
+            EnsurePipeKindForMaterial();
+            NotifyJointConnectionLabels();
+        }
     }
 
-    /// <summary>강관은 소켓 대신 용접이라 접합 라벨 어휘가 바뀐다(docs/211 § I). 저장 값(<see cref="BendConnection"/>)은 그대로다.</summary>
+    /// <summary>강관 관 등급 콤보의 "DN별 기본" 항목 — DN≤300 STWW 290, 그 밖 STWW 400 A(<see cref="PipeKindCatalog.DefaultSteelGrade"/>).</summary>
+    public const string AutoSteelGradeLabel = "자동 (DN별 기본)";
+
+    /// <summary>관 등급 콤보 항목(docs/260 § C). 직관·단관 단위중량(`DH_무게`) 조회 키이며 `DH_관종등급`에 기록된다.
+    /// 등급명은 정식 명칭 그대로 둔다(`STWW 400 A`).</summary>
+    public IReadOnlyList<string> PipeKindLabels => _pipeMaterial == PipeMaterial.Steel
+        ? new[] { AutoSteelGradeLabel }.Concat(PipeKindCatalog.SteelAll).ToList()
+        : PipeKindCatalog.AllFor(_pipeMaterial);
+
+    public string PipeKindLabel
+    {
+        get => _pipeKind.Length == 0 ? AutoSteelGradeLabel : _pipeKind;
+        set
+        {
+            var kind = value == AutoSteelGradeLabel ? string.Empty : value;
+            if (!PipeKindLabels.Contains(value ?? string.Empty) || _pipeKind == kind) return;
+            _pipeKind = kind;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>관종이 바뀌어 현재 등급이 목록에 없으면 기본값으로 — 주철 `상수 1종관`, 강관 "DN별 기본".</summary>
+    private void EnsurePipeKindForMaterial()
+    {
+        if (!PipeKindLabels.Contains(PipeKindLabel))
+            _pipeKind = _pipeMaterial == PipeMaterial.Steel ? string.Empty : PipeKindCatalog.AllFor(_pipeMaterial).FirstOrDefault() ?? string.Empty;
+        OnPropertyChanged(nameof(PipeKindLabels));
+        OnPropertyChanged(nameof(PipeKindLabel));
+    }
+
+    /// <summary>강관은 소켓 대신 용접이라 접합 라벨 어휘가 바뀐다(docs/211 § I). 저장 값(<see cref="BendConnection"/>)은 그대로다.
+    /// <para>관종이 바뀌면 강관 등급 콤보 활성 여부와 바이패스 세트 핸드북 관경도 바뀐다(docs/256 § D-2).</para></summary>
     private void NotifyJointConnectionLabels()
     {
         OnPropertyChanged(nameof(JointConnectionLabels));
         OnPropertyChanged(nameof(JointConnectionLabel));
+        OnPropertyChanged(nameof(IsSteelFittingClassEnabled));
+        RefreshFittings();
     }
-    /// <summary>관종 콤보 항목(한글 라벨). 어휘는 <see cref="PipeAlignmentParameters.Label(PipeMaterial)"/> 한곳에서 온다 —
-    /// 여기서 문자열을 새로 만들면 계획관로가 쓰는 `DH_관종` 값과 갈린다.</summary>
-    public IReadOnlyList<string> PipeMaterialLabels { get; } =
-        ((PipeMaterial[])Enum.GetValues(typeof(PipeMaterial))).Select(PipeAlignmentParameters.Label).ToList();
 
-    /// <summary>콤보 바인딩용 라벨. 라벨을 못 되돌리면 현재 값을 유지한다(어휘가 갈린 경우의 안전판).</summary>
-    public string PipeMaterialLabel
+    /// <summary>강관 밸브부관 등급(docs/256). 바이패스 지관 규격표 조회에 쓰고, 프로젝트 설정에 저장한다.
+    /// 관로 모델링의 곡관 등급(<c>ActiveSteelFittingClass</c>)과는 따로 둔다(2026-10-01 사용자 결정).</summary>
+    public SteelFittingClass SteelFittingClass
     {
-        get => PipeAlignmentParameters.Label(_pipeMaterial);
+        get => _steelFittingClass;
         set
         {
-            if (PipeAlignmentParameters.MaterialFromLabel(value) is not { } material || material == _pipeMaterial) return;
-            _pipeMaterial = material;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(PipeMaterial));
-            NotifyJointConnectionLabels();
+            var normalized = ValveBypassSpecTable.NormalizeSteelClass(value);
+            if (!SetProperty(ref _steelFittingClass, normalized)) return;
+            OnPropertyChanged(nameof(SteelFittingClassLabel));
+            RefreshFittings();
         }
     }
+
+    /// <summary>강관 등급 콤보 항목. <see cref="SteelFittingClass.None"/>은 넣지 않는다.</summary>
+    public IReadOnlyList<string> SteelFittingClassLabels { get; } =
+        [nameof(SteelFittingClass.F12), nameof(SteelFittingClass.F15), nameof(SteelFittingClass.F20)];
+
+    /// <summary>콤보 바인딩용 라벨. 라벨을 못 되돌리면 현재 값을 유지한다(관종 콤보와 같은 안전판).</summary>
+    public string SteelFittingClassLabel
+    {
+        get => _steelFittingClass.ToString();
+        set
+        {
+            if (Enum.TryParse<SteelFittingClass>(value, out var parsed) && parsed != SteelFittingClass.None)
+                SteelFittingClass = parsed;
+        }
+    }
+
+    /// <summary>강관일 때만 등급을 고른다.</summary>
+    public bool IsSteelFittingClassEnabled => _pipeMaterial == PipeMaterial.Steel;
+
+    /// <summary>현재 관종·등급의 핸드북 지관 관경(docs/256). 규격이 없으면 null.</summary>
+    private double? HandbookBypassDiameterMm(double mainMm)
+        => ValveBypassSpecTable.BranchDiameterMm(_pipeMaterial, _steelFittingClass, mainMm);
+
+    /// <summary>캔버스 개략 그림용 바이패스 관경 — 핸드북 값, 없으면 그림만 그리려고 옛 추정값을 쓴다(docs/256 § D-3).</summary>
+    private double BypassPreviewDiameterMm(double mainMm)
+        => HandbookBypassDiameterMm(mainMm) ?? BypassSet.PreviewBypassDiameterMm(mainMm);
+    /// <summary>관종 토글(docs/263 § C). 주철관·강관만 고른다 — PE·PVC는 규격 자료가 없어 노출하지 않는다(<see cref="PipeMaterial"/> 주석).
+    /// 세터는 <see cref="PipeMaterial"/>을 거쳐 관 등급·접합 라벨·강관 등급 가시성을 함께 맞춘다.
+    /// 모양은 계획관로 창과 같다(PipeAlignmentModelingViewModel.IsDuctileIronSelected).</summary>
+    public bool IsDuctileIronSelected { get => _pipeMaterial == PipeMaterial.DuctileIron; set { if (value) PipeMaterial = PipeMaterial.DuctileIron; } }
+    public bool IsSteelSelected { get => _pipeMaterial == PipeMaterial.Steel; set { if (value) PipeMaterial = PipeMaterial.Steel; } }
     /// <summary>이 배치의 기본 접합 방식(docs/170 § E). 부재가 자기 패밀리 파라미터로 접합을 밝히면 그쪽이 이긴다.</summary>
     public BendConnection JointConnection { get => _jointConnection; set => SetProperty(ref _jointConnection, value); }
 
@@ -603,6 +714,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             _jointConnection = resolved;
             OnPropertyChanged();
             OnPropertyChanged(nameof(JointConnection));
+            ApplyJointFamilyDefaults();
         }
     }
 
@@ -819,7 +931,9 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         ValveTeeMainDiameterParameterName: ValveTeeMainDiameterParameterName ?? "",
         ValveTeeBranchDiameterParameterName: ValveTeeBranchDiameterParameterName ?? "",
         ValveTeeHorizontalBranchParameterName: ValveTeeHorizontalBranchParameterName ?? "",
-        ValveTeeVerticalBranchParameterName: ValveTeeVerticalBranchParameterName ?? "");
+        ValveTeeVerticalBranchParameterName: ValveTeeVerticalBranchParameterName ?? "",
+        SteelFittingClass: _steelFittingClass,
+        PipeKind: _pipeKind);
 
     /// <summary>저장값(또는 외부에서 만든 설정)을 적용한다. <b>비어 있지 않은 칸만</b> 덮고 그 칸은 핀 고정한다 —
     /// 빈 칸은 이름 추정 결과를 그대로 둔다(docs/175 D6). 콤보 목록에 없는 패밀리명은 그대로 넣어 사용자가 알아채게 한다.</summary>
@@ -827,18 +941,26 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     public void ApplyFamilySettings(PipeLayoutFamilySettings settings, bool fromStorage = false)
     {
         if (fromStorage) _familySettingsLoaded = true;
-        if (!string.IsNullOrWhiteSpace(settings.SegmentFamilyTypeName)) SegmentFamilyTypeName = settings.SegmentFamilyTypeName;
+        // 패밀리 세터 묶음은 후보 갱신을 미뤘다가 마지막 패밀리 기준으로 한 번만 읽는다(docs/258 § B).
+        // 종전에는 세터마다 전체 후보를 다시 읽었다 — 최종 결과는 마지막 패밀리 기준 갱신과 같다.
+        _parameterRefreshDeferral++;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(settings.SegmentFamilyTypeName)) SegmentFamilyTypeName = settings.SegmentFamilyTypeName;
+            if (!string.IsNullOrWhiteSpace(settings.BendFamilyTypeName)) BendFamilyTypeName = settings.BendFamilyTypeName;
+            if (!string.IsNullOrWhiteSpace(settings.TeeFamilyTypeName)) TeeFamilyTypeName = settings.TeeFamilyTypeName;
+            if (!string.IsNullOrWhiteSpace(settings.CrossFamilyTypeName)) CrossFamilyTypeName = settings.CrossFamilyTypeName;
+            if (!string.IsNullOrWhiteSpace(settings.WyeFamilyTypeName)) WyeFamilyTypeName = settings.WyeFamilyTypeName;
+            if (!string.IsNullOrWhiteSpace(settings.ReducerFamilyTypeName)) ReducerFamilyTypeName = settings.ReducerFamilyTypeName;
+            if (!string.IsNullOrWhiteSpace(settings.ValveBendFamilyTypeName)) ValveBendFamilyTypeName = settings.ValveBendFamilyTypeName;
+            if (!string.IsNullOrWhiteSpace(settings.ValveTeeFamilyTypeName)) ValveTeeFamilyTypeName = settings.ValveTeeFamilyTypeName;
+        }
+        finally { _parameterRefreshDeferral--; }
+        FlushDeferredParameterRefresh();
+        // 패밀리를 넣으면 세터가 파라미터 후보를 다시 추정하므로, 파라미터는 패밀리 뒤(위 갱신 뒤)에 넣어야 덮이지 않는다.
         if (!string.IsNullOrWhiteSpace(settings.LengthParameterName)) LengthParameterName = settings.LengthParameterName;
         if (!string.IsNullOrWhiteSpace(settings.DiameterParameterName)) DiameterParameterName = settings.DiameterParameterName;
         if (double.IsFinite(settings.StraightLengthMm) && settings.StraightLengthMm > 0) StraightLengthMm = settings.StraightLengthMm;
-        if (!string.IsNullOrWhiteSpace(settings.BendFamilyTypeName)) BendFamilyTypeName = settings.BendFamilyTypeName;
-        if (!string.IsNullOrWhiteSpace(settings.TeeFamilyTypeName)) TeeFamilyTypeName = settings.TeeFamilyTypeName;
-        if (!string.IsNullOrWhiteSpace(settings.CrossFamilyTypeName)) CrossFamilyTypeName = settings.CrossFamilyTypeName;
-        if (!string.IsNullOrWhiteSpace(settings.WyeFamilyTypeName)) WyeFamilyTypeName = settings.WyeFamilyTypeName;
-        if (!string.IsNullOrWhiteSpace(settings.ReducerFamilyTypeName)) ReducerFamilyTypeName = settings.ReducerFamilyTypeName;
-        if (!string.IsNullOrWhiteSpace(settings.ValveBendFamilyTypeName)) ValveBendFamilyTypeName = settings.ValveBendFamilyTypeName;
-        if (!string.IsNullOrWhiteSpace(settings.ValveTeeFamilyTypeName)) ValveTeeFamilyTypeName = settings.ValveTeeFamilyTypeName;
-        // 패밀리를 넣으면 세터가 파라미터 후보를 다시 추정하므로, 파라미터는 패밀리 뒤에 넣어야 덮이지 않는다.
         if (!string.IsNullOrWhiteSpace(settings.BendDiameterParameterName)) BendDiameterParameterName = settings.BendDiameterParameterName;
         if (!string.IsNullOrWhiteSpace(settings.BendAngleParameterName)) BendAngleParameterName = settings.BendAngleParameterName;
         if (!string.IsNullOrWhiteSpace(settings.TeeDiameterParameterName)) TeeDiameterParameterName = settings.TeeDiameterParameterName;
@@ -869,6 +991,14 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         if (settings.ReferenceX is { } savedX) { _referenceX = savedX; OnPropertyChanged(nameof(ReferenceX)); }
         if (settings.ReferenceY is { } savedY) { _referenceY = savedY; OnPropertyChanged(nameof(ReferenceY)); }
         _arrowFromTop = settings.ArrowFromTop; OnPropertyChanged(nameof(ArrowFromTop));
+        // 강관 등급(docs/256). 옛 저장본은 키가 없어 F12로 읽힌다.
+        if (settings.SteelFittingClass != SteelFittingClass.None) SteelFittingClass = settings.SteelFittingClass;
+        // 관 등급(docs/260 § C). 옛 저장본(null)은 현재 값을 유지한다. 관종과 맞지 않으면 다음 관종 변경 때 기본값으로 바뀐다.
+        if (settings.PipeKind is { } savedKind && (savedKind.Length == 0 || PipeKindCatalog.Normalize(savedKind) is not null))
+        {
+            _pipeKind = PipeKindCatalog.Normalize(savedKind) ?? string.Empty;
+            EnsurePipeKindForMaterial();
+        }
         if (settings.Ports is { Count: > 0 } storedPorts)
         {
             DetachAllPorts();
@@ -896,25 +1026,31 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         Status = message;
     }
 
-    /// <summary>필수 매핑(관 패밀리·길이 파라미터)이 비었는지. 오른쪽 패널 요약을 빨갛게 만든다.</summary>
-    public bool HasIncompleteFamilySettings => ToFamilySettings().IsIncomplete;
-
-    /// <summary>오른쪽 패널의 한 줄 요약. 설정 창을 열지 않아도 무엇이 걸려 있는지 보인다(docs/175 § F).</summary>
-    public string FamilySettingsSummary
-    {
-        get
-        {
-            static string Show(string? name) => string.IsNullOrWhiteSpace(name) ? "(미지정)" : name;
-            return $"관 {Show(SegmentFamilyTypeName)} · 곡관 {Show(BendFamilyTypeName)} · T형 {Show(TeeFamilyTypeName)} · Y형 {Show(WyeFamilyTypeName)} · 십자 {Show(CrossFamilyTypeName)}"
-                   + $" · 이경 {Show(ReducerFamilyTypeName)} · 밸브부관 A {Show(ValveTeeFamilyTypeName)} · 밸브부관 B {Show(ValveBendFamilyTypeName)}";
-        }
-    }
-
     private void NotifyFamilySettingsChanged()
     {
-        OnPropertyChanged(nameof(FamilySettingsSummary));
-        OnPropertyChanged(nameof(HasIncompleteFamilySettings));
         NotifyValidationChanged();
+    }
+
+    /// <summary>접합 종류가 바뀌면 관·곡관·T·Y·십자·이경 칸을 그 접합의 패밀리로 바꾼다(docs/263 § D, 2026-10-02 사용자 결정).
+    /// 사용자가 고른 값도 덮는다. 매칭이 없는 칸은 그대로 두고, 사용자는 이후 설정 창에서 다시 고를 수 있다.
+    /// 밸브부관 A·B는 대상이 아니다.</summary>
+    private void ApplyJointFamilyDefaults()
+    {
+        var names = SegmentFamilyTypeNames.ToList();
+        // 세터 묶음은 후보 갱신을 미뤘다가 한 번만 읽는다(ApplyFamilySettings와 같은 패턴, docs/258 § B).
+        _parameterRefreshDeferral++;
+        try
+        {
+            if (GuessFamilyForJoint(names, PipeFamilyDefaultKeywords, _jointConnection) is { } segment) SegmentFamilyTypeName = segment;
+            if (GuessFamilyForJoint(names, BendFamilyDefaultKeywords, _jointConnection) is { } bend) BendFamilyTypeName = bend;
+            if (GuessFamilyForJoint(names, TeeFamilyDefaultKeywords, _jointConnection) is { } tee) TeeFamilyTypeName = tee;
+            if (GuessFamilyForJoint(names, CrossFamilyDefaultKeywords, _jointConnection) is { } cross) CrossFamilyTypeName = cross;
+            if (GuessFamilyForJoint(names, WyeFamilyDefaultKeywords, _jointConnection) is { } wye) WyeFamilyTypeName = wye;
+            if (GuessFamilyForJoint(names, ReducerFamilyDefaultKeywords, _jointConnection) is { } reducer) ReducerFamilyTypeName = reducer;
+        }
+        finally { _parameterRefreshDeferral--; }
+        FlushDeferredParameterRefresh();
+        NotifyFamilySettingsChanged();
     }
 
     // ── 이음관 배치 선택(docs/175 § C-3). 밸브처럼 선 위를 클릭해 놓는다. ────────────
@@ -963,7 +1099,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         {
             if (!double.IsFinite(value) || value <= 0)
                 throw new ArgumentOutOfRangeException(nameof(value), $"[{ErrorCodes.PL_InvalidStraightLength}] 정척 길이는 0보다 큰 숫자여야 합니다.");
-            if (SetProperty(ref _straightLengthMm, value)) NotifyValidationChanged();
+            // 정척 수직보조선(docs/245)이 새 간격을 따라오도록 화면을 다시 그린다. 검증 알림은 앞 줄이 이미 한다.
+            if (SetProperty(ref _straightLengthMm, value)) { NotifyValidationChanged(); RefreshViewOnly(); }
         }
     }
 
@@ -1016,6 +1153,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     public double SubLineBX2 { get => _subLineBX2; private set => SetProperty(ref _subLineBX2, value); }
     public double SubLineBY2 { get => _subLineBY2; private set => SetProperty(ref _subLineBY2, value); }
     public bool IsSubLineVisible { get => _isSubLineVisible; private set => SetProperty(ref _isSubLineVisible, value); }
+    /// <summary>미리보기 정척 수직보조선(docs/245). 가시성은 <see cref="IsSubLineVisible"/>를 따른다.</summary>
+    public System.Windows.Media.Geometry? SubLineTicks { get => _subLineTicks; private set => SetProperty(ref _subLineTicks, value); }
     // 분할 표식: 커서가 올라탄 지점에서 선에 수직하게 긋는 짧은 선분(docs/181 § A). 분할 중에만 보인다.
     public double SplitMarkerX1 { get => _splitMarkerX1; private set => SetProperty(ref _splitMarkerX1, value); }
     public double SplitMarkerY1 { get => _splitMarkerY1; private set => SetProperty(ref _splitMarkerY1, value); }
@@ -1167,20 +1306,17 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         IsCursorVisible = true;
         // 분할 표식은 스냅 표식보다 먼저 갱신한다 — 스냅이 안 잡혀도(아래 else에서 꺼진다) 표식은 계속 보여야 한다.
         if (IsSplittingEdge) UpdateSplitMarker(point); else IsSplitMarkerVisible = false;
-        if (IsPlacingFitting && _segmentStart is null) { UpdateFittingPreview(raw); return; }
-        HideFittingPreview();
-        if (snapped is not null)
+        if (IsPlacingFitting && _segmentStart is null)
         {
-            var marker = Transform.ToScreen(snapped.Value.Point);
-            SnapMarkerX = marker.X;
-            SnapMarkerY = marker.Y;
-            var isOrigin = snapped.Value.Point.DistanceTo(new DHBIMWATER.Core.Geometry.Point2D(0, 0)) <= double.Epsilon;
-            // 기준점 OSNAP만 +로 표시한다. 교차 OSNAP은 원점에서도 ×를 유지한다.
-            SnapMarkerSymbol = isOrigin && SnapReferencePoint ? "+" : GetSnapMarkerSymbol(snapped.Value);
-            SnapMarkerLabel = isOrigin && SnapReferencePoint ? "기준점" : GetSnapMarkerLabel(snapped.Value);
-            IsSnapMarkerVisible = true;
+            // 바이패스 세트만 OSNAP을 쓴다(docs/259). 최근접(Nearest)은 배관 위 최근접점 자체라 격자 반올림보다 못하므로 뺀다.
+            // 일반 밸브·이음관은 종전처럼 격자 반올림뿐이다.
+            var setSnap = _isPlacingBypassSet && snapped is { Kind: not PipeSnapKind.Nearest } ? snapped : null;
+            UpdateFittingPreview(raw, setSnap?.Point);
+            UpdateSnapMarker(IsFittingPreviewVisible ? setSnap : null);
+            return;
         }
-        else IsSnapMarkerVisible = false;
+        HideFittingPreview();
+        UpdateSnapMarker(snapped);
 
         if (drawingStart is null) { TempDimensions.Clear(); return; }
         var end = ResolveDrawingEnd(drawingStart, raw);
@@ -1232,11 +1368,22 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     }
 
     /// <summary>커서에 가장 가까운 엣지 위의 점을 찾고(허용오차 <see cref="PipeTopologyBuilder.SnapTolerance"/>),
-    /// 엣지 시작점부터의 거리를 <see cref="GridSnapMm"/> 격자로 반올림해 배치 미리보기를 갱신한다.</summary>
-    private void UpdateFittingPreview(DHBIMWATER.Core.Geometry.Point2D cursor)
+    /// 엣지 시작점부터의 거리를 <see cref="GridSnapMm"/> 격자로 반올림해 배치 미리보기를 갱신한다.
+    /// <para><paramref name="snapPoint"/>가 있으면(바이패스 세트 OSNAP, docs/259) 격자 대신 그 점을 커서 최근접 엣지 위로
+    /// 수직 투영한 자리를 쓴다. 엣지는 여전히 커서 기준으로 고른다 — 스냅점이 배관 밖(벽 모서리·기준점)일 수 있다.</para></summary>
+    private void UpdateFittingPreview(DHBIMWATER.Core.Geometry.Point2D cursor, DHBIMWATER.Core.Geometry.Point2D? snapPoint = null)
     {
         var target = FindNearestEdgePoint(cursor);
         if (target is null) { HideFittingPreview(); return; }
+        if (snapPoint is not null)
+        {
+            var snapEdge = target.Value.Edge;
+            var edgeStart = _network.Nodes.First(x => x.Id == snapEdge.StartNodeId).Position;
+            var edgeEnd = _network.Nodes.First(x => x.Id == snapEdge.EndNodeId).Position;
+            var snapT = Math.Clamp(Segment2D.ParameterOnSegment(snapPoint, edgeStart, edgeEnd), 0, 1);
+            target = (snapEdge, snapT, new DHBIMWATER.Core.Geometry.Point2D(
+                edgeStart.X + (edgeEnd.X - edgeStart.X) * snapT, edgeStart.Y + (edgeEnd.Y - edgeStart.Y) * snapT), edgeStart);
+        }
         var (edge, t, point, startPosition) = target.Value;
         _fittingPreviewEdgeId = edge.Id; _fittingPreviewT = t;
         _fittingPreviewCursor = cursor;
@@ -1247,16 +1394,33 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         {
             // 개략 모양 — 실제 치수는 Revit이 패밀리를 재서 정한다(docs/228 § 0-5).
             var side = BypassSideAt(edge, cursor);
-            (BypassPreviewLine, BypassPreviewMarkers) = BuildBypassGeometry(point, EdgeDirection(edge), side, edge.DiameterMm, BypassDiameterMm);
+            (BypassPreviewLine, BypassPreviewMarkers) = BuildBypassGeometry(point, EdgeDirection(edge), side, edge.DiameterMm,
+                BypassPreviewDiameterMm(edge.DiameterMm), _bypassValveCount);   // 핸드북 지관 관경, 없으면 개략 추정값(docs/256 § D-3)
             IsBypassPreviewVisible = true;
         }
 
         var dimStart = Transform.ToScreen(startPosition);
         FittingDimX1 = dimStart.X; FittingDimY1 = dimStart.Y; FittingDimX2 = screen.X; FittingDimY2 = screen.Y;
         FittingDimLabel = $"{point.DistanceTo(startPosition):N0} mm";
+        // 표에 없는 주관이어도 배치는 막지 않는다 — 모델 생성 때 건너뛴다(2026-10-01 사용자 결정, docs/256 § D-3).
         Status = _isPlacingBypassSet
             ? "클릭 → 바이패스 세트 (커서 쪽 분기) · Esc 종료"
+              + (HandbookBypassDiameterMm(edge.DiameterMm) is null ? " · 이 주관은 핸드북 규격이 없어 생성 시 건너뜁니다" : "")
             : "클릭 → 부속 배치 · Esc 취소";
+    }
+
+    /// <summary>스냅 표식 갱신. 바이패스 세트 배치(docs/259)와 그리기 모드가 같이 쓴다 — 표식은 투영 전 원래 스냅점에 띄운다.</summary>
+    private void UpdateSnapMarker(PipeSnapResult? snapped)
+    {
+        if (snapped is null) { IsSnapMarkerVisible = false; return; }
+        var marker = Transform.ToScreen(snapped.Value.Point);
+        SnapMarkerX = marker.X;
+        SnapMarkerY = marker.Y;
+        var isOrigin = snapped.Value.Point.DistanceTo(new DHBIMWATER.Core.Geometry.Point2D(0, 0)) <= double.Epsilon;
+        // 기준점 OSNAP만 +로 표시한다. 교차 OSNAP은 원점에서도 ×를 유지한다.
+        SnapMarkerSymbol = isOrigin && SnapReferencePoint ? "+" : GetSnapMarkerSymbol(snapped.Value);
+        SnapMarkerLabel = isOrigin && SnapReferencePoint ? "기준점" : GetSnapMarkerLabel(snapped.Value);
+        IsSnapMarkerVisible = true;
     }
 
     private void HideFittingPreview()
@@ -1799,6 +1963,21 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             foreach (var fitting in edge.InlineFittings.OrderBy(x => x.T))
             {
                 hasFitting = true;
+                // 바이패스 세트는 패밀리명이 비어 있고 구성이 Bypass에 있다 — 일반 밸브처럼 적으면 줄이 공란이 된다(docs/241).
+                if (fitting.Bypass is { } bypass)
+                {
+                    var valve = string.IsNullOrWhiteSpace(bypass.BypassValveFamilyTypeName) ? "(미지정)" : bypass.BypassValveFamilyTypeName;
+                    // 밸브 2개 세트는 V1 → V2 순서와 단관 길이를 함께 적는다(docs/255 § D-7).
+                    if (bypass.HasTwoValves)
+                        valve = FormattableString.Invariant($"{valve} → {bypass.SecondValveFamilyTypeName} · 단관 {bypass.SpoolLengthMm:0}mm");
+                    // Side +1 = 선 진행 방향(시작→끝)의 왼쪽(BypassSetSpec.Side).
+                    var side = bypass.NormalizedSide > 0 ? "좌측" : "우측";
+                    // 관경 0 = 핸드북 규격표가 정한다(docs/256). 되가져온 세트는 모델 실제값이다.
+                    var diameter = bypass.BypassDiameterMm > 0 ? $"DN{bypass.BypassDiameterMm:0}"
+                        : HandbookBypassDiameterMm(edge.DiameterMm) is { } handbookMm ? $"DN{handbookMm:0}(핸드북)" : "핸드북 규격 없음 — 생성 시 건너뜀";
+                    text.AppendLine($"  선{i + 1} | {fitting.T * length:0}mm | 바이패스 세트 | 바이패스 밸브 {valve} · {diameter} · 진행 방향 {side}");
+                    continue;
+                }
                 var kind = fitting.TypeKey == InlineJoint.TypeKey ? "이음관" : "밸브";
                 text.AppendLine($"  선{i + 1} | {fitting.T * length:0}mm | {kind} | {fitting.FamilyTypeName}");
             }
@@ -1921,8 +2100,17 @@ public sealed class PipeLayoutViewModel : ViewModelBase
                 // 캔버스 엣지는 가져온 선과 방향이 뒤집혀 있을 수 있어 가져온 쪽 Side를 그대로 쓰면 반대로 선다.
                 var direction = EdgeDirection(target.Value.Edge);
                 var side = direction.X * bypass.Normal.Y - direction.Y * bypass.Normal.X < 0 ? -1 : 1;
+                // 밸브 2개 세트(docs/255 § D-5) — 두 밸브를 이 캔버스 엣지 방향에 투영해 시작 쪽을 V1으로 둔다. 같은 이유로 가져온 순서를 믿지 않는다.
+                var (firstValve, secondValve) = (bypass.BypassValveFamilyTypeName, bypass.SecondValveFamilyTypeName);
+                if (!string.IsNullOrWhiteSpace(secondValve) && bypass.ValvePositions.Count == 2)
+                {
+                    var p0 = ToCanvasPoint(bypass.ValvePositions[0]);
+                    var p1 = ToCanvasPoint(bypass.ValvePositions[1]);
+                    if ((p1.X - p0.X) * direction.X + (p1.Y - p0.Y) * direction.Y < 0) (firstValve, secondValve) = (secondValve, firstValve);
+                }
                 _network.AddInlineFitting(target.Value.Edge.Id, BypassSet.TypeKey, fitting.FamilyTypeName, target.Value.T,
-                    preservePosition: true, bypass: new BypassSetSpec(bypass.BypassValveFamilyTypeName, bypass.BypassDiameterMm, side));
+                    preservePosition: true, bypass: new BypassSetSpec(firstValve, bypass.BypassDiameterMm, side,
+                        string.IsNullOrWhiteSpace(secondValve) ? null : secondValve, string.IsNullOrWhiteSpace(secondValve) ? 0 : bypass.SpoolLengthMm));
                 if (_network.Edges.FirstOrDefault(x => x.Id == target.Value.Edge.Id) is { InlineFittings.Count: > 0 } setEdge)
                     importedIds[setEdge.InlineFittings[^1].Id] = bypass.ElementIds;
                 continue;
@@ -1962,7 +2150,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         }
 
         _network.Elevation = import.ElevationMm;
-        _elevation = import.ElevationMm; OnPropertyChanged(nameof(Elevation));
+        _elevation = import.ElevationMm; OnPropertyChanged(nameof(Elevation)); OnPropertyChanged(nameof(ElevationM));
         var keptFamilies = ApplyImportedSettings(import);
 
         _importedSourceIds = import.SourceElementIds;
@@ -2188,6 +2376,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         var lines = CalculateSubLines(start, end, _diameterMm);
         if (lines is null)
         {
+            SubLineTicks = null;
             IsSubLineVisible = false;
             return;
         }
@@ -2195,6 +2384,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         var value = lines.Value;
         SubLineAX1 = value.AX1; SubLineAY1 = value.AY1; SubLineAX2 = value.AX2; SubLineAY2 = value.AY2;
         SubLineBX1 = value.BX1; SubLineBY1 = value.BY1; SubLineBX2 = value.BX2; SubLineBY2 = value.BY2;
+        SubLineTicks = BuildStraightLengthTicks(start, end, _diameterMm);
         IsSubLineVisible = true;
     }
 
@@ -2217,6 +2407,51 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         var b1 = Transform.ToScreen(new DHBIMWATER.Core.Geometry.Point2D(start.X - offsetX, start.Y - offsetY));
         var b2 = Transform.ToScreen(new DHBIMWATER.Core.Geometry.Point2D(end.X - offsetX, end.Y - offsetY));
         return (a1.X, a1.Y, a2.X, a2.Y, b1.X, b1.Y, b2.X, b2.Y);
+    }
+
+    /// <summary>한 선에 그릴 정척 눈금 상한. 정척을 1mm처럼 잘못 넣고 긴 선을 그리면 눈금이 수만 개가 돼 UI가 멈춘다.</summary>
+    private const int MaxStraightLengthTicks = 500;
+
+    /// <summary>정척 길이마다 SubLine A–B를 잇는 수직보조선(docs/245). 시작점부터 단순 간격이며
+    /// 부속 폭은 무시한다 — 실제 이음 위치(PipeSegmentPlan)와 어긋날 수 있는 참고 눈금이다.
+    /// 끝점과 겹치는 눈금은 그리지 않는다(PipeSegmentPlan의 허용오차 관례와 같다).</summary>
+    private System.Windows.Media.Geometry? BuildStraightLengthTicks(
+        DHBIMWATER.Core.Geometry.Point2D start,
+        DHBIMWATER.Core.Geometry.Point2D end,
+        double diameterMm)
+    {
+        const double tolerance = 1e-6;
+        var straightLengthMm = _straightLengthMm;
+        var dx = end.X - start.X;
+        var dy = end.Y - start.Y;
+        var length = Math.Sqrt(dx * dx + dy * dy);
+        if (length < double.Epsilon || !double.IsFinite(diameterMm) || diameterMm <= 0) return null;
+        if (!double.IsFinite(straightLengthMm) || straightLengthMm <= 0) return null;
+
+        var tickCount = (int)Math.Min(int.MaxValue, Math.Floor((length - tolerance) / straightLengthMm));
+        if (tickCount <= 0 || tickCount > MaxStraightLengthTicks) return null;
+
+        var ux = dx / length;
+        var uy = dy / length;
+        var radius = diameterMm / 2;
+        var offsetX = -uy * radius;
+        var offsetY = ux * radius;
+        var path = new System.Text.StringBuilder();
+        for (var k = 1; k <= tickCount; k++)
+        {
+            var d = k * straightLengthMm;
+            if (d >= length - tolerance) break;
+            var cx = start.X + ux * d;
+            var cy = start.Y + uy * d;
+            var a = Transform.ToScreen(new DHBIMWATER.Core.Geometry.Point2D(cx + offsetX, cy + offsetY));
+            var b = Transform.ToScreen(new DHBIMWATER.Core.Geometry.Point2D(cx - offsetX, cy - offsetY));
+            path.Append(FormattableString.Invariant($"M {a.X},{a.Y} L {b.X},{b.Y} "));
+        }
+        if (path.Length == 0) return null;
+
+        var geometry = System.Windows.Media.Geometry.Parse(path.ToString());
+        geometry.Freeze();
+        return geometry;
     }
 
     /// <summary>커서(또는 스냅된 점)에서 X·Y 각 방향으로 가장 가까운 외곽선까지의 중심선·SubLine 임시치수를 만든다.</summary>
@@ -2797,17 +3032,20 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         _bypassValveFamilyName ??= ValveFamilyNames.FirstOrDefault(x => x.Name.Contains("게이트", StringComparison.Ordinal))?.Name
             ?? ValveFamilyNames.FirstOrDefault()?.Name;
         OnPropertyChanged(nameof(BypassValveFamilyName));
+        _bypassSecondValveFamilyName ??= _bypassValveFamilyName;
+        OnPropertyChanged(nameof(BypassSecondValveFamilyName));
         RefreshBypassValveTypeNames();
         RefreshValveTypeNames();
         RefreshDiameterMatch();
 
         // 이름으로 기본값을 추정한다. 못 찾으면 비워 두고 검증에서 선택을 요구한다.
-        _segmentFamilyTypeName ??= GuessFamily(fittingNames, PipeFamilyDefaultKeywords);
-        _bendFamilyTypeName ??= GuessFamily(fittingNames, BendFamilyDefaultKeywords);
-        _teeFamilyTypeName ??= GuessFamily(fittingNames, TeeFamilyDefaultKeywords);
-        _crossFamilyTypeName ??= GuessFamily(fittingNames, CrossFamilyDefaultKeywords);
-        _wyeFamilyTypeName ??= GuessFamily(fittingNames, WyeFamilyDefaultKeywords);
-        _reducerFamilyTypeName ??= GuessFamily(fittingNames, ReducerFamilyDefaultKeywords);
+        // 현재 접합 종류(기본 플랜지)의 패밀리를 먼저 찾는다(docs/263 § D-2). 저장값은 이 뒤 ApplyFamilySettings가 덮는다.
+        _segmentFamilyTypeName ??= GuessFamilyForJoint(fittingNames, PipeFamilyDefaultKeywords, _jointConnection) ?? GuessFamily(fittingNames, PipeFamilyDefaultKeywords);
+        _bendFamilyTypeName ??= GuessFamilyForJoint(fittingNames, BendFamilyDefaultKeywords, _jointConnection) ?? GuessFamily(fittingNames, BendFamilyDefaultKeywords);
+        _teeFamilyTypeName ??= GuessFamilyForJoint(fittingNames, TeeFamilyDefaultKeywords, _jointConnection) ?? GuessFamily(fittingNames, TeeFamilyDefaultKeywords);
+        _crossFamilyTypeName ??= GuessFamilyForJoint(fittingNames, CrossFamilyDefaultKeywords, _jointConnection) ?? GuessFamily(fittingNames, CrossFamilyDefaultKeywords);
+        _wyeFamilyTypeName ??= GuessFamilyForJoint(fittingNames, WyeFamilyDefaultKeywords, _jointConnection) ?? GuessFamily(fittingNames, WyeFamilyDefaultKeywords);
+        _reducerFamilyTypeName ??= GuessFamilyForJoint(fittingNames, ReducerFamilyDefaultKeywords, _jointConnection) ?? GuessFamily(fittingNames, ReducerFamilyDefaultKeywords);
         // 후보가 이미 키워드로 걸러져 있다. A·B는 커넥터 수로만 갈리므로(docs/227 § 0-6) 이름으로는 패밀리명(유형명 제외)의
         // A/B 표기만 본다. B는 못 찾으면 첫 항목, A는 못 찾으면 비워 두고 검증에서 선택을 요구한다.
         // 기본 패밀리명 완전일치가 먼저다(docs/232 § A-2) — `DH_특수_밸브부관`·`(D형)`에는 A/B 글자가 없어 종전 규칙이 못 잡는다.
@@ -2877,6 +3115,25 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         return separatorIndex < 0 ? familyTypeName : familyTypeName[..separatorIndex];
     }
 
+    /// <summary>접합 종류에 맞는 패밀리만 남긴 뒤 부재 키워드 추정(<see cref="GuessFamily"/>)을 돌린다(docs/263 § D-1).
+    /// 이름 규칙이 `DH_{접합}_{부재}`라 1순위는 `소켓_`·`플랜지_` 접두다 — `DH_소켓_플랜지T형관`처럼 두 단어가 다 든 패밀리가 있어
+    /// 단어 포함만 보면 소켓 T형관이 플랜지로 잡힌다. 2순위는 패밀리명에 접합 단어 포함. 둘 다 없으면 null(호출부가 현재 값 유지).
+    /// 강관 `용접`은 값이 <see cref="BendConnection.Socket"/>이라 소켓 패밀리로 매칭한다(2026-10-02 사용자 결정).</summary>
+    private static string? GuessFamilyForJoint(IReadOnlyList<string> names, IReadOnlyList<string> keywords, BendConnection joint)
+    {
+        var word = joint switch
+        {
+            BendConnection.Socket => "소켓",
+            BendConnection.Flanged => "플랜지",
+            _ => null
+        };
+        if (word is null) return null;
+        var prefixed = names.Where(x => GetFamilyName(x).Contains(word + "_", StringComparison.Ordinal)).ToList();
+        if (GuessFamily(prefixed, keywords) is { } byPrefix) return byPrefix;
+        var contained = names.Where(x => GetFamilyName(x).Contains(word, StringComparison.Ordinal)).ToList();
+        return GuessFamily(contained, keywords);
+    }
+
     private static string? GuessFamily(IReadOnlyList<string> names, IReadOnlyList<string> keywords)
         => GuessByKeywords(names, keywords, name => name.StartsWith("DH", StringComparison.OrdinalIgnoreCase))
             ?? GuessByKeywords(names, keywords, _ => true);
@@ -2887,8 +3144,20 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             .FirstOrDefault(name => name is not null);
 
     /// <summary>선택된 관 패밀리의 인스턴스 파라미터를 다시 읽고, 사용자가 직접 고르지 않은 길이·직경 이름을 자동 추정한다.</summary>
+    /// <summary>미뤄 둔 후보 갱신을 한 번씩 실행한다(docs/258 § B). 지연 중이면 아무것도 하지 않는다.
+    /// 순서는 종전 추정 경로(<see cref="RefreshFamilyTypeNames"/>)와 같다 — 관 → 이형관·밸브 → 바이패스 밸브.</summary>
+    private void FlushDeferredParameterRefresh()
+    {
+        if (_parameterRefreshDeferral > 0) return;
+        if (_pendingSegmentRefresh) RefreshSegmentParameterNames();
+        if (_pendingFittingRefresh) RefreshFittingDiameterParameterNames();
+        if (_pendingBypassRefresh) RefreshBypassValveParameterNames();
+    }
+
     private void RefreshSegmentParameterNames()
     {
+        if (_parameterRefreshDeferral > 0) { _pendingSegmentRefresh = true; return; }   // docs/258 § B
+        _pendingSegmentRefresh = false;
         LengthParameterNames.Clear();
         // TODO: 실제로는 카테고리 공통 조회이므로 인터페이스 메서드명을 별도 작업에서 일반화한다.
         var names = string.IsNullOrWhiteSpace(SegmentFamilyTypeName)
@@ -2916,6 +3185,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
 
     private void RefreshFittingDiameterParameterNames()
     {
+        if (_parameterRefreshDeferral > 0) { _pendingFittingRefresh = true; return; }   // docs/258 § B
+        _pendingFittingRefresh = false;
         _isRefreshingParameterNames = true;
         try
         {
@@ -3052,6 +3323,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     /// 없으면 일반 직경 추정값을 쓰고 그 추정값을 사전에 넣는다(4번 섹션 <see cref="RestoreValveDiameterParameterForFamily"/>와 같은 규칙).</summary>
     private void RefreshBypassValveParameterNames()
     {
+        if (_parameterRefreshDeferral > 0) { _pendingBypassRefresh = true; return; }   // docs/258 § B
+        _pendingBypassRefresh = false;
         var wasRefreshing = _isRefreshingParameterNames;   // 다른 갱신 안에서 불려도 바깥 플래그를 되돌린다.
         _isRefreshingParameterNames = true;
         try
@@ -3069,8 +3342,6 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             }
             _bypassValveDiameterParameterName = selected;
             OnPropertyChanged(nameof(BypassValveDiameterParameterName));
-            RefreshTypeDiameterParameterNames(BypassValveTypeParameterNames, BypassValveTypeName,
-                ref _bypassValveTypeDiameterParameterName, nameof(BypassValveTypeDiameterParameterName));
         }
         finally
         {
@@ -3147,30 +3418,32 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(ValveTypeDiameterText));
         OnPropertyChanged(nameof(IsValveTypeDiameterMismatch));
-        OnPropertyChanged(nameof(BypassValveTypeDiameterText));
-        OnPropertyChanged(nameof(IsBypassValveTypeDiameterMismatch));
         OnPropertyChanged(nameof(ValidationSummary));
     }
 
-    /// <summary>생성을 막지 않는 경고(docs/233 § B-3). 놓인 인라인 밸브는 올라탄 선의 관경과, 바이패스 세트는 세트의 바이패스 관경과 유형 직경값을 대조한다.</summary>
+    /// <summary>생성을 막지 않는 경고(docs/233 § B-3). 놓인 인라인 밸브는 올라탄 선의 관경과 유형 직경값을 대조한다.
+    /// 바이패스 세트는 대조하지 않는다 — 밸브 유형을 모델 생성 때 바이패스 관경과 같은 DN으로 고른다(docs/244).</summary>
     private List<string> GetValidationWarnings()
     {
         var warnings = new List<string>();
         var valveMismatch = 0;
-        var bypassMismatch = 0;
         foreach (var edge in _network.Edges)
             foreach (var fitting in edge.InlineFittings)
             {
-                if (fitting.IsJoint) continue;
-                if (fitting.IsBypassSet)
-                {
-                    if (fitting.Bypass is { } bypass && !string.IsNullOrWhiteSpace(bypass.BypassValveFamilyTypeName)
-                        && IsTypeDiameterMismatch(bypass.BypassValveFamilyTypeName, bypass.BypassDiameterMm)) bypassMismatch++;
-                }
-                else if (!string.IsNullOrWhiteSpace(fitting.FamilyTypeName) && IsTypeDiameterMismatch(fitting.FamilyTypeName, edge.DiameterMm)) valveMismatch++;
+                if (fitting.IsJoint || fitting.IsBypassSet) continue;
+                if (!string.IsNullOrWhiteSpace(fitting.FamilyTypeName) && IsTypeDiameterMismatch(fitting.FamilyTypeName, edge.DiameterMm)) valveMismatch++;
             }
         if (valveMismatch > 0) warnings.Add($"유형 직경이 선 관경과 다른 밸브 {valveMismatch}개 — 4번 섹션 유형 직경 매개변수 확인");
-        if (bypassMismatch > 0) warnings.Add($"바이패스 밸브 유형 직경이 바이패스 관경과 다른 세트 {bypassMismatch}개 — 5번 섹션 유형 직경 매개변수 확인");
+
+        // 되가져오기는 패밀리명 키워드로 밸브부관을 가린다(RevitValveRoomPipingPickRepo.Classify). 키워드 없는 패밀리로 만들면
+        // 모델은 생기지만 되가져올 때 A는 T형·십자, B는 곡관으로 돌아와 세트가 풀린다(2026-09-29).
+        var hasSet = _network.Edges.Any(e => e.InlineFittings.Any(x => x.IsBypassSet));
+        if ((hasSet || _network.Nodes.Any(IsValveTeeNode)) && !string.IsNullOrWhiteSpace(ValveTeeFamilyTypeName)
+            && !PipeValveBend.IsValveBendFamily(ValveTeeFamilyTypeName))
+            warnings.Add($"밸브부관 A 패밀리명에 '{PipeValveBend.FamilyKeyword}'가 없어 되가져오기 시 T형·십자로 돌아옵니다");
+        if ((hasSet || _network.Nodes.Any(IsValveBendNode)) && !string.IsNullOrWhiteSpace(ValveBendFamilyTypeName)
+            && !PipeValveBend.IsValveBendFamily(ValveBendFamilyTypeName))
+            warnings.Add($"밸브부관 B 패밀리명에 '{PipeValveBend.FamilyKeyword}'가 없어 되가져오기 시 곡관으로 돌아옵니다");
         return warnings;
     }
 
@@ -3235,7 +3508,9 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             .Where(name => !name.Contains("구경", StringComparison.Ordinal)
                         && !name.Contains("직경", StringComparison.Ordinal)
                         && !name.Contains(RadiusToken, StringComparison.Ordinal)).ToList();
-        return keywords.Select(keyword => candidates.FirstOrDefault(name => name.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+        // 키워드와 이름이 정확히 같은 파라미터(`수평분기`)를 먼저 고른다(docs/241) — `수평분기_길이` 같은 이름이 앞에 있어도 밀리지 않게.
+        return keywords.Select(keyword => candidates.FirstOrDefault(name => string.Equals(name, keyword, StringComparison.OrdinalIgnoreCase)))
+            .Concat(keywords.Select(keyword => candidates.FirstOrDefault(name => name.Contains(keyword, StringComparison.OrdinalIgnoreCase))))
             .FirstOrDefault(name => name is not null);
     }
 
@@ -3383,8 +3658,9 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         if (succeeded) ForgetImportedSource();
         if (!succeeded && _failures.Count > 0) CenterFirstFailureIfOutsideViewport(_failures[0]);
         RefreshGraph();
+        // 성공 문구는 호출측이 완성해 보낸다("배치 성공" / "배치 완료 · 실패 N개") — 상세는 로그로만 남긴다(2026-10-01 사용자 결정).
         Status = succeeded
-            ? $"생성 완료 · {message}"
+            ? message
             : $"생성 실패 · {message}{FormatFailurePoint(_failures.FirstOrDefault())}";
     }
 
@@ -3398,6 +3674,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         BeginEditing();
         _elevation = _network.Elevation;
         OnPropertyChanged(nameof(Elevation));
+        OnPropertyChanged(nameof(ElevationM));
         OnPropertyChanged(nameof(HasImportedSource));
         OnPropertyChanged(nameof(HasReplaceTarget));
         // 되돌린 이격이 다음 외곽 피킹에서 중앙값으로 덮이면 안 되므로 사용자 편집값으로 복원한다(docs/172 § C-10).
@@ -3557,7 +3834,11 @@ public sealed class PipeLayoutViewModel : ViewModelBase
                 ValveRoomZone,
                 // 부재가 자기 패밀리 파라미터로 접합을 밝히지 않을 때만 쓰이는 기본값이다(docs/170 § A·§ E).
                 // 압륜은 창에서 지정하지 않는다(docs/175 § A) — 사용자가 인스턴스 파라미터로 제어한다.
-                JointConnection));
+                JointConnection,
+                // 바이패스 지관 규격표 등급(docs/256).
+                _steelFittingClass,
+                // 관 등급 — 직관·단관 단위중량 조회와 DH_관종등급(docs/260 § C).
+                _pipeKind));
             Status = "Revit에서 배치 중…";
         }
         catch (Exception ex)
@@ -3788,7 +4069,10 @@ public sealed class PipeLayoutViewModel : ViewModelBase
                 start.DistanceTo(end), SelectedEdgeIds.Contains(edge.Id),
                 subLines?.AX1 ?? 0, subLines?.AY1 ?? 0, subLines?.AX2 ?? 0, subLines?.AY2 ?? 0,
                 subLines?.BX1 ?? 0, subLines?.BY1 ?? 0, subLines?.BX2 ?? 0, subLines?.BY2 ?? 0,
-                _errorEdgeIds.Contains(edge.Id), edge.DiameterMm));
+                _errorEdgeIds.Contains(edge.Id), edge.DiameterMm)
+            {
+                StraightTicks = BuildStraightLengthTicks(start, end, edge.DiameterMm)
+            });
         }
         foreach (var node in _network.Nodes)
         {
@@ -4000,8 +4284,14 @@ public sealed class PipeLayoutViewModel : ViewModelBase
                     var start = _network.Nodes.First(x => x.Id == edge.StartNodeId).Position;
                     var end = _network.Nodes.First(x => x.Id == edge.EndNodeId).Position;
                     var center = new DHBIMWATER.Core.Geometry.Point2D(start.X + (end.X - start.X) * t, start.Y + (end.Y - start.Y) * t);
-                    var (line, markers) = BuildBypassGeometry(center, EdgeDirection(edge), fitting.Bypass!.NormalizedSide, edge.DiameterMm, fitting.Bypass.BypassDiameterMm);
-                    item = item with { BypassLine = line, BypassMarkers = markers, MainDiameterMm = edge.DiameterMm };
+                    var (line, markers) = BuildBypassGeometry(center, EdgeDirection(edge), fitting.Bypass!.NormalizedSide, edge.DiameterMm,
+                        fitting.Bypass.BypassDiameterMm > 0 ? fitting.Bypass.BypassDiameterMm : BypassPreviewDiameterMm(edge.DiameterMm),
+                        fitting.Bypass.HasTwoValves ? 2 : 1);
+                    item = item with
+                    {
+                        BypassLine = line, BypassMarkers = markers, MainDiameterMm = edge.DiameterMm,
+                        HandbookBranchDiameterMm = HandbookBypassDiameterMm(edge.DiameterMm),
+                    };
                 }
                 InlineFittings.Add(item);
             }
@@ -4014,15 +4304,17 @@ public sealed class PipeLayoutViewModel : ViewModelBase
 
     private void PlacePreviewedBypassSet()
     {
-        if (string.IsNullOrWhiteSpace(BypassValveTypeName)) { Status = "바이패스 밸브 유형 선택 필요"; return; }
+        if (string.IsNullOrWhiteSpace(BypassValveFamilyName)) { Status = "바이패스 밸브 패밀리 선택 필요"; return; }
+        var (second, spoolMm, configError) = BypassValvePanelConfig();
+        if (configError is not null) { Status = configError; return; }
         var edge = _network.Edges.FirstOrDefault(x => x.Id == _fittingPreviewEdgeId);
         if (edge is null) return;
-        if (BypassDiameterMm >= edge.DiameterMm) { Status = $"바이패스 관경({BypassDiameterMm:N0}) < 본관 관경({edge.DiameterMm:N0}) 필요"; return; }
         var side = _fittingPreviewCursor is { } cursor ? BypassSideAt(edge, cursor) : 1;
         var before = Snapshot();
         // 세트 부속의 FamilyTypeName은 빈 문자열이다 — 본관 밸브는 세트가 아니다(docs/230 § B).
         if (!TryEditNetwork(before, () => _network.AddInlineFitting(edge.Id, BypassSet.TypeKey, string.Empty, _fittingPreviewT,
-            bypass: new BypassSetSpec(BypassValveTypeName, BypassDiameterMm, side)))) return;
+            // 밸브는 패밀리명만, 관경 0 = 모델 생성 때 밸브부관 B가 정한다(docs/244 § D-2).
+            bypass: new BypassSetSpec(BypassValveFamilyName, 0, side, second, spoolMm)))) return;
         BeginEditing();
         RecordUndoIfChanged(before);
         RefreshGraph();
@@ -4032,18 +4324,16 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     private void ApplyBypassValves(InlineFittingItem? item)
     {
         if (item is null || IsCreating) return;
-        if (string.IsNullOrWhiteSpace(BypassValveTypeName))
+        if (string.IsNullOrWhiteSpace(BypassValveFamilyName))
         {
-            Status = "바이패스 밸브 유형 선택 필요";
+            Status = "바이패스 밸브 패밀리 선택 필요";
             return;
         }
-        if (_network.Edges.FirstOrDefault(x => x.Id == item.EdgeId) is { } edge && BypassDiameterMm >= edge.DiameterMm)
-        {
-            Status = $"바이패스 관경({BypassDiameterMm:N0}) < 본관 관경({edge.DiameterMm:N0}) 필요";
-            return;
-        }
+        var (second, spoolMm, configError) = BypassValvePanelConfig();
+        if (configError is not null) { Status = configError; return; }
         var before = Snapshot();
-        if (!_network.UpdateBypassSet(item.EdgeId, item.Id, BypassValveTypeName, BypassDiameterMm)) return;
+        // 새 세트와 같이 패밀리명·관경 0(자동)을 넣는다(docs/244 § D-2). 밸브 개수·V2·단관도 패널 값으로 바꾼다(docs/255 § D-3).
+        if (!_network.UpdateBypassSet(item.EdgeId, item.Id, BypassValveFamilyName, 0, second, spoolMm)) return;
         BeginEditing();
         RecordUndoIfChanged(before);
         RefreshGraph();
@@ -4059,6 +4349,17 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         RecordUndoIfChanged(before);
         RefreshGraph();
         Status = "바이패스 세트 방향 전환";
+    }
+
+    private void SwapBypassValves(InlineFittingItem? item)
+    {
+        if (item is null || IsCreating) return;
+        var before = Snapshot();
+        if (!_network.SwapBypassValves(item.EdgeId, item.Id)) return;
+        BeginEditing();
+        RecordUndoIfChanged(before);
+        RefreshGraph();
+        Status = "바이패스 밸브 순서 바꿈 (밸브 1 ↔ 밸브 2)";
     }
 
     /// <summary>커서가 엣지 진행 방향의 왼쪽이면 +1, 오른쪽이면 -1(<see cref="BypassSetSpec.Side"/>).</summary>
@@ -4079,9 +4380,11 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     }
 
     /// <summary>세트 개략 그림(화면 좌표). 선: A1 → B1 → B2 → A2(바이패스 경로), 표식: A 사각형 · B 원 · 바이패스 밸브 다이아몬드.
-    /// 치수는 <see cref="BypassSet.EstimatedHalfSpanMm"/>·<see cref="BypassSet.EstimatedOffsetMm"/> 개략값이다.</summary>
+    /// 치수는 <see cref="BypassSet.EstimatedHalfSpanMm"/>·<see cref="BypassSet.EstimatedOffsetMm"/> 개략값이다.
+    /// 밸브 2개 세트는 다이아몬드를 두 개 그린다(docs/255 § D-7) — 간격도 개략값이다.</summary>
     private (System.Windows.Media.Geometry Line, System.Windows.Media.Geometry Markers) BuildBypassGeometry(
-        DHBIMWATER.Core.Geometry.Point2D center, DHBIMWATER.Core.Geometry.Point2D direction, int side, double mainMm, double bypassMm)
+        DHBIMWATER.Core.Geometry.Point2D center, DHBIMWATER.Core.Geometry.Point2D direction, int side, double mainMm, double bypassMm,
+        int valveCount = 1)
     {
         var half = BypassSet.EstimatedHalfSpanMm(mainMm, bypassMm);
         var offset = BypassSet.EstimatedOffsetMm(mainMm, bypassMm);
@@ -4093,18 +4396,19 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         static string Square(Point p) => FormattableString.Invariant($"M {p.X - 6:0.##},{p.Y - 6:0.##} h 12 v 12 h -12 Z ");
         static string Circle(Point p) => FormattableString.Invariant($"M {p.X - 5:0.##},{p.Y:0.##} A 5,5 0 1 0 {p.X + 5:0.##},{p.Y:0.##} A 5,5 0 1 0 {p.X - 5:0.##},{p.Y:0.##} Z ");
         static string Diamond(Point p) => FormattableString.Invariant($"M {p.X:0.##},{p.Y - 7:0.##} L {p.X + 7:0.##},{p.Y:0.##} L {p.X:0.##},{p.Y + 7:0.##} L {p.X - 7:0.##},{p.Y:0.##} Z ");
-        var markers = Square(a1) + Square(a2) + Circle(b1) + Circle(b2) + Diamond(v);
+        var valves = valveCount == 2 ? Diamond(At(-half * 0.3, offset)) + Diamond(At(half * 0.3, offset)) : Diamond(v);
+        var markers = Square(a1) + Square(a2) + Circle(b1) + Circle(b2) + valves;
         var lineGeometry = System.Windows.Media.Geometry.Parse(line); lineGeometry.Freeze();
         var markerGeometry = System.Windows.Media.Geometry.Parse(markers); markerGeometry.Freeze();
         return (lineGeometry, markerGeometry);
     }
 
-    /// <summary>바이패스 밸브 유형 후보를 채운다. 기본값은 바이패스 관경과 같은 DN 유형(없으면 첫 유형)이다.</summary>
+    /// <summary>바이패스 밸브 유형 후보를 채운다. 대표 유형은 패밀리 첫 유형이다(docs/244 § D-2) — 실제 유형은 모델 생성 때 DN으로 고른다.</summary>
     private void RefreshBypassValveTypeNames()
     {
-        Fill(BypassValveTypeNames, _bypassValveFamilyName, _bypassDiameterMm, ref _bypassValveTypeName, nameof(BypassValveTypeName));
+        Fill(BypassValveTypeNames, _bypassValveFamilyName, ref _bypassValveTypeName, nameof(BypassValveTypeName));
 
-        void Fill(ObservableCollection<string> target, string? family, double diameterMm, ref string? selected, string propertyName)
+        void Fill(ObservableCollection<string> target, string? family, ref string? selected, string propertyName)
         {
             target.Clear();
             foreach (var name in _accessoryFamilyTypeNames.Where(x => family is not null && GetFamilyName(x) == family)
@@ -4112,8 +4416,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
                 target.Add(name);
             if (selected is null || !target.Contains(selected))
             {
-                selected = target.FirstOrDefault(x => NominalDiameterParser.Parse(x) is { } dn && Math.Abs(dn - diameterMm) < 0.5)
-                           ?? target.FirstOrDefault();
+                selected = target.FirstOrDefault();
                 OnPropertyChanged(propertyName);
             }
         }
@@ -4130,9 +4433,16 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         if (string.IsNullOrWhiteSpace(ValveTeeFamilyTypeName)) yield return "바이패스 세트용 밸브부관 A 패밀리 선택 필요";
         if (string.IsNullOrWhiteSpace(ValveBendFamilyTypeName)) yield return "바이패스 세트용 밸브부관 B 패밀리 선택 필요";
         var noValve = sets.Count(x => string.IsNullOrWhiteSpace(x.Bypass!.BypassValveFamilyTypeName));
-        if (noValve > 0) yield return $"바이패스 밸브가 비어 있는 세트 {noValve}개 — 세트 목록 [밸브 적용] 필요";
-        var tooLarge = sets.Count(x => definition.Edges.FirstOrDefault(e => e.Id == x.EdgeId) is { } edge && x.Bypass!.BypassDiameterMm >= edge.DiameterMm);
+        if (noValve > 0) yield return $"바이패스 밸브 패밀리가 비어 있는 세트 {noValve}개 — 세트 목록 [밸브 적용] 필요";
+        // 관경 0(자동)은 생성 때 정하므로 검사하지 않는다 — 되가져온 세트만 해당(docs/244 § D-2).
+        var tooLarge = sets.Count(x => definition.Edges.FirstOrDefault(e => e.Id == x.EdgeId) is { } edge
+            && x.Bypass!.BypassDiameterMm > 0 && x.Bypass.BypassDiameterMm >= edge.DiameterMm);
         if (tooLarge > 0) yield return $"바이패스 관경 ≥ 본관인 세트 {tooLarge}개 수정 필요";
+        // 밸브 2개 세트의 단관(docs/255 § D-6) — 0(직결) 또는 관 최소 조각 이상. 되가져온 모델의 짧은 관이 여기 걸릴 수 있다.
+        var badSpool = sets.Count(x => x.Bypass!.HasTwoValves && !BypassSet.IsValidSpoolLength(x.Bypass.SpoolLengthMm));
+        if (badSpool > 0)
+            yield return FormattableString.Invariant(
+                $"바이패스 밸브 사이 단관이 {PipeSegmentPlan.MinSegmentMm:0}mm 미만인 세트 {badSpool}개 — 0(직결) 또는 {PipeSegmentPlan.MinSegmentMm:0}mm 이상으로 [밸브 적용]");
     }
 }
 
@@ -4149,6 +4459,8 @@ public sealed record PipeEdgeItem(
     /// <summary>선마다 다를 수 있는 관경 표시(docs/152 § D-3).</summary>
     public string DiameterLabel => $"D{DiameterMm:0.##}";
     public string Stroke => IsError ? "#E74C3C" : IsSelected ? "#E67E22" : "#2878B8";
+    /// <summary>정척 수직보조선(docs/245). 없으면 null.</summary>
+    public System.Windows.Media.Geometry? StraightTicks { get; init; }
 }
 public sealed record PipeNodeItem(Guid Id, double X, double Y, int Degree, NodeKind NodeKind)
 {
@@ -4164,7 +4476,7 @@ public sealed record PipeNodeItem(Guid Id, double X, double Y, int Degree, NodeK
     public double ValveSideX2 => ValveSideEnd?.X ?? X;
     public double ValveSideY2 => ValveSideEnd?.Y ?? Y;
     public string Label => IsValveBend ? PipeValveBend.PartNameB : IsValveTee ? PipeValveBend.PartNameA : $"{NodeKind} ({Degree})";
-    public string Color => IsValveBend ? "#C0392B" : IsValveTee ? "#922B21" : NodeKind switch { NodeKind.EndPoint => "#7F8C8D", NodeKind.Inline => "#3498DB", NodeKind.Elbow => "#F39C12", NodeKind.Tee => "#9B59B6", NodeKind.Wye => "#16A085", _ => "#E74C3C" };
+    public string Color => IsValveBend ? "#C0392B" : IsValveTee ? "#6E2C00" : NodeKind switch { NodeKind.EndPoint => "#7F8C8D", NodeKind.Inline => "#3498DB", NodeKind.Elbow => "#F39C12", NodeKind.Tee => "#9B59B6", NodeKind.Wye => "#16A085", _ => "#E74C3C" };
 }
 /// <summary>캔버스·목록에 보이는 인라인 부속 하나. 이음관은 <see cref="IsJoint"/>로만 구분한다(docs/175 § C-3) —
 /// 밸브와 같은 다이아몬드를 초록으로 그린다.</summary>
@@ -4175,20 +4487,29 @@ public sealed record InlineFittingItem(Guid Id, Guid EdgeId, string TypeKey, str
     /// <summary>바이패스 세트 입력(docs/228). 세트가 아니면 null.</summary>
     public BypassSetSpec? Bypass { get; init; }
     public bool IsBypassSet => Bypass is not null;
+    /// <summary>밸브 2개 세트인가 — 목록의 [순서 바꾸기] 표시 조건(docs/255 § D-4).</summary>
+    public bool HasTwoBypassValves => Bypass?.HasTwoValves == true;
     /// <summary>세트 개략 그림(화면 좌표) — 바이패스 경로 선과 A·B·바이패스 밸브 표식.</summary>
     public System.Windows.Media.Geometry? BypassLine { get; init; }
     public System.Windows.Media.Geometry? BypassMarkers { get; init; }
     public double MainDiameterMm { get; init; }
-    /// <summary>세트 목록 한 줄 요약.</summary>
+    /// <summary>핸드북 규격표의 지관 관경(docs/256). 이 레코드는 관종·등급을 모르므로 VM이 계산해 넣는다. null = 규격 없음.</summary>
+    public double? HandbookBranchDiameterMm { get; init; }
+    /// <summary>세트 목록 한 줄 요약. 되가져온 세트는 모델 실제값, 새 세트는 핸드북 값을 보인다(docs/256 § D-3).</summary>
     public string BypassSummary => Bypass is null ? ""
-        : $"바이패스 {TypeNameOf(Bypass.BypassValveFamilyTypeName)} D{Bypass.BypassDiameterMm:0.##} · {(Bypass.NormalizedSide > 0 ? "왼쪽" : "오른쪽")}";
+        : Bypass.HasTwoValves
+            // 밸브 2개 세트는 V1 / V2와 단관 길이를 보인다(docs/255 § D-7).
+            ? FormattableString.Invariant($"바이패스 {TypeNameOf(Bypass.BypassValveFamilyTypeName)} / {TypeNameOf(Bypass.SecondValveFamilyTypeName!)} · 단관 {Bypass.SpoolLengthMm:0}mm · {BypassDiameterText} · {(Bypass.NormalizedSide > 0 ? "왼쪽" : "오른쪽")}")
+            : $"바이패스 {TypeNameOf(Bypass.BypassValveFamilyTypeName)} {BypassDiameterText} · {(Bypass.NormalizedSide > 0 ? "왼쪽" : "오른쪽")}";
+    private string BypassDiameterText => Bypass!.BypassDiameterMm > 0 ? $"D{Bypass.BypassDiameterMm:0.##}"
+        : HandbookBranchDiameterMm is { } dn ? $"DN{dn:0}(핸드북)" : "핸드북 규격 없음";
     private static string TypeNameOf(string familyTypeName)
     {
         var name = familyTypeName.StartsWith("DH_", StringComparison.Ordinal) ? familyTypeName[3..] : familyTypeName;
         return name;
     }
-    public string Fill => IsBypassSet ? (IsSelected ? "#6C3483" : "#8E44AD")
-        : IsJoint ? (IsSelected ? "#117A65" : "#16A085") : (IsSelected ? "#E67E22" : "#F39C12");
+    public string Fill => IsBypassSet ? (IsSelected ? "#1A237E" : "#283593")
+        : IsJoint ? (IsSelected ? "#558B2F" : "#7CB342") : (IsSelected ? "#AD1457" : "#D81B60");
     /// <summary>캔버스 라벨. 바이패스 세트는 본관 밸브가 없어 패밀리명이 비므로 이름을 따로 단다(docs/230 § C).</summary>
     public string DisplayName => IsBypassSet ? BypassSet.TypeKey : FamilyTypeName;
     /// <summary>목록 배지. 이음관·바이패스 세트만 표시한다.</summary>

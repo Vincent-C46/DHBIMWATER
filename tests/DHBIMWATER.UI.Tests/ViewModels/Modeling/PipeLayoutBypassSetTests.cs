@@ -11,6 +11,7 @@ public sealed class PipeLayoutBypassSetTests
 {
     private const string MainValve1650 = "DH_버터플라이 밸브 : 1650A";
     private const string GateValve300 = "DH_게이트 밸브 : 300A";
+    private const string GateFamily = "DH_게이트 밸브";
 
     [Fact]
     public void Defaults_PreferGateForBypass_WithMatchingDn()
@@ -38,7 +39,8 @@ public sealed class PipeLayoutBypassSetTests
         // 본관 밸브는 세트가 아니다(docs/230) — 패밀리명은 비고 라벨은 세트 이름이다.
         Assert.Equal("", set.FamilyTypeName);
         Assert.Equal(BypassSet.TypeKey, set.DisplayName);
-        Assert.Equal(new BypassSetSpec(GateValve300, 300, 1), set.Bypass);
+        // 밸브는 패밀리명만, 관경 0 = 모델 생성 때 밸브부관 B가 정한다(docs/244 § D-2).
+        Assert.Equal(new BypassSetSpec(GateFamily, 0, 1), set.Bypass);
         Assert.NotNull(set.BypassLine);
         Assert.Contains("세트 1", vm.NetworkSummary);
     }
@@ -79,16 +81,73 @@ public sealed class PipeLayoutBypassSetTests
     }
 
     [Fact]
-    public void BypassDiameterNotSmallerThanMain_IsRejected()
+    public void NewSet_ShowsAutoDiameter_InSummaryAndTemplateText()
+    {
+        // docs/244 § D-2 — 바이패스 관경 입력이 없어졌다. 새 세트는 관경 0(자동)이며 "관경 자동"으로 보이고, 관경 검사 대상이 아니다.
+        var vm = CreateMainPipeViewModel();
+        vm.IsPlacingBypassSet = true;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 50)));
+
+        // docs/256 — 관경은 핸드북 규격표가 정한다. 기본 관종(덕타일주철관)은 DN1200까지라 본관 1650은 규격 없음이다.
+        var set = Assert.Single(vm.BypassSetItems);
+        Assert.Contains("핸드북 규격 없음", set.BypassSummary);
+        Assert.Contains("핸드북 규격 없음 — 생성 시 건너뜀", vm.BuildTemplateText());
+        Assert.DoesNotContain("바이패스 관경 ≥ 본관", vm.ValidationSummary);
+
+        // 강관 F12는 1650×300 규격이 있다.
+        vm.PipeMaterial = DHBIMWATER.Core.Piping.PipeMaterial.Steel;
+        Assert.Contains("DN300(핸드북)", vm.BypassSetItems.Single().BypassSummary);
+        Assert.Contains("DN300(핸드북)", vm.BuildTemplateText());
+        // F20은 1500까지다.
+        vm.SteelFittingClassLabel = "F20";
+        Assert.Contains("핸드북 규격 없음", vm.BypassSetItems.Single().BypassSummary);
+    }
+
+    [Fact]
+    public void SteelFittingClass_EnabledOnlyForSteel_AndRoundTripsThroughSettings()
+    {
+        var vm = CreateViewModel();
+        Assert.False(vm.IsSteelFittingClassEnabled);
+        Assert.Equal("F12", vm.SteelFittingClassLabel);
+
+        vm.PipeMaterial = DHBIMWATER.Core.Piping.PipeMaterial.Steel;
+        Assert.True(vm.IsSteelFittingClassEnabled);
+        vm.SteelFittingClassLabel = "F15";
+        vm.SteelFittingClassLabel = "없는등급";   // 못 되돌리는 라벨은 무시한다.
+        Assert.Equal(DHBIMWATER.Core.Piping.SteelFittingClass.F15, vm.SteelFittingClass);
+
+        var settings = vm.ToFamilySettings();
+        Assert.Equal(DHBIMWATER.Core.Piping.SteelFittingClass.F15, settings.SteelFittingClass);
+
+        var restored = CreateViewModel();
+        restored.ApplyFamilySettings(settings);
+        Assert.Equal(DHBIMWATER.Core.Piping.SteelFittingClass.F15, restored.SteelFittingClass);
+    }
+
+    [Fact]
+    public void DuctileMain300_ShowsHandbookBranch100()
+    {
+        var vm = CreateMainPipeViewModel(300);
+        vm.IsPlacingBypassSet = true;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 50)));
+
+        var set = Assert.Single(vm.BypassSetItems);
+        Assert.Equal(300, set.MainDiameterMm);
+        Assert.Contains("DN100(핸드북)", set.BypassSummary);
+    }
+
+    [Fact]
+    public void PlacingWithoutBypassValveFamily_IsRejected()
     {
         var vm = CreateMainPipeViewModel();
-        vm.BypassDiameterMm = 1650;
+        vm.BypassValveFamilyName = null;
         vm.IsPlacingBypassSet = true;
         vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2000, 50)));
         vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 50)));
 
         Assert.Empty(vm.BypassSetItems);
-        Assert.Contains("본관 관경", vm.Status);
     }
 
     [Fact]
@@ -124,7 +183,27 @@ public sealed class PipeLayoutBypassSetTests
         Assert.NotNull(request);
         var set = Assert.Single(request!.InlineFittings, x => x.IsBypassSet);
         Assert.Equal("", set.FamilyTypeName);
-        Assert.Equal(GateValve300, set.Bypass!.BypassValveFamilyTypeName);
+        Assert.Equal(GateFamily, set.Bypass!.BypassValveFamilyTypeName);
+        Assert.Equal(0, set.Bypass.BypassDiameterMm);
+    }
+
+    [Fact]
+    public void ValveBendFamilyWithoutKeyword_WarnsReimportLoss()
+    {
+        // 되가져오기는 패밀리명의 '밸브부관'으로 A·B를 가린다 — 키워드 없는 패밀리는 만들 수는 있어도 세트로 돌아오지 않는다.
+        var vm = CreateMainPipeViewModel();
+        vm.IsPlacingBypassSet = true;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.IsPlacingBypassSet = false;
+        vm.ValveTeeFamilyTypeName = "DH_밸브부관A : 1650A";
+        Assert.DoesNotContain("되가져오기 시", vm.ValidationSummary);
+
+        vm.ValveTeeFamilyTypeName = "DH_T형관 : 1650A";
+        vm.ValveBendFamilyTypeName = "DH_곡관 : 300A";
+
+        Assert.Contains("밸브부관 A 패밀리명에 '밸브부관'가 없어", vm.ValidationSummary);
+        Assert.Contains("밸브부관 B 패밀리명에 '밸브부관'가 없어", vm.ValidationSummary);
     }
 
     [Theory]
@@ -146,7 +225,10 @@ public sealed class PipeLayoutBypassSetTests
 
         var set = Assert.Single(vm.BypassSetItems);
         Assert.Equal(expectedSide, set.Bypass!.Side);
-        Assert.DoesNotContain("바이패스 밸브가 비어 있는", vm.ValidationSummary);
+        // 되가져온 세트는 모델 실제값(300)을 표시용으로 든다(docs/244 § D-2).
+        Assert.Contains("D300", set.BypassSummary);
+        Assert.Contains("DN300", vm.BuildTemplateText());
+        Assert.DoesNotContain("바이패스 밸브 패밀리가 비어 있는", vm.ValidationSummary);
     }
 
     [Fact]
@@ -158,17 +240,196 @@ public sealed class PipeLayoutBypassSetTests
             [new ImportedEdge(new Point2D(-200, 0), new Point2D(2200, 0), 1650)],
             [new ImportedFitting(0, "", 0.5) { Bypass = new ImportedBypass("", 300, new Point2D(0, -1), [1]) }],
             0, [1], []));
-        Assert.Contains("바이패스 밸브가 비어 있는 세트 1개", vm.ValidationSummary);
+        Assert.Contains("바이패스 밸브 패밀리가 비어 있는 세트 1개", vm.ValidationSummary);
 
         vm.ApplyBypassValvesCommand.Execute(vm.BypassSetItems.Single());
 
+        // [밸브 적용]은 패밀리명·관경 0(자동)을 넣는다(docs/244 § D-2).
         var set = vm.BypassSetItems.Single();
-        Assert.Equal(GateValve300, set.Bypass!.BypassValveFamilyTypeName);
+        Assert.Equal(GateFamily, set.Bypass!.BypassValveFamilyTypeName);
+        Assert.Equal(0, set.Bypass.BypassDiameterMm);
         Assert.Equal(-1, set.Bypass.Side);
-        Assert.DoesNotContain("바이패스 밸브가 비어 있는", vm.ValidationSummary);
+        Assert.Contains("핸드북 규격 없음", set.BypassSummary);   // 덕타일주철관 DN1650은 표 범위 밖(docs/256)
+        Assert.DoesNotContain("바이패스 밸브 패밀리가 비어 있는", vm.ValidationSummary);
     }
 
-    private static PipeLayoutViewModel CreateMainPipeViewModel()
+    // ── docs/255 — 밸브 2개 + 사이 단관 ──────────────────────────────────────
+
+    private const string ButterflyFamily = "DH_버터플라이 밸브";
+
+    [Fact]
+    public void SecondValve_DefaultsToFirstValveFamily_AndSingleValveIsDefault()
+    {
+        var vm = CreateViewModel();
+
+        Assert.True(vm.IsBypassSingleValve);
+        Assert.Equal(GateFamily, vm.BypassSecondValveFamilyName);
+        Assert.Equal(BypassSet.DefaultSpoolLengthMm, vm.BypassSpoolLengthMm);
+    }
+
+    [Fact]
+    public void PlacingTwoValveSet_SendsSecondValveAndSpool_AndSwapExchangesThem()
+    {
+        var vm = CreateMainPipeViewModel();
+        vm.IsBypassTwoValves = true;
+        vm.BypassSecondValveFamilyName = ButterflyFamily;
+        vm.BypassSpoolLengthMm = 400;
+        vm.IsPlacingBypassSet = true;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.IsPlacingBypassSet = false;
+
+        var set = Assert.Single(vm.BypassSetItems);
+        Assert.Equal(new BypassSetSpec(GateFamily, 0, 1, ButterflyFamily, 400), set.Bypass);
+        Assert.True(set.HasTwoBypassValves);
+        Assert.Contains("게이트 밸브 / 버터플라이 밸브 · 단관 400mm", set.BypassSummary);
+        Assert.Contains($"{GateFamily} → {ButterflyFamily} · 단관 400mm", vm.BuildTemplateText());
+
+        vm.SwapBypassValvesCommand.Execute(set);
+
+        Assert.Equal(new BypassSetSpec(ButterflyFamily, 0, 1, GateFamily, 400), vm.BypassSetItems.Single().Bypass);
+        vm.UndoCommand.Execute(null);
+        Assert.Equal(new BypassSetSpec(GateFamily, 0, 1, ButterflyFamily, 400), vm.BypassSetItems.Single().Bypass);
+    }
+
+    [Fact]
+    public void ApplyBypassValves_SwitchesBetweenOneAndTwoValves()
+    {
+        var vm = CreateMainPipeViewModel();
+        vm.IsPlacingBypassSet = true;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2000, -50)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, -50)));
+        vm.IsPlacingBypassSet = false;
+        Assert.False(vm.BypassSetItems.Single().HasTwoBypassValves);
+
+        vm.IsBypassTwoValves = true;
+        vm.BypassSpoolLengthMm = 0;   // 직결 허용(docs/255 G-2)
+        vm.ApplyBypassValvesCommand.Execute(vm.BypassSetItems.Single());
+        Assert.Equal(new BypassSetSpec(GateFamily, 0, -1, GateFamily, 0), vm.BypassSetItems.Single().Bypass);
+
+        vm.IsBypassSingleValve = true;
+        vm.ApplyBypassValvesCommand.Execute(vm.BypassSetItems.Single());
+        Assert.Equal(new BypassSetSpec(GateFamily, 0, -1), vm.BypassSetItems.Single().Bypass);
+    }
+
+    [Fact]
+    public void TwoValvesWithoutSecondFamily_IsRejected()
+    {
+        var vm = CreateMainPipeViewModel();
+        vm.IsBypassTwoValves = true;
+        vm.BypassSecondValveFamilyName = null;
+        vm.IsPlacingBypassSet = true;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 50)));
+
+        Assert.Empty(vm.BypassSetItems);
+        Assert.Equal("바이패스 밸브 2 패밀리 선택 필요", vm.Status);
+    }
+
+    [Theory]
+    [InlineData(5)]
+    [InlineData(-10)]
+    public void SpoolLength_BelowMinSegment_IsRejectedByPanel(double spool)
+    {
+        var vm = CreateViewModel();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => vm.BypassSpoolLengthMm = spool);
+        Assert.Equal(BypassSet.DefaultSpoolLengthMm, vm.BypassSpoolLengthMm);
+    }
+
+    [Fact]
+    public void ApplyPickedPiping_TwoValveSet_OrdersValvesByEdgeDirection_AndFlagsShortSpool()
+    {
+        // 같은 세트를 밸브 순서만 바꿔 두 번 가져와도 V1(엣지 시작 쪽)은 위치로 정해져 같아야 한다(docs/255 § D-5).
+        var first = ImportTwoValveSet(GateValve300, new Point2D(600, 700), "DH_버터플라이 밸브 : 300A", new Point2D(1400, 700), 400);
+        var second = ImportTwoValveSet("DH_버터플라이 밸브 : 300A", new Point2D(1400, 700), GateValve300, new Point2D(600, 700), 400);
+
+        var a = first.BypassSetItems.Single().Bypass!;
+        var b = second.BypassSetItems.Single().Bypass!;
+        Assert.True(a.HasTwoValves);
+        Assert.Equal(a.BypassValveFamilyTypeName, b.BypassValveFamilyTypeName);
+        Assert.Equal(a.SecondValveFamilyTypeName, b.SecondValveFamilyTypeName);
+        Assert.Equal(400, a.SpoolLengthMm);
+        Assert.DoesNotContain("단관이", first.ValidationSummary);
+
+        var tooShort = ImportTwoValveSet(GateValve300, new Point2D(600, 700), "DH_버터플라이 밸브 : 300A", new Point2D(1400, 700), 5);
+        Assert.Contains("바이패스 밸브 사이 단관이 10mm 미만인 세트 1개", tooShort.ValidationSummary);
+    }
+
+    private static PipeLayoutViewModel ImportTwoValveSet(string valve0, Point2D position0, string valve1, Point2D position1, double spoolMm)
+    {
+        var vm = CreateViewModel();
+        vm.HandleCanvasSizeChanged(1000, 1000);
+        vm.ApplyPickedPiping(new PipeLayoutImport(
+            [new ImportedEdge(new Point2D(-200, 0), new Point2D(2200, 0), 1650)],
+            [new ImportedFitting(0, "", 0.5)
+            {
+                Bypass = new ImportedBypass(valve0, 300, new Point2D(0, 1), [1, 2, 3, 4, 22, 25])
+                {
+                    SecondValveFamilyTypeName = valve1, SpoolLengthMm = spoolMm, ValvePositions = [position0, position1]
+                }
+            }],
+            0, [1, 2, 3, 4, 22, 25], []));
+        return vm;
+    }
+
+    // ── docs/259 — 바이패스 세트 배치 기준점 OSNAP ─────────────────────────────
+
+    [Fact]
+    public void BypassPlacement_SnapsToMidpoint_InsteadOfGrid()
+    {
+        // 본관 4050 — 중간점 2025는 격자(10mm)로는 나올 수 없는 자리다(커서 2031 → 격자 2030).
+        var vm = CreateLineViewModel(new Point2D(0, 0), new Point2D(4050, 0));
+        vm.SnapMidpoint = true;
+        vm.IsPlacingBypassSet = true;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2031, 50)));
+
+        Assert.True(vm.IsSnapMarkerVisible);
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2031, 50)));
+
+        Assert.Equal(0.5, vm.BypassSetItems.Single().T, 6);
+    }
+
+    [Fact]
+    public void ValvePlacement_StillUsesGrid_WhenMidpointSnapIsOn()
+    {
+        var vm = CreateLineViewModel(new Point2D(0, 0), new Point2D(4050, 0));
+        vm.SnapMidpoint = true;
+        vm.SelectedFamilyTypeName = MainValve1650;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2031, 50)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2031, 50)));
+
+        Assert.Equal(2030.0 / 4050, vm.InlineFittings.Single().T, 6);
+    }
+
+    [Fact]
+    public void BypassPlacement_OffPipeSnap_IsProjectedOntoPipe()
+    {
+        // 기준점 (0,0)은 배관(y=40) 밖이다 — 배관 위 수직 투영점 (0,40)에 세트 중심이 온다.
+        var vm = CreateLineViewModel(new Point2D(-1000, 40), new Point2D(3000, 40));
+        vm.SnapReferencePoint = true;
+        vm.IsPlacingBypassSet = true;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(13, 70)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(13, 70)));
+
+        Assert.Equal(0.25, vm.BypassSetItems.Single().T, 6);
+    }
+
+    [Fact]
+    public void BypassPlacement_WithoutSnap_KeepsGrid()
+    {
+        var vm = CreateLineViewModel(new Point2D(0, 0), new Point2D(4050, 0));
+        vm.IsPlacingBypassSet = true;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2031, 50)));
+
+        Assert.False(vm.IsSnapMarkerVisible);
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2031, 50)));
+
+        Assert.Equal(2030.0 / 4050, vm.BypassSetItems.Single().T, 6);
+    }
+
+    /// <summary>스냅을 모두 끈 채 선 하나를 그린다. 테스트가 필요한 스냅만 켠다.</summary>
+    private static PipeLayoutViewModel CreateLineViewModel(Point2D start, Point2D end)
     {
         var vm = CreateViewModel();
         vm.HandleCanvasSizeChanged(1000, 1000);
@@ -181,6 +442,24 @@ public sealed class PipeLayoutBypassSetTests
         vm.SnapNearest = false;
         vm.SnapOutline = false;
         vm.DiameterMm = 1650;
+        vm.HandleCanvasClick(vm.Transform.ToScreen(start));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(end));
+        return vm;
+    }
+
+    private static PipeLayoutViewModel CreateMainPipeViewModel(double diameterMm = 1650)
+    {
+        var vm = CreateViewModel();
+        vm.HandleCanvasSizeChanged(1000, 1000);
+        vm.SnapReferencePoint = false;
+        vm.SnapEndpoint = false;
+        vm.SnapMidpoint = false;
+        vm.SnapQuadrant = false;
+        vm.SnapIntersection = false;
+        vm.SnapPerpendicular = false;
+        vm.SnapNearest = false;
+        vm.SnapOutline = false;
+        vm.DiameterMm = diameterMm;
         vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(0, 0)));
         vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(4000, 0)));
         return vm;

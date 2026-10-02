@@ -1,3 +1,5 @@
+using DHBIMWATER.Core.Piping;
+
 namespace DHBIMWATER.Core.Gis;
 
 public enum BendResolutionKind

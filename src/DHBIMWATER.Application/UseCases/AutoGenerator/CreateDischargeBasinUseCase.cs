@@ -34,6 +34,7 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
     private readonly ISharedParameterRepository _sharedParameter;
     private readonly IElementParameterCommandRepo _elementParameterCommand;
     private readonly IDialogService _dialog;
+    private readonly IConcreteSettingsRepo _concreteSettings;
 
     public CreateDischargeBasinUseCase(
         ITransactionContext transaction,
@@ -47,7 +48,8 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
         IElementTypeCommandRepo elementTypeCommand,
         ISharedParameterRepository sharedParameter,
         IElementParameterCommandRepo elementParameterCommand,
-        IDialogService dialog)
+        IDialogService dialog,
+        IConcreteSettingsRepo concreteSettings)
     {
         _transaction = transaction;
         _levelQuery = levelQuery;
@@ -61,6 +63,7 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
         _sharedParameter = sharedParameter;
         _elementParameterCommand = elementParameterCommand;
         _dialog = dialog;
+        _concreteSettings = concreteSettings;
     }
 
     /// <summary>
@@ -94,22 +97,17 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
                 // ── 슬래브 ──
                 var slabs = DischargeBasinLayoutCalculator.CalculateSlabs(input, geometry);
                 var slabLevels = _levelQuery.GetLevelIds(slabs.Select(s => s.LevelName));
-                var slabConcrete = new ConcreteSpec(25, 30, 150);
-                var slabMaterial = _elementTypeCommand.FindOrCreateConcreteMaterial(slabConcrete);
-                var slabTypes = slabs.Select(s => s.Thickness).Distinct().ToDictionary(
-                    t => t,
-                    t => _elementTypeCommand.FindOrCreateSlabType(new FloorTypeSpec(t, $"일반 - {t}mm", slabConcrete), slabMaterial));
-                foreach (var slab in slabs)
-                    createdIds.Add(_slabCommand.CreateSlab(slab, slabLevels[slab.LevelName], slabTypes[slab.Thickness]));
+                // 부재별 콘크리트는 문서 공용 설정을 쓴다(docs/249 § D). 토출조 바닥슬래브·상부슬래브는 슬래브 강도다.
+                var concrete = new ConcreteTypeResolver(_elementTypeCommand, _concreteSettings.Load() ?? ConcreteSettings.Default);
+                var slabList = slabs.ToList();
+                var slabTypes = concrete.ResolveSlabTypes(slabList);
+                for (var i = 0; i < slabList.Count; i++)
+                    createdIds.Add(_slabCommand.CreateSlab(slabList[i], slabLevels[slabList[i].LevelName], slabTypes[i].TypeId));
 
                 // ── 외벽 ──
                 var walls = DischargeBasinLayoutCalculator.CalculateWalls(input, geometry);
                 var wallLevels = _levelQuery.GetLevelIds(walls.Select(w => w.LevelName));
-                var wallConcrete = new ConcreteSpec(25, 27, 120);
-                var wallMaterial = _elementTypeCommand.FindOrCreateConcreteMaterial(wallConcrete);
-                var wallTypes = walls.Select(w => w.Thickness).Distinct().ToDictionary(
-                    t => t,
-                    t => _elementTypeCommand.FindOrCreateWallType(new WallTypeSpec(t, $"일반 - {t}mm", wallConcrete), wallMaterial));
+                var wallTypes = concrete.ResolveWallTypes(walls.Select(w => w.Thickness)).ToDictionary(kv => kv.Key, kv => kv.Value.TypeId);
                 foreach (var wall in walls)
                     createdIds.Add(_wallCommand.CreateLinearWall(wall, wallLevels[wall.LevelName], wallTypes[wall.Thickness]));
 
@@ -133,8 +131,8 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
 
                 // ── 기둥 · 거더 (확장 지점) ──
                 // input.Frame 이 null 인 동안은 두 목록 모두 비어 있어 아무 일도 일어나지 않는다.
-                createdIds.AddRange(CreateColumns(input, geometry));
-                createdIds.AddRange(CreateGirders(input, geometry));
+                createdIds.AddRange(CreateColumns(input, geometry, concrete));
+                createdIds.AddRange(CreateGirders(input, geometry, concrete));
 
                 // 생성한 부재에 DH_Zone 을 한 번에 찍는다. 생성 실패(0)는 제외한다.
                 _elementParameterCommand.SetTextParameter(
@@ -179,7 +177,7 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
     /// 기둥. Frame 이 없으면 빈 목록이라 그대로 빠져나간다.
     /// 기둥 유형은 만들 수 없고 <b>기존 문서에서 찾아 쓰는 것</b>뿐이라, 못 찾으면(0) 만들지 않고 경고한다.
     /// </summary>
-    private IReadOnlyList<int> CreateColumns(DischargeBasinInputDto input, DischargeBasinGeometryDto geometry)
+    private IReadOnlyList<int> CreateColumns(DischargeBasinInputDto input, DischargeBasinGeometryDto geometry, ConcreteTypeResolver concrete)
     {
         var columns = DischargeBasinLayoutCalculator.CalculateColumns(input, geometry);
         if (columns.Count == 0) return Array.Empty<int>();
@@ -187,6 +185,8 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
         var levels = _levelQuery.GetLevelIds(columns.SelectMany(c => new[] { c.BaseLevelName, c.TopLevelName }));
         var symbols = columns.Select(c => c.TypeName).Distinct()
             .ToDictionary(name => name, _elementTypeCommand.FindColumnSymbolByFamilyType);
+        foreach (var symbolId in symbols.Values.Distinct())
+            concrete.ApplyTo(symbolId, ConcreteMember.Column);
 
         var created = new List<int>(columns.Count);
         foreach (var column in columns)
@@ -203,7 +203,7 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
     }
 
     /// <summary>거더. 보 유형은 단면으로 찾거나 만들 수 있다(펌프장과 같은 방식).</summary>
-    private IReadOnlyList<int> CreateGirders(DischargeBasinInputDto input, DischargeBasinGeometryDto geometry)
+    private IReadOnlyList<int> CreateGirders(DischargeBasinInputDto input, DischargeBasinGeometryDto geometry, ConcreteTypeResolver concrete)
     {
         var girders = DischargeBasinLayoutCalculator.CalculateGirders(input, geometry);
         if (girders.Count == 0) return Array.Empty<int>();
@@ -213,6 +213,8 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
             section => section,
             section => _elementTypeCommand.FindOrCreateBeamType(
                 new BeamTypeSpec(section.Width, section.Height, $"{section.Width} x {section.Height}")));
+        foreach (var typeId in types.Values.Distinct())
+            concrete.ApplyTo(typeId, ConcreteMember.Beam);
 
         return girders
             .Select(g => _beamCommand.CreateBeam(g, levels[g.LevelName], types[(g.Width, g.Height)]))

@@ -5,6 +5,7 @@ using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Infrastructure.Repositories.Gis;
 using DHBIMWATER.Infrastructure.Helpers;
 using Xunit;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.UI.Tests.Gis;
 

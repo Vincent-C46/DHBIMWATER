@@ -1,4 +1,5 @@
 using DHBIMWATER.Core.Gis;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.Application.DTOs.Gis;
 
@@ -45,8 +46,11 @@ public sealed record PipeAlignmentModelingRequest
     public ZSource ZSource { get; init; } = ZSource.GeometryZ;
     public PipeAlignmentOutputMode OutputMode { get; init; } = PipeAlignmentOutputMode.DirectShape;
     public double IntervalMm { get; init; } = 6000;
-    /// <summary>이경관 몸통 길이 S(mm). 제원표 확정 전 임시 입력이며 0 이하면 배치하지 않는다.</summary>
+    /// <summary>이경관 대체 길이(mm). 카탈로그(핸드북 편락관)에 대·소경 조합이 없을 때만 쓴다(docs/260 § G).
+    /// 그때 0 이하면 배치하지 않는다.</summary>
     public double ReducerBodyLengthMm { get; init; } = 250d;
+    /// <summary>주철 소켓 편락관 형식(A/B/C). 곡관 형식과 별개로 모델링 창에서 고른다(docs/260 § G-6).</summary>
+    public ReducerForm ReducerForm { get; init; } = ReducerForm.BType;
     /// <summary>직관 2점 가변 패밀리·타입("패밀리명 : 타입명").</summary>
     public string? StraightFamilyTypeName { get; init; }
     /// <summary>직관 인스턴스에 호칭지름(mm)을 기록할 파라미터명. null이면 기록하지 않는다.</summary>

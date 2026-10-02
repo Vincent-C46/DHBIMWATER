@@ -2,7 +2,7 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DHBIMWATER.Application.Interfaces.Gis;
-using DHBIMWATER.Core.Gis;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Local;
 

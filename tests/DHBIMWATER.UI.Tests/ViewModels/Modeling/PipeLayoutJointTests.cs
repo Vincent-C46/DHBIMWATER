@@ -103,7 +103,7 @@ public sealed class PipeLayoutJointTests
         Assert.Equal(JointFamily, joint.FamilyTypeName);
         Assert.Equal(InlineJoint.TypeKey, joint.TypeKey);
         Assert.Equal("이음관", joint.KindBadge);
-        Assert.Equal("#16A085", joint.Fill);
+        Assert.Equal("#7CB342", joint.Fill);
         Assert.Equal(2, vm.InlineFittings.Count);   // 밸브 1 + 이음관 1
         // 배치 정의도 독립 부속 하나로 나간다.
         PipeNetworkDefinition? request = null;
@@ -190,7 +190,57 @@ public sealed class PipeLayoutJointTests
         Assert.Equal("DH_십자관 : DN100", vm.CrossFamilyTypeName);
         // 동심·편심은 docs/188부터 한 칸이다. 키워드 순서상 `이경관`이 먼저 걸린다.
         Assert.Equal("이경관 : DN100x80", vm.ReducerFamilyTypeName);
-        Assert.Contains("십자 DH_십자관 : DN100", vm.FamilySettingsSummary);
+    }
+
+    // ── 접합 종류별 패밀리 기본값(docs/263 § D) ────────────────────
+
+    private static readonly string[] JointFamilyNames =
+    [
+        "DH_소켓_직관 : 80A", "DH_플랜지_직관 : 80A", "DH_소켓_곡관 : 90°", "DH_플랜지_곡관 : 90°",
+        "DH_소켓_플랜지T형관 : 100x80", "DH_플랜지_T형관 : 100x80", "DH_십자관 : DN100",
+    ];
+
+    [Fact]
+    public void JointFamilyDefaults_PickFlangeFamilies_OnOpen()
+    {
+        var vm = CreateViewModelWithValve(JointFamilyNames);
+
+        Assert.Equal(DHBIMWATER.Core.Piping.BendConnection.Flanged, vm.JointConnection);
+        Assert.Equal("DH_플랜지_직관 : 80A", vm.SegmentFamilyTypeName);
+        Assert.Equal("DH_플랜지_곡관 : 90°", vm.BendFamilyTypeName);
+        Assert.Equal("DH_플랜지_T형관 : 100x80", vm.TeeFamilyTypeName);
+        // 접합 단어가 없는 패밀리뿐이면 종전 추정으로 돌아간다.
+        Assert.Equal("DH_십자관 : DN100", vm.CrossFamilyTypeName);
+    }
+
+    [Fact]
+    public void JointFamilyDefaults_FollowJointConnection_AndKeepUnmatchedSlots()
+    {
+        var vm = CreateViewModelWithValve(JointFamilyNames);
+
+        vm.JointConnectionLabel = "소켓";
+        Assert.Equal("DH_소켓_직관 : 80A", vm.SegmentFamilyTypeName);
+        Assert.Equal("DH_소켓_곡관 : 90°", vm.BendFamilyTypeName);
+        // `DH_소켓_플랜지T형관`은 `플랜지`가 들어 있어도 소켓 쪽이다(접두 `소켓_` 우선).
+        Assert.Equal("DH_소켓_플랜지T형관 : 100x80", vm.TeeFamilyTypeName);
+        Assert.Equal("DH_십자관 : DN100", vm.CrossFamilyTypeName);
+
+        // 사용자가 바꾼 값도 다음 접합 변경 때 덮는다(2026-10-02 사용자 결정).
+        vm.SegmentFamilyTypeName = "DH_소켓_곡관 : 90°";
+        vm.JointConnectionLabel = "플랜지";
+        Assert.Equal("DH_플랜지_직관 : 80A", vm.SegmentFamilyTypeName);
+        Assert.Equal("DH_플랜지_T형관 : 100x80", vm.TeeFamilyTypeName);
+    }
+
+    [Fact]
+    public void JointFamilyDefaults_SteelWeldUsesSocketFamilies()
+    {
+        var vm = CreateViewModelWithValve(JointFamilyNames);
+        vm.IsSteelSelected = true;
+
+        vm.JointConnectionLabel = "용접";
+
+        Assert.Equal("DH_소켓_직관 : 80A", vm.SegmentFamilyTypeName);
     }
 
     // ── 패밀리 설정 저장·적용(docs/175 § E-4) ────────────────────

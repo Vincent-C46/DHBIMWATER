@@ -1,6 +1,7 @@
+using DHBIMWATER.Core.Gis;
 using System.Text.Json.Serialization;
 
-namespace DHBIMWATER.Core.Gis;
+namespace DHBIMWATER.Core.Piping;
 
 /// <summary>적용 규격이 정의하는 이형관 형식 구분. Joint Type과는 별개다.</summary>
 public enum BendForm { AType, BType }
@@ -27,7 +28,8 @@ public enum SteelFittingClass { None, F12, F15, F20 }
 /// </param>
 /// <param name="Connection">소켓/플랜지. 기본값이 있어 이 축 도입 이전 JSON도 소켓으로 읽힌다.</param>
 /// <param name="FittingClass">강관 이형관 종류(F12/F15/F20). 주철관 행은 None. 기본값이 있어 이 축 도입 이전 JSON도 그대로 읽힌다(docs/211 § C-2).</param>
-/// <param name="WeightKg">접합 종류와 무관한 한 개 무게(kg) — 강관 곡관용. 주철관 행은 0이며 KP/타이튼 무게 열을 쓴다.</param>
+/// <param name="WeightKg">접합 종류와 무관한 한 개 무게(kg) — 강관 곡관과 주철관 플랜지곡관(B형, docs/260)용.
+/// 주철관 소켓 행은 0이며 KP/타이튼 무게 열을 쓴다.</param>
 public sealed record BendFittingEntry(
     double DiameterMm,
     double AngleDeg,
@@ -225,6 +227,33 @@ public sealed class BendFittingCatalog
         return true;
     }
 
+    /// <summary>90° 플랜지곡관 무게 — (DN, A형, B형) kg, PN10. 출처 핸드북 p.105 (13. 90° FLANGED BEND, docs/260 § A).</summary>
+    private static readonly (double Dn, double A, double B)[] FlangedWeight90 =
+    {
+        (80, 9.9, 9.8), (100, 11.9, 12.2), (125, 15.6, 16.2), (150, 20.0, 21.0), (200, 31.0, 32.5), (250, 50.0, 51.0),
+        (300, 70.0, 71.0), (350, 90.0, 93.0), (400, 116, 120), (450, 143, 149), (500, 181, 187), (600, 272, 278),
+        (700, 386, 393), (800, 533, 537), (900, 698, 704), (1000, 907, 912), (1100, 1069, 1059), (1200, 1463, 1440)
+    };
+
+    /// <summary>45° 플랜지곡관 무게 — (DN, A형, B형) kg, PN10. 출처 핸드북 p.106 (14. 45° FLANGED BEND).</summary>
+    private static readonly (double Dn, double A, double B)[] FlangedWeight45 =
+    {
+        (80, 9.5, 9.4), (100, 11.3, 11.6), (125, 14.6, 15.2), (150, 18.5, 19.3), (200, 27.5, 29.0), (250, 55.0, 56.0),
+        (300, 78.0, 79.0), (350, 76.0, 79.0), (400, 96.0, 100), (450, 115, 121), (500, 145, 151), (600, 212, 218),
+        (700, 296, 303), (800, 403, 407), (900, 519, 525), (1000, 668, 673), (1100, 859, 850), (1200, 1050, 1041)
+    };
+
+    /// <summary>주철관 플랜지곡관 핸드북 무게(접합 종류 무관 한 개 무게). 소켓곡관의 <see cref="TryGetHandbookWeight"/>와 같은 역할이다 —
+    /// 저장된 곡관표의 플랜지 행은 무게가 0이라(docs/260 이전 저장본) 배치 시 형식(A/B)에 맞춰 여기서 다시 찾는다.</summary>
+    public static bool TryGetFlangedHandbookWeight(double diameterMm, double angleDeg, BendForm form, out double weightKg)
+    {
+        var table = Math.Abs(angleDeg - 90d) <= Epsilon ? FlangedWeight90 : Math.Abs(angleDeg - 45d) <= Epsilon ? FlangedWeight45 : null;
+        var row = table?.FirstOrDefault(x => Math.Abs(x.Dn - diameterMm) <= Epsilon);
+        if (table is null || row is null || row.Value == default) { weightKg = 0d; return false; }
+        weightKg = form == BendForm.AType ? row.Value.A : row.Value.B;
+        return true;
+    }
+
     private static IEnumerable<BendFittingEntry> BuildHandbook()
     {
         foreach (var dn in StraightPipeSpecTable.DuctileIronNominalDiameters)
@@ -248,6 +277,7 @@ public sealed class BendFittingCatalog
             foreach (var table in FlangedAngleTables)
             {
                 var row = table.Rows.First(x => Math.Abs(x.Dn - dn) <= Epsilon);
+                TryGetFlangedHandbookWeight(dn, table.AngleDeg, BendForm.BType, out var flangedKg);
                 yield return new BendFittingEntry(
                     dn,
                     table.AngleDeg,
@@ -255,7 +285,8 @@ public sealed class BendFittingCatalog
                     row.LayingMm,
                     row.RadiusMm,
                     WallThickness.First(x => Math.Abs(x.Dn - dn) <= Epsilon).WallThicknessMm,
-                    Connection: BendConnection.Flanged);
+                    Connection: BendConnection.Flanged,
+                    WeightKg: flangedKg);
             }
     }
 

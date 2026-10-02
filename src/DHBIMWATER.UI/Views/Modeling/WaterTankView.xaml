@@ -474,6 +474,13 @@
         </Grid>
         <Grid Grid.Row="2">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,20,20">
+                <!-- docs/249 § E — 구조물 공용 부재별 콘크리트 강도 -->
+                <Button Content="콘크리트 강도"
+                        Style="{StaticResource PrimaryButtonStyle}"
+                        Width="120" Height="40"
+                        Margin="0,0,8,0"
+                        ToolTip="펌프장·토출조·배수지·밸브실 공용 부재별 콘크리트 강도를 지정합니다. 다음 생성부터 적용됩니다."
+                        Command="{Binding ConcreteLauncher.OpenCommand}"/>
                 <Button Content="내보내기"
                         Style="{StaticResource PrimaryButtonStyle}"
                         Width="100" Height="40"

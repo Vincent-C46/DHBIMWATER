@@ -1,4 +1,6 @@
-namespace DHBIMWATER.Core.Gis;
+using DHBIMWATER.Core.Gis;
+
+namespace DHBIMWATER.Core.Piping;
 
 /// <summary>
 /// 관 <b>등급</b> 목록 — 주철관 핸드북의 덕타일주철관 등급(상수 1종관 등)과 강관 핸드북(KS D 3565)의 STWW 등급.

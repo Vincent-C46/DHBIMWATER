@@ -35,14 +35,37 @@ public sealed class PipeNetwork
         => new PipeTopologyBuilder(this).AddInlineFitting(edgeId, typeKey, familyTypeName, desiredT, preservePosition, bypass);
 
     /// <summary>바이패스 세트의 바이패스 밸브·관경을 바꾼다(docs/229 § D, docs/230 § B). 방향(Side)은 그대로 둔다. 세트가 아니면 false.
-    /// 본관 밸브는 세트가 아니다 — A–A 사이에 일반 밸브로 놓는다.</summary>
-    public bool UpdateBypassSet(Guid edgeId, Guid fittingId, string bypassValveFamilyTypeName, double bypassDiameterMm)
+    /// 본관 밸브는 세트가 아니다 — A–A 사이에 일반 밸브로 놓는다.
+    /// <para>밸브 구성도 함께 바꾼다(docs/255) — <paramref name="secondValveFamilyTypeName"/>이 비면 밸브 1개 세트가 되고 단관은 0이 된다.</para></summary>
+    public bool UpdateBypassSet(Guid edgeId, Guid fittingId, string bypassValveFamilyTypeName, double bypassDiameterMm,
+        string? secondValveFamilyTypeName = null, double spoolLengthMm = 0)
     {
         var edge = FindEdge(edgeId) ?? throw new ArgumentOutOfRangeException(nameof(edgeId));
         var target = edge.InlineFittings.FirstOrDefault(x => x.Id == fittingId);
         if (target is not { IsBypassSet: true, Bypass: { } spec }) return false;
+        var second = string.IsNullOrWhiteSpace(secondValveFamilyTypeName) ? null : secondValveFamilyTypeName;
         edge.ReplaceFittings(edge.InlineFittings.Select(x => x.Id == fittingId
-            ? x with { Bypass = spec with { BypassValveFamilyTypeName = bypassValveFamilyTypeName, BypassDiameterMm = bypassDiameterMm } }
+            ? x with
+            {
+                Bypass = spec with
+                {
+                    BypassValveFamilyTypeName = bypassValveFamilyTypeName, BypassDiameterMm = bypassDiameterMm,
+                    SecondValveFamilyTypeName = second, SpoolLengthMm = second is null ? 0 : spoolLengthMm
+                }
+            }
+            : x).ToList());
+        return true;
+    }
+
+    /// <summary>밸브 2개 세트의 V1·V2를 맞바꾼다(docs/255 § A-3). 방향·단관은 그대로 둔다. 1개 세트이거나 세트가 아니면 false.</summary>
+    public bool SwapBypassValves(Guid edgeId, Guid fittingId)
+    {
+        var edge = FindEdge(edgeId) ?? throw new ArgumentOutOfRangeException(nameof(edgeId));
+        var target = edge.InlineFittings.FirstOrDefault(x => x.Id == fittingId);
+        if (target is not { IsBypassSet: true, Bypass: { HasTwoValves: true } spec }) return false;
+        // ToList로 먼저 굳힌다 — FlipBypassSide와 같은 이유.
+        edge.ReplaceFittings(edge.InlineFittings.Select(x => x.Id == fittingId
+            ? x with { Bypass = spec with { BypassValveFamilyTypeName = spec.SecondValveFamilyTypeName!, SecondValveFamilyTypeName = spec.BypassValveFamilyTypeName } }
             : x).ToList());
         return true;
     }
@@ -113,11 +136,13 @@ public sealed class PipeNetwork
         string levelName = "",
         PipeSegmentFamilySelection? segmentFamilies = null,
         string junctionId = "",
-        Gis.PipeMaterial material = Gis.PipeMaterial.DuctileIron,
+        PipeMaterial material = PipeMaterial.DuctileIron,
         bool isNightWork = false,
         IReadOnlyList<long>? sourceElementIdsToDelete = null,
         string zone = "",
-        Gis.BendConnection jointConnection = Gis.BendConnection.Flanged)
+        BendConnection jointConnection = BendConnection.Flanged,
+        SteelFittingClass steelFittingClass = SteelFittingClass.F12,
+        string pipeKind = "")
     {
         var edges = EdgeDefinitions();
         var fittings = FittingDefinitions();
@@ -126,7 +151,7 @@ public sealed class PipeNetwork
         var nodes = NodeDefinitions(edges, fittings);
         return new PipeNetworkDefinition(nodes, edges, fittings, Elevation, diameterMm, outputMode, referencePoint,
             pipingSystemTypeName, pipeTypeName, levelName, segmentFamilies, junctionId, material, isNightWork,
-            sourceElementIdsToDelete, zone, jointConnection);
+            sourceElementIdsToDelete, zone, jointConnection, steelFittingClass, pipeKind);
     }
 
     // ── 밸브부관 A·B(docs/225 § A-3, docs/227 § A) ───────────────────────────────

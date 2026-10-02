@@ -10,6 +10,9 @@ public class ValveRoomGeometryCalculator
     public const string BaseLevelName = "밸브실 기초 상부";
     public const string IntermediateLevelName = "밸브실 중간슬래브";
     public const string TopLevelName = "밸브실 상부슬래브";
+    public const string SectionAName = "A-A";
+    public const string SectionBName = "B-B";
+    private const double SectionMargin = 500; // 뷰 여유치(mm) — 펌프장 CalculateSectionViews의 offset과 같은 값
 
     /// <summary>기초 상부 EL(m)을 프로젝트 내부 단위(mm)로 환산한 기준 레벨 표고.</summary>
     public static double BaseElevation(ValveRoomGeometryRequestDto dto) => dto.DesignConditionDto.FoundationTopEl * 1000;
@@ -385,6 +388,38 @@ public class ValveRoomGeometryCalculator
                     Part = "보 교차부 기둥"
                 });
         return columns;
+    }
+
+    /// <summary>기초 중앙을 지나는 단면 A-A(X축 평행, +Y를 바라봄) · B-B(Y축 평행, +X를 바라봄)(docs/246).
+    /// <para>깊이는 중앙에서 버림콘크리트 바깥 + 여유치까지, 높이는 버림 하단 - 여유치 ~ 상부슬래브 상단 + 여유치.
+    /// 공기밸브실은 버림 슬래브가 없으므로(<see cref="CalculateSlabs"/>) 버림 확장을 빼고 계산한다.</para>
+    /// <para>공기밸브 관통 Void 깊이는 AirSpec이 이 DTO 밖에 있어 반영하지 않는다(docs/246 § 5).</para></summary>
+    public static IReadOnlyList<SectionCutDefinition> CalculateSections(ValveRoomGeometryRequestDto dto)
+    {
+        var pl = dto.PlanSpecDto;
+        var pr = dto.ProfileSpecDto;
+        var plainExt = dto.DesignConditionDto.GeometryType == "공기밸브실" ? 0 : pr.PlainConcreteThickness;
+        var halfX = pl.InnerLength / 2 + pr.OuterWallThickness + pr.FoundationToe + plainExt;
+        var halfY = pl.InnerWidth / 2 + pr.OuterWallThickness + pr.FoundationToe + plainExt;
+        var origin = new Point3D(pl.InnerLength / 2, pl.InnerWidth / 2, 0);
+        var zMin = BaseElevation(dto) - pr.FoundationThickness - plainExt - SectionMargin;
+        var zMax = TopElevation(dto) + SectionMargin;
+
+        return new[]
+        {
+            // 화면 오른쪽 +X → 바라보는 방향 (+Z) × (+X) = +Y.
+            new SectionCutDefinition
+            {
+                Name = SectionAName, CutOrigin = origin, Right = new Vector3D(1, 0, 0),
+                HalfWidth = halfX + SectionMargin, ZMin = zMin, ZMax = zMax, FarClipDepth = halfY + SectionMargin
+            },
+            // 화면 오른쪽 -Y → 바라보는 방향 (+Z) × (-Y) = +X.
+            new SectionCutDefinition
+            {
+                Name = SectionBName, CutOrigin = origin, Right = new Vector3D(0, -1, 0),
+                HalfWidth = halfY + SectionMargin, ZMin = zMin, ZMax = zMax, FarClipDepth = halfX + SectionMargin
+            },
+        };
     }
 
     /// <summary>제수밸브실 보 개수 상한(방향별). 큰 값이 들어가면 보 N² 배치·Z맞춤 재생성이 반복돼 멈춘 것처럼 보인다(docs/238 § D).</summary>

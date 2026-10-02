@@ -17,6 +17,7 @@ public partial class ValveRoomView : Window
         InitializeComponent();
         DataContext = viewModel;
         viewModel.CloseAction = Close;
+        viewModel.ConcreteLauncher.ShowDialog = vm => ConcreteSettingsView.Show(this, vm);   // docs/249 § E
         // Revit 위의 모델리스 WPF 창은 떠도 WPF 키보드 포커스가 비어 있어, 사용자가 처음 클릭한 TextBox가
         // IME(TSF) 컨텍스트를 못 받는다 → 한글 조합이 깨지고 백스페이스가 텍스트 전체를 지운다(docs/182 § 2).
         // 포커스를 한 번 옮겼다 돌아오면 정상화되는 것이 확인됐으므로, 그 왕복을 창이 뜰 때 자동으로 한 번 한다.
@@ -39,6 +40,8 @@ public partial class ValveRoomView : Window
 
     // 입력 영역(왼쪽 열) 폭 — 기존 창 1080에서 참고도 340을 뺀 값. 밸브실 종류·용도 버튼이 한 줄에 들어가는 폭.
     private const double InputColumnWidth = 740;
+    // 입력 영역과 참고도 사이의 토글 열 폭 — 버튼 24 + 오른쪽 여백 8(XAML ImagePanelToggle). 접힘/펼침 모두 보이므로 항상 창 폭에 더한다.
+    private const double ToggleColumnWidth = 32;
     // 참고도 열 최대 폭 — 기존 340의 2배. 화면이 좁으면 남는 폭만큼만 쓴다.
     private const double ImageColumnMaxWidth = 680;
 
@@ -54,12 +57,12 @@ public partial class ValveRoomView : Window
     {
         var workArea = SystemParameters.WorkArea;
         var imageWidth = expanded
-            ? Math.Max(0, Math.Min(ImageColumnMaxWidth, workArea.Width - InputColumnWidth))
+            ? Math.Max(0, Math.Min(ImageColumnMaxWidth, workArea.Width - InputColumnWidth - ToggleColumnWidth))
             : 0;
 
         ImagePanel.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
         ImageColumn.Width = new GridLength(imageWidth);
-        Width = Math.Min(InputColumnWidth + imageWidth, workArea.Width);
+        Width = Math.Min(InputColumnWidth + ToggleColumnWidth + imageWidth, workArea.Width);
 
         // 창이 이미 떠 있을 때 펼치면 오른쪽으로 늘어나 화면 밖으로 나갈 수 있다 → 왼쪽으로 당긴다.
         // (첫 표시 전에는 Left가 NaN — CenterScreen이 자리를 잡는다.)

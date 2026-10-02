@@ -9,6 +9,8 @@ using DHBIMWATER.Infrastructure.Helpers;
 using DHBIMWATER.Shared.Diagnostics;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
 using DHBIMWATER.Shared.Errors;
+using DHBIMWATER.Core.Piping;
+using PipeCountRules = DHBIMWATER.Core.Piping.PipeCountRules;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Gis;
 
@@ -224,7 +226,9 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
             var startStationM = stationProfile.StationAt(segment.DistanceFromStart);
             var endStationM = stationProfile.StationAt(segment.DistanceFromStart + lengthM);
             writer.Text(instance, PipeAlignmentParameters.Addin, PipeAlignmentParameters.AddinValue);
-            writer.Text(instance, PipeAlignmentParameters.Part, PipeAlignmentParameters.StraightPartValue);
+            // 6 m 정척 − 1 mm 미만 토막은 단관(부설 1 · 절단 1), 이상은 직관(부설 0 · 절단 0)이다(docs/266 R-1·R-6).
+            var segmentCounts = PipeCountRules.ForPlannedSegment(lengthM * 1000d);
+            writer.Text(instance, PipeAlignmentParameters.Part, segmentCounts.PartName);
             writer.Text(instance, PipeAlignmentParameters.NominalDiameter, PipeAlignmentParameters.DiameterText(diameterMm));
             writer.Text(instance, PipeAlignmentParameters.Material, MaterialCodeOf(alignment.PipeKind));
             writer.Text(instance, PipeAlignmentParameters.Grade, alignment.PipeKind);
@@ -234,23 +238,24 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
             // 무게 = 단위중량 × 연장 + 소켓 무게(docs/178 § A-2). 규격표에 M무게가 없는 관종은 두 칸 다 비워 둔다.
             if (StraightPipeWeight.TotalKg(spec, lengthM, info.JointType) is { } weightKg)
             {
-                writer.Number(instance, PipeAlignmentParameters.UnitWeight, spec!.UnitWeightKgPerM);
-                writer.Number(instance, PipeAlignmentParameters.Weight, weightKg);
+                writer.MassPerLengthKgPerM(instance, PipeAlignmentParameters.UnitWeight, spec!.UnitWeightKgPerM);
+                writer.MassKg(instance, PipeAlignmentParameters.Weight, weightKg);
             }
             // 직관도 접합 슬롯 1벌을 적는다(docs/186 § 5, 2026-09-18 개정). 산출서 「강관 직관 용접합 및 부설 196본」은
             // 엑셀이 연장 ÷ 정척으로 역산한 값이고, BIM은 정척으로 잘린 인스턴스 하나가 곧 1본 = 접합 1개소다.
-            // 규격은 비운다(요소 관경). 부설은 슬롯이 아니라 인스턴스가 만드는 행이라 DHBoost가 `DH_부설수`를 읽지 않는다.
+            // 규격은 비운다(요소 관경). 부설은 슬롯이 아니라 인스턴스가 만드는 행이라 수량산출 애드인이 `DH_부설수`를 읽지 않는다.
             writer.JointSlots(instance, PipeKindCatalog.MaterialOf(alignment.PipeKind), info.BendConnection,
                 new[] { (Spec: string.Empty, Count: 1) }, info.UseRestraintGland);
-            writer.Integer(instance, PipeAlignmentParameters.LayingCount, 0);
+            writer.Integer(instance, PipeAlignmentParameters.LayingCount, segmentCounts.LayingCount);
+            writer.Integer(instance, PipeAlignmentParameters.CutCount, segmentCounts.CutCount);
             // 접합 구성은 개소와 별개로 부재 형상을 적는다. 직관은 소켓이 한쪽뿐이라 A/B형과 무관하게 `1S`(docs/199 § 2).
             writer.JointComposition(instance, info.BendConnection, endCount: 2, socketEnds: 1);
             writer.Text(instance, PlacementStationParameters.SourceFile, alignment.SourceFile);
             writer.Text(instance, PlacementStationParameters.Alignment, alignment.RecordNumber);
             writer.Text(instance, PlacementStationParameters.Profile, string.Empty);
-            writer.Number(instance, PlacementStationParameters.StaStart, startStationM);
-            writer.Number(instance, PlacementStationParameters.StaEnd, endStationM);
-            writer.Number(instance, PlacementStationParameters.ZOffset, zOffsetM);
+            writer.StationM(instance, PlacementStationParameters.StaStart, startStationM);
+            writer.StationM(instance, PlacementStationParameters.StaEnd, endStationM);
+            writer.StationM(instance, PlacementStationParameters.ZOffset, zOffsetM);
             writer.YesNo(instance, PlacementStationParameters.Flip, false);
             writer.Text(instance, PlacementStationParameters.VerticalBasis, "GlobalZ");
             if (!string.IsNullOrWhiteSpace(alignmentSnapshotId))

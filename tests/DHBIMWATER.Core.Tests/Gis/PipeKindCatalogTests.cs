@@ -1,5 +1,5 @@
-using DHBIMWATER.Core.Gis;
 using Xunit;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.Core.Tests.Gis;
 

@@ -1,4 +1,5 @@
 using DHBIMWATER.Core.Gis;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.Application.Gis;
 

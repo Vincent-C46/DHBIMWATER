@@ -6,7 +6,6 @@ using DHBIMWATER.Infrastructure.Helpers;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
 // Core.Gis를 통째로 열면 NodeKind가 Core.Piping과 충돌한다. 필요한 형식만 별칭으로 끌어온다.
 using PipeAlignmentParameters = DHBIMWATER.Core.Gis.PipeAlignmentParameters;
-using BendConnection = DHBIMWATER.Core.Gis.BendConnection;
 using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
@@ -22,7 +21,8 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
 {
     private const double ConnectionToleranceMm = 1;
     /// <summary>이음관을 밸브 커넥터에 밀착시키는 허용 거리(mm, docs/175 § D-2). 캔버스는 실척이 아니라 사용자가
-    /// 밸브 옆에 정확히 붙여 찍을 수 없다 — 이음관 구간이 밸브 스팬과 겹치거나 이 거리 안이면 밸브 경계에 이어 붙인다.</summary>
+    /// 밸브 옆에 정확히 붙여 찍을 수 없다 — 이음관 구간이 밸브 스팬과 겹치거나 이 거리 안이면 밸브 경계에 이어 붙인다.
+    /// 절점 부속 커넥터 밀착에도 같은 값을 쓴다(docs/250, <see cref="InlineJointSnap"/>).</summary>
     private const double JointSnapToleranceMm = 50;
     /// <summary>절점 부속의 실제 커넥터 방향이 캔버스 레그 방향과 이 각도를 넘게 벌어지면, 직경·각도가
     /// 요청대로 구동되지 않은 것으로 보고 그 부속을 건너뛴다. 이 커넥터를 배치 앵커로 쓰면 직관이
@@ -48,8 +48,14 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
     /// <param name="BranchDiameterMm">T형·십자의 분기 구경. 있으면 `DN300×300`으로 적는다.</param>
     /// <param name="LengthMm">직관·단관만 — `DH_연장`에 적을 실제 연장. 패밀리 길이 파라미터에 구동한 값과 같다.</param>
     /// <param name="DeflectionDeg">곡관만 — `DH_곡관규격각`에 적을 편각. 규격 문자열 `D300 45°`와 같은 값이다.</param>
+    /// <param name="ValveFitting">밸브부관 A/B — 품목명이 패밀리명이라 이름으로는 가를 수 없어 무게 조회용으로 따로 표시한다(docs/260 § B).</param>
+    /// <param name="WyeAngleDeg">Y형만 — 분기각. 핸드북 Y관(45°)과 맞을 때만 무게를 쓴다.</param>
     private sealed record MaterialPart(FamilyInstance Instance, string Name, string Spec,
-        double DiameterMm, double? BranchDiameterMm = null, double? LengthMm = null, double? DeflectionDeg = null);
+        double DiameterMm, double? BranchDiameterMm = null, double? LengthMm = null, double? DeflectionDeg = null,
+        ValveFittingKind ValveFitting = ValveFittingKind.None, double? WyeAngleDeg = null);
+
+    /// <summary>밸브부관 구분(무게 표가 다르다).</summary>
+    private enum ValveFittingKind { None, Tee, Bend }
     // TODO: DistanceMm은 미사용이다 — 인라인 부속 보정은 docs/122에서 앵커 축 정사영 방식으로 대체됐다.
     private readonly record struct NodeLegAnchor(double DistanceMm, XYZ ConnectorOrigin);
 
@@ -145,10 +151,11 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             var edge = network.Edges[edgeIndex];
             var startXyz = ToXyz(edge.Start, edge.Elevation, network.ReferencePoint);
             var endXyz = ToXyz(edge.End, edge.Elevation, network.ReferencePoint);
-            var startAnchor = legAnchors.TryGetValue((NodeIdAt(network, edge.Start), edge.Id), out var startLeg)
-                ? startLeg.ConnectorOrigin : startXyz;
-            var endAnchor = legAnchors.TryGetValue((NodeIdAt(network, edge.End), edge.Id), out var endLeg)
-                ? endLeg.ConnectorOrigin : endXyz;
+            // 앵커 여부는 이음관을 절점 부속 커넥터에 밀착할지 가르는 데도 쓴다(docs/250 § A-3).
+            var startAnchored = legAnchors.TryGetValue((NodeIdAt(network, edge.Start), edge.Id), out var startLeg);
+            var startAnchor = startAnchored ? startLeg.ConnectorOrigin : startXyz;
+            var endAnchored = legAnchors.TryGetValue((NodeIdAt(network, edge.End), edge.Id), out var endLeg);
+            var endAnchor = endAnchored ? endLeg.ConnectorOrigin : endXyz;
             var lengthMm = UC.FtToMm(startAnchor.DistanceTo(endAnchor));
             if (lengthMm <= 0) continue;
 
@@ -160,13 +167,28 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             var rotation = Math.Atan2(direction.Y, direction.X);
             edgeAxes[edge.Id] = new EdgeAxis(startAnchor, direction);
 
-            var occupied = new List<OccupiedSpan>();
-            occupied.AddRange(InlineFittingSpans(document, symbols, edge, network, families, spanCache, startAnchor, direction,
-                unusableValves, skipped, inlineAxisCenters, droppedFittings, reservedWidths));
+            var occupied = new List<(Guid Id, OccupiedSpan Span)>();
+            // 세트 A를 먼저 잰다 — 본관 밸브·이음관이 A 주관 커넥터에 밀착하려면 A 자리를 알아야 한다(docs/257 § B-1).
+            // 겹침 판정(InlineSpanFilter)은 구간을 정렬해서 보므로 이 순서가 결과를 바꾸지 않는다.
             occupied.AddRange(BypassSetSpans(document, symbols, edge, network, families, skipPlan, startAnchor, direction,
                 unusableValves, skipped, inlineAxisCenters, droppedFittings, bypassLayouts, bypassLayoutCache, warnings));
+            var teePairs = network.InlineFittings
+                .Where(x => x.EdgeId == edge.Id && x.IsBypassSet && !droppedFittings.Contains(x.Id)
+                            && bypassLayouts.ContainsKey(x.Id) && inlineAxisCenters.ContainsKey(x.Id))
+                .Select(x => new BypassTeePair(
+                    bypassLayouts[x.Id].TeeSpan(inlineAxisCenters[x.Id], -1),
+                    bypassLayouts[x.Id].TeeSpan(inlineAxisCenters[x.Id], 1)))
+                .ToList();
+            occupied.AddRange(InlineFittingSpans(document, symbols, edge, network, families, spanCache, startAnchor, direction,
+                lengthMm, startAnchored, endAnchored, teePairs,
+                unusableValves, skipped, inlineAxisCenters, droppedFittings, reservedWidths));
 
-            var plan = PipeSegmentPlan.Build(lengthMm, occupied, families.StraightLengthMm);
+            // 위치 오류(배관 밖·겹침·짧은 틈)는 그 부속만 건너뛴다(docs/251 § B). 종전에는 아래 PL-301로 전체가 롤백됐다.
+            var filtered = InlineSpanFilter.Filter(lengthMm, occupied.Select(x => new InlineSpanCandidate(x.Id, x.Span, SpanPriority(network, x.Id))));
+            foreach (var (droppedId, reason) in filtered.Dropped)
+                SkipMisplacedFitting(network, droppedId, reason, skipped, droppedFittings);
+
+            var plan = PipeSegmentPlan.Build(lengthMm, filtered.Kept, families.StraightLengthMm);
             if (plan.Errors.Count > 0)
             {
                 var errors = plan.Errors.Distinct().Take(2).ToList();
@@ -332,6 +354,9 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         // 5) 격점상세도 배관재료표용 정보 파라미터를 한 번에 기록한다(docs/131 § B-4).
         // 번호가 격점 전체(명칭+규격 조합)를 보고 정해지므로 배치 즉시가 아니라 여기서 매긴다.
         RecordMaterialParameters(document, materialParts, network, warnings);
+        // 6) 연결에 의존하는 개수 — 플랜지 접합(연결 1건 = 1개소) · 유입부 소켓 절단을 문서 전체로 다시 센다(docs/266 § 1).
+        // 새 부재가 기존 부재와 맞닿으면 이웃의 플랜지 귀속도 바뀌므로 이번 배치분만이 아니라 문서 전체를 본다.
+        PipeJointConnectionRecorder.Apply(document, warnings);
 
         if (singlePortCount > 0)
             warnings.Add($"1포트 배관부속 {singlePortCount}개는 주관을 분할하거나 연결하지 않고 지정 위치에 배치했습니다.");
@@ -439,6 +464,14 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                 Skip(null, plannedReason);
                 continue;
             }
+            // 밸브부관 B는 부관_구경(본관 구경 키)에 이어진 밸브부관 A의 주관 구경을 넣는다 — 부관 관경은 패밀리가 정한다(docs/244 § C).
+            // 검증(PipeValveBend.ResolveMainDiameter)이 먼저 막지만, 그래도 모르면 이 절점만 건너뛴다.
+            var valveBendMainMm = isValveBend ? node.MainDiameterMm : null;
+            if (isValveBend && valveBendMainMm is null)
+            {
+                Skip(null, $"{PipeValveBend.PartNameB}가 {PipeValveBend.PartNameA}의 분기에 이어져 있지 않아 본관 구경을 알 수 없습니다.");
+                continue;
+            }
 
             try
             {
@@ -491,7 +524,8 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                     : isElbow ? families.BendDiameterParameterName
                     : isTee ? families.TeeDiameterParameterName
                     : isWye ? families.WyeDiameterParameterName : families.CrossDiameterParameterName;
-                SetOptionalDiameterParameter(instance, diameterParameterName, isValveTee ? valveTeeMainMm : nodeDiameterMm, role, warnings);
+                SetOptionalDiameterParameter(instance, diameterParameterName,
+                    isValveTee ? valveTeeMainMm : valveBendMainMm ?? nodeDiameterMm, role, warnings);
                 if (isValveTee)
                 {
                     // 밸브부관 A는 주관·분기 구경이 원래 다르다(D1650 x D300). T형처럼 큰 쪽 하나로 맞추지 않는다(docs/227 § D).
@@ -525,7 +559,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                 {
                     Skip(instance, BuildConnectorCountMessage(
                         instance, $"절점 부속 '{symbol.Family.Name} : {symbol.Name}'", connectors.Count,
-                        BuildConnectorInstruction(connectorsBeforeDriving == expectedConnectors, connectorsBeforeDriving, nodeDiameterMm,
+                        BuildConnectorInstruction(connectorsBeforeDriving == expectedConnectors, connectorsBeforeDriving, valveBendMainMm ?? nodeDiameterMm,
                             [diameterParameterName,
                                 isValveTee ? families.ValveTeeBranchDiameterParameterName
                                     : isTee ? families.TeeBranchDiameterParameterName
@@ -537,6 +571,19 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                 }
 
                 // 밸브부관 A는 수직분기 커넥터를 빼고 돌린다 — 섞이면 "나머지와 직교하는 커넥터"로 수직 커넥터가 분기로 잡힌다(docs/227 § D).
+                // 밸브부관 B의 실제 부관 관경 = 커넥터 지름(docs/244 § C). 단독 B는 사용자가 바이패스 선을 직접 그린 경우라
+                // 선 관경을 자동으로 바꾸지 않고 경고만 남긴다(§ F-2). 재료표 분기 구경은 실제 값을 쓴다.
+                var valveBendBranchMm = nodeDiameterMm;
+                if (isValveBend)
+                {
+                    valveBendBranchMm = ValveBendBranchDiameterMm(instance, valveBendMainMm!.Value);
+                    if (Math.Abs(valveBendBranchMm - nodeDiameterMm) > 0.5)
+                        warnings.Add(FormattableString.Invariant(
+                            $"{PipeValveBend.PartNameB}(캔버스 ({node.Position.X:N0}, {node.Position.Y:N0})mm): 본관 {valveBendMainMm.Value:0.#}mm에서 부관 관경이 {valveBendBranchMm:0.#}mm로 정해져 ") +
+                            FormattableString.Invariant(
+                            $"바이패스 선 관경 {nodeDiameterMm:0.#}mm와 다릅니다 — 바이패스 선을 {valveBendBranchMm:0.#}mm로 그리세요."));
+                }
+
                 var verticalConnectors = isValveTee ? connectors.Where(IsVerticalConnector).ToList() : [];
                 RotateTo(document, instance, origin, isValveTee ? connectors.Except(verticalConnectors).ToList() : connectors,
                     targetRotation, node.NodeKind);
@@ -573,14 +620,14 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                 track(node.Id, instance);
                 materialParts.Add(isValveBend
                     // 밸브부관은 배관 부속류지만 품목명을 패밀리명 그대로 쓴다 — PipeJointCountWriter.IsAccessory가 밸브류로 묶어 접합 표기·절단수가 붙지 않는다.
-                    // 규격은 주관 x 분기(`D1650xD300`)다. B의 분기는 자기 관경, 주관은 이어진 A의 주관이다(docs/227 § 0-2).
+                    // 규격은 주관 x 분기(`D1650xD300`)다. B의 분기는 커넥터로 잰 실제 부관 관경(docs/244 § C), 주관은 이어진 A의 주관이다(docs/227 § 0-2).
                     ? node.MainDiameterMm is { } bendMainMm
-                        ? new MaterialPart(instance, FittingNameOf(instance), PipeMaterialSpecText.ValveBranch(bendMainMm, nodeDiameterMm),
-                            bendMainMm, BranchDiameterMm: nodeDiameterMm)
+                        ? new MaterialPart(instance, FittingNameOf(instance), PipeMaterialSpecText.ValveBranch(bendMainMm, valveBendBranchMm),
+                            bendMainMm, BranchDiameterMm: valveBendBranchMm, ValveFitting: ValveFittingKind.Bend)
                         : new MaterialPart(instance, FittingNameOf(instance), ValvePipingParameters.DiameterText(nodeDiameterMm), nodeDiameterMm)
                     : isValveTee
                     ? new MaterialPart(instance, FittingNameOf(instance), PipeMaterialSpecText.ValveBranch(valveTeeMainMm, valveTeeBranchMm),
-                        valveTeeMainMm, BranchDiameterMm: valveTeeBranchMm)
+                        valveTeeMainMm, BranchDiameterMm: valveTeeBranchMm, ValveFitting: ValveFittingKind.Tee)
                     : isElbow
                     ? new MaterialPart(instance, role, BendSpecText(nodeDiameterMm, deflectionDeg), nodeDiameterMm, DeflectionDeg: deflectionDeg)
                     // T형·십자 분기 구경은 현재 주관과 같은 값으로 구동한다(docs/130 § A). 이경티는 범위 밖이다.
@@ -588,7 +635,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                         isTee ? TeeSpecText(nodeDiameterMm, nodeDiameterMm)
                             : isWye ? WyeSpecText(nodeDiameterMm, nodeDiameterMm, wyeOrder!.BranchAngleDeg)
                             : CrossSpecText(nodeDiameterMm, nodeDiameterMm),
-                        nodeDiameterMm, BranchDiameterMm: nodeDiameterMm));
+                        nodeDiameterMm, BranchDiameterMm: nodeDiameterMm, WyeAngleDeg: isWye ? wyeOrder!.BranchAngleDeg : null));
                 foreach (var anchor in anchors) legAnchors[(node.Id, anchor.Key)] = anchor.Value;
             }
             catch (Exception ex)
@@ -740,7 +787,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         ForceElevation(document, instance, origin.Z, elevationFixes);
     }
 
-    /// <summary>밸브부관의 밸브 쪽 커넥터(최소 Id)가 <see cref="PipeNodeDefinition.ValveSideEdgeId"/> 레그를 향하게 한다(docs/225 § D).
+    /// <summary>밸브부관의 밸브 쪽 커넥터(긴 레그, docs/247)가 <see cref="PipeNodeDefinition.ValveSideEdgeId"/> 레그를 향하게 한다(docs/225 § D).
     /// <para>규약·보정 방식은 <see cref="CorrectElbowSocketDirection"/>과 같다 — 이등분 수평축으로 180° 돌리면 두 커넥터가 서로 자리를 바꾼다.
     /// 기준 레그만 "상류"가 아니라 "밸브 쪽"이다.</para></summary>
     private static void CorrectValveBendSide(
@@ -755,7 +802,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             return;
         }
 
-        var connectors = GetMepConnectors(instance).OrderBy(x => x.Id).ToList();
+        var connectors = PipeMaterialConnectorReader.ValveBendValveSideFirst(GetMepConnectors(instance));
         if (connectors.Count != 2 || connectors[0].Id == connectors[1].Id)
         {
             warnings.Add($"밸브부관 방향 보정을 건너뛰었습니다: 절점 ({node.Position.X:N0}, {node.Position.Y:N0})mm의 커넥터가 구분 가능한 2개가 아닙니다.");
@@ -880,21 +927,47 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             ? byFamily.TryGetValue(symbol.Family.Name, out var name) ? name : null
             : families.ValveDiameterParameterName;
 
+    /// <summary><see cref="InlineSpanFilter"/> 우선순위 — 겹치면 바이패스 세트 &gt; 밸브 &gt; 이음관 순으로 남는다(docs/251 § B-1).</summary>
+    private static int SpanPriority(PipeNetworkDefinition network, Guid fittingId)
+    {
+        var fitting = network.InlineFittings.First(x => x.Id == fittingId);
+        return fitting.IsBypassSet ? InlineSpanFilter.BypassSetPriority
+            : fitting.IsJoint ? InlineSpanFilter.JointPriority
+            : InlineSpanFilter.ValvePriority;
+    }
+
+    /// <summary>위치 오류로 뺀 인라인 부속을 건너뛰기로 기록한다(docs/251 § B-2). 3) 실배치는 <paramref name="droppedFittings"/>를 보고 넘어간다.
+    /// <para>패밀리를 <c>unusableValves</c>에 넣지 않는다 — 자리 문제라 같은 패밀리의 다른 개체는 정상이다.</para></summary>
+    private static void SkipMisplacedFitting(PipeNetworkDefinition network, Guid fittingId, string reason,
+        ICollection<PipeConnectionFailure> skipped, ISet<Guid> droppedFittings)
+    {
+        var fitting = network.InlineFittings.First(x => x.Id == fittingId);
+        var (role, name) = fitting.IsBypassSet ? (BypassSet.TypeKey, BypassValveFamilyOf(fitting.Bypass!.BypassValveFamilyTypeName))
+            : fitting.IsJoint ? ("이음관", fitting.FamilyTypeName)
+            : ("배관부속", fitting.FamilyTypeName);
+        skipped.Add(CreateFailure(ToXyz(fitting.Position, fitting.Elevation, network.ReferencePoint), role, name, 0,
+            $"{reason} 이 부속만 빼고 그 자리는 관으로 채웠습니다.", network));
+        droppedFittings.Add(fittingId);
+    }
+
     /// <summary>인라인 밸브가 축 위에서 차지하는 구간. 커넥터 2개 사이 길이를 실측해 쓴다.
     /// 구간 중심은 캔버스 점을 배치 축(<paramref name="startAnchor"/>, <paramref name="direction"/>)에
     /// 정사영해 잡는다 — 관 조각과 같은 축 좌표라야 커넥터가 맞물린다(docs/122 §A).
     /// <para>지연 열거(yield)를 쓰지 않는 이유: 실측 실패를 try/catch로 잡아 그 밸브만 건너뛰어야 하는데
     /// yield가 있는 메서드에서는 catch로 감쌀 수 없다(docs/145 § 4-5). 건너뛴 밸브는 스팬을 예약하지 않으므로
     /// 직관이 그 자리를 연속으로 채운다.</para></summary>
-    private static List<OccupiedSpan> InlineFittingSpans(
+    private static List<(Guid Id, OccupiedSpan Span)> InlineFittingSpans(
         Document document, FamilySymbolCache symbols, PipeEdgeDefinition edge, PipeNetworkDefinition network,
         PipeSegmentFamilySelection families,
         Dictionary<(ElementId SymbolId, double DiameterMm), InlineSpan> spanCache, XYZ startAnchor, XYZ direction,
+        double edgeLengthMm, bool startAnchored, bool endAnchored, IReadOnlyList<BypassTeePair> teePairs,
         IDictionary<string, string> unusableValves, ICollection<PipeConnectionFailure> skipped,
         IDictionary<Guid, double> axisCenters, ISet<Guid> droppedFittings, IDictionary<Guid, double> reservedWidths)
     {
         var axis = new EdgeAxis(startAnchor, direction);
-        var spans = new List<OccupiedSpan>();
+        // 이 엣지 세트의 A 구간 전부. 밸브·이음관이 A 주관 커넥터에 밀착하는 후보다(docs/257 § B-2).
+        var teeSpans = teePairs.SelectMany(x => new[] { x.First, x.Second }).ToList();
+        var spans = new List<(Guid Id, OccupiedSpan Span)>();
         // 밸브 본체가 차지한 구간. 이음관은 이 경계에 그대로 이어 붙는다(docs/167 § B).
         var valveSpans = new Dictionary<Guid, OccupiedSpan>();
 
@@ -921,10 +994,17 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                 var center = AxisDistanceMm(canvasPoint, axis);
                 axisCenters[fitting.Id] = center;
                 if (widthMm is null) continue; // 1포트는 주관을 자르지 않는 위치 배치다(밸브는 이것이 정상 경우다).
-                var span = new OccupiedSpan(center - widthMm.Value / 2, center + widthMm.Value / 2);
+                // 2포트 밸브도 엣지 끝 절점 부속 커넥터에 밀착한다(docs/251 § A) — 캔버스는 절점 부속 레그 길이를 몰라
+                // "T 바로 옆"을 찍으면 T 몸통 안쪽이 된다. 밸브끼리는 밀착하지 않는다.
+                // 바이패스 세트 A도 같은 이유로 밀착 대상이다(docs/257) — 두 A 사이면 가까운 A 안쪽 커넥터에 거리 제한 없이,
+                // A 바깥이면 A 구간을 밸브 스팬 후보로 넘겨 절점 부속과 같은 허용 거리 규칙을 따른다.
+                var span = BypassTeeSnap.InsideSet(center, widthMm.Value, teePairs)
+                           ?? InlineJointSnap.Resolve(center, widthMm.Value, teeSpans, edgeLengthMm, startAnchored, endAnchored, JointSnapToleranceMm)
+                           ?? new OccupiedSpan(center - widthMm.Value / 2, center + widthMm.Value / 2);
+                axisCenters[fitting.Id] = (span.StartMm + span.EndMm) / 2;
                 valveSpans[fitting.Id] = span;
                 reservedWidths[fitting.Id] = widthMm.Value;
-                spans.Add(span);
+                spans.Add((fitting.Id, span));
             }
             catch (Exception ex)
             {
@@ -935,7 +1015,8 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             }
         }
 
-        // 2단 — 이음관. 자기 캔버스 점을 축에 정사영해 중심을 잡되, 밸브 스팬과 겹치거나 가까우면 밸브 경계에 밀착한다(docs/175 § D-2).
+        // 2단 — 이음관. 자기 캔버스 점을 축에 정사영해 중심을 잡되, 밸브 스팬 또는 엣지 끝 절점 부속 커넥터와
+        // 겹치거나 가까우면 그 경계에 밀착한다(docs/175 § D-2, docs/250) — 사이에 단관이 끼지 않는다.
         // 폭은 `이음관_구경`을 엣지 관경으로 구동한 뒤 실측한 값이므로 패밀리가 계산한 `이음관_길이`를 그대로 따른다.
         foreach (var fitting in network.InlineFittings.Where(x => x.EdgeId == edge.Id
                      && x.IsJoint && !string.IsNullOrWhiteSpace(x.FamilyTypeName)))
@@ -963,11 +1044,13 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
 
                 var center = AxisDistanceMm(canvasPoint, axis);
                 var half = widthMm.Value / 2;
-                var span = SnapToValve(center, widthMm.Value, valveSpans.Values)
+                // 세트 A 커넥터(안·밖)도 밸브와 같은 후보다(docs/257 § B-2).
+                var span = InlineJointSnap.Resolve(center, widthMm.Value, valveSpans.Values.Concat(teeSpans),
+                               edgeLengthMm, startAnchored, endAnchored, JointSnapToleranceMm)
                            ?? new OccupiedSpan(center - half, center + half);
                 axisCenters[fitting.Id] = (span.StartMm + span.EndMm) / 2;
                 reservedWidths[fitting.Id] = widthMm.Value;
-                spans.Add(span);
+                spans.Add((fitting.Id, span));
             }
             catch (Exception ex)
             {
@@ -1022,33 +1105,6 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             }
             catch (Exception ex) { warnings.Add($"ElementId {item.Instance.Id.Value}: 3D 뷰 적색 표시를 적용하지 못했습니다({ex.Message})."); }
         }
-    }
-
-    /// <summary>이음관 밀착 규칙(docs/175 § D-2). 이음관 구간 [center±width/2]가 어느 밸브 스팬과 겹치거나
-    /// <see cref="JointSnapToleranceMm"/> 안에 있으면 그 밸브의 가까운 쪽 경계에 폭만큼 이어 붙인 구간을 돌려준다.
-    /// 후보가 여럿이면 틈이 가장 작은 밸브. 후보가 없으면 null — 그때는 찍은 자리를 그대로 쓴다.
-    /// 이음관끼리의 밀착은 하지 않는다(범위 밖).</summary>
-    private static OccupiedSpan? SnapToValve(double centerMm, double widthMm, IEnumerable<OccupiedSpan> valves)
-    {
-        OccupiedSpan? best = null;
-        var bestGap = double.MaxValue;
-        foreach (var valve in valves)
-        {
-            // 이음관이 밸브 앞(시작쪽)에 오는 경우와 뒤(끝쪽)에 오는 경우의 틈. 음수면 겹친 것이다.
-            var gapBefore = valve.StartMm - (centerMm + widthMm / 2);
-            var gapAfter = (centerMm - widthMm / 2) - valve.EndMm;
-            // 중심이 밸브 스팬 안이면 가까운 쪽 경계로 보낸다.
-            var beforeSide = centerMm <= (valve.StartMm + valve.EndMm) / 2;
-            var gap = beforeSide ? gapBefore : gapAfter;
-            if (gap > JointSnapToleranceMm || gap < -widthMm) continue;
-            var distance = Math.Abs(gap);
-            if (distance >= bestGap) continue;
-            bestGap = distance;
-            best = beforeSide
-                ? new OccupiedSpan(valve.StartMm - widthMm, valve.StartMm)
-                : new OccupiedSpan(valve.EndMm, valve.EndMm + widthMm);
-        }
-        return best;
     }
 
     /// <summary>인라인 부속 실측 결과(docs/190 § B-1). <see cref="WidthMm"/>가 null이면 1포트 위치 배치 부속이다.
@@ -1131,9 +1187,9 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             if (network.Nodes.Any(x => x.IsValveBend))
             {
                 // 밸브부관 B는 90° 고정 형상이라 각도 파라미터를 보지 않는다. 직경만 곡관과 같은 규칙으로 검사한다.
-                // 주관구경은 구동하지 않는다 — 규격 매개변수에만 적는다(docs/229 § A).
+                // 본관 구경을 구동한다 — 부관 관경은 패밀리가 정한다(docs/244).
                 if (symbols.TryResolve(families.ValveBendFamilyTypeName, PipeValveBend.PartNameB, out var valveBend, out var valveBendReason))
-                    Check(valveBendFailures, valveBend!, PipeValveBend.PartNameB, families.ValveBendDiameterParameterName, "직경", false);
+                    Check(valveBendFailures, valveBend!, PipeValveBend.PartNameB, families.ValveBendDiameterParameterName, "본관 구경(부관_구경)", false);
                 else valveBendFailures.Add($"- {valveBendReason}");
             }
             if (network.Nodes.Any(x => x.IsValveTee))
@@ -1189,15 +1245,27 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                 }
                 else bypassSetFailures.Add($"- {setTeeReason}");
                 if (symbols.TryResolve(families.ValveBendFamilyTypeName, PipeValveBend.PartNameB, out var setBend, out var setBendReason))
-                    Check(bypassSetFailures, setBend!, PipeValveBend.PartNameB, families.ValveBendDiameterParameterName, "직경", false);
+                    Check(bypassSetFailures, setBend!, PipeValveBend.PartNameB, families.ValveBendDiameterParameterName, "본관 구경(부관_구경)", false);
                 else bypassSetFailures.Add($"- {setBendReason}");
             }
-            var bypassValveFittings = network.InlineFittings
-                .Where(x => x.IsBypassSet && !string.IsNullOrWhiteSpace(x.Bypass!.BypassValveFamilyTypeName))
-                .Select(x => x with { FamilyTypeName = x.Bypass!.BypassValveFamilyTypeName, TypeKey = "배관 밸브류" });
+            // 바이패스 밸브는 유형을 생성 때 정하므로(docs/244 § B-2) 패밀리 단위로 검사한다. 대표 심볼 = 패밀리 첫 유형.
+            // 사유 사전 키는 패밀리명이다 — BypassSetSpans가 같은 키로 찾는다.
+            foreach (var family in network.InlineFittings
+                         .Where(x => x.IsBypassSet)
+                         // 밸브 2개 세트의 V2도 같은 규칙으로 검사한다(docs/255 § B-7).
+                         .SelectMany(x => new[] { x.Bypass!.BypassValveFamilyTypeName, x.Bypass.HasTwoValves ? x.Bypass.SecondValveFamilyTypeName : null })
+                         .Select(BypassValveFamilyOf)
+                         .Where(x => !string.IsNullOrWhiteSpace(x))
+                         .Distinct())
+            {
+                var single = new List<string>();
+                if (symbols.TypesOf(family).FirstOrDefault() is { } representative)
+                    Check(single, representative, "바이패스 밸브", ValveDiameterParameterNameFor(families, representative), "직경", false);
+                else single.Add($"- 바이패스 밸브 패밀리 '{family}'가 프로젝트에 없습니다.");
+                if (single.Count > 0) valveFailures[family] = FormatSkipReason(single);
+            }
             foreach (var group in network.InlineFittings
                          .Where(x => !string.IsNullOrWhiteSpace(x.FamilyTypeName))
-                         .Concat(bypassValveFittings)
                          .GroupBy(x => (x.FamilyTypeName, x.IsJoint)))
             {
                 var (familyTypeName, isJoint) = group.Key;
@@ -1475,6 +1543,8 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
 
         var failed = new List<string>();
         var diagnostics = new JointCountDiagnostics();
+        // 무게 조회용 규격표(docs/260 § D). UseCase가 프로젝트 저장값을 실어 보낸다.
+        var catalog = network.CatalogSettings ?? BendSettings.Default.WithSteelDefaults();
         foreach (var part in parts)
         {
             SetOptionalTextParameter(part.Instance, ValvePipingParameters.Addin, ValvePipingParameters.AddinValue, failed);
@@ -1493,10 +1563,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             if (part.BranchDiameterMm is { } branchSpecMm)
                 SetOptionalTextParameterIfEmpty(part.Instance, ValvePipingParameters.BranchSpec,
                     PipeAlignmentParameters.BranchSpecText(branchSpecMm), failed);
-            // 현장 절단 개소. 관·이형관만 받고 기본값은 1이다 — 사용자가 고치거나 0으로 지운다.
-            if (PipeMaterialSpecText.IsCutTarget(part.Name))
-                SetOptionalIntegerParameterIfEmpty(part.Instance, ValvePipingParameters.CutCount,
-                    PipeAlignmentParameters.DefaultCutCount, failed);
+            // 현장 절단 개소는 PipeJointCountWriter.Write(평단 단관)와 연결 패스(유입부 소켓)가 정한다(docs/266 § 2-2).
             if (part.LengthMm is { } lengthMm) SetOptionalLengthInfoParameter(part.Instance, ValvePipingParameters.Length, lengthMm, failed);
             if (part.DeflectionDeg is { } deflectionDeg) SetOptionalAngleInfoParameter(part.Instance, ValvePipingParameters.BendAngle, deflectionDeg, failed);
             SetOptionalTextParameter(part.Instance, ValvePipingParameters.Material, PipeAlignmentParameters.Code(network.Material), failed);
@@ -1519,6 +1586,20 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                 connections.TryGetValue(part.Instance.Id, out var connection) ? connection : network.JointConnection,
                 useRestraintGland: false, compositions.GetValueOrDefault(part.Instance.Id), failed, diagnostics,
                 flagsById.GetValueOrDefault(part.Instance.Id));
+            // 카탈로그 무게(docs/260 § B). 관 등급은 관·이형관에만 적는다 — 밸브류는 등급이 없다.
+            var weightPart = WeightPartOf(part);
+            if (weightPart is FittingWeightPart.Straight or FittingWeightPart.Bend or FittingWeightPart.Tee
+                    or FittingWeightPart.Cross or FittingWeightPart.Wye
+                && FittingWeightResolver.ResolveGrade(network.Material, network.PipeKind, part.DiameterMm) is { } grade)
+                SetOptionalTextParameter(part.Instance, ValvePipingParameters.Grade, grade, failed);
+            PipeWeightParameterWriter.Write(part.Instance,
+                // 밸브부관은 밸브류라 위 connections에 없다(TryGetValue 실패 시 connection은 기본값 Socket) — 따로 해석한다.
+                new FittingWeightInput(weightPart, network.Material,
+                    connections.TryGetValue(part.Instance.Id, out var weightConnection) ? weightConnection
+                        : PipeJointCountWriter.ResolveConnection(part.Instance, network.JointConnection),
+                    network.SteelFittingClass, network.PipeKind,
+                    part.DiameterMm, part.BranchDiameterMm, part.LengthMm, part.DeflectionDeg, part.WyeAngleDeg),
+                catalog, failed);
         }
 
         if (diagnostics.Warning is { } jointWarning) warnings.Add(jointWarning);
@@ -1529,6 +1610,16 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             warnings.Add($"배관재료표 매개변수 {string.Join(", ", distinct)}에 값을 쓰지 못했습니다. " +
                 "배관 밸브류·배관 이음쇠 카테고리에 공유 매개변수가 바인딩됐는지 확인하세요(모델 생성 자체는 정상입니다).");
     }
+
+    /// <summary>무게 규칙용 부재 종류. 밸브부관은 표시값, 밸브류는 패밀리 매개변수(<see cref="FittingWeightPart.Other"/>), 나머지는 품목명으로 가른다.</summary>
+    private static FittingWeightPart WeightPartOf(MaterialPart part) => part.ValveFitting switch
+    {
+        ValveFittingKind.Tee => FittingWeightPart.ValveTee,
+        ValveFittingKind.Bend => FittingWeightPart.ValveBend,
+        _ => PipeJointCountWriter.IsAccessory(part.Instance)
+            ? FittingWeightPart.Other
+            : FittingWeightResolver.PartOf(PipeMaterialSpecText.StripJointMark(part.Name))
+    };
 
     private static void SetOptionalTextParameter(FamilyInstance instance, string parameterName, string value, ICollection<string> failed)
     {
@@ -1549,20 +1640,6 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         }
         if (!string.IsNullOrWhiteSpace(parameter.AsString())) return;
         if (!parameter.Set(value ?? string.Empty)) failed.Add(parameterName);
-    }
-
-    /// <inheritdoc cref="SetOptionalTextParameterIfEmpty"/>
-    private static void SetOptionalIntegerParameterIfEmpty(FamilyInstance instance, string parameterName, int value, ICollection<string> failed)
-    {
-        var parameter = instance.LookupParameter(parameterName);
-        if (parameter is null || parameter.IsReadOnly || parameter.StorageType != StorageType.Integer)
-        {
-            failed.Add(parameterName);
-            return;
-        }
-        // Integer는 0도 뜻이 있는 값이라(자르지 않는다) 미태깅만 채운다.
-        if (parameter.HasValue) return;
-        if (!parameter.Set(value)) failed.Add(parameterName);
     }
 
     private static void SetOptionalYesNoParameter(FamilyInstance instance, string parameterName, bool value, ICollection<string> failed)
@@ -1833,6 +1910,17 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             try { symbol = Resolve(familyTypeName, role); reason = null; return true; }
             catch (DhbimwaterException ex) { symbol = null; reason = ex.Message; return false; }
         }
+
+        /// <summary>패밀리의 유형 전부. 순서는 창 목록과 같은 호칭지름 우선 정렬이다(docs/244 § A-4).</summary>
+        public IReadOnlyList<FamilySymbol> TypesOf(string familyName)
+            => Symbols().Where(x => x.Key.Item1 == familyName)
+                .OrderBy(x => $"{x.Key.Item1} : {x.Key.Item2}", NominalDiameterParser.FamilyGroupedComparer)
+                .Select(x => x.Value).ToList();
+
+        /// <summary>유형명에서 읽은 호칭지름이 <paramref name="diameterMm"/>와 0.5mm 안으로 같은 첫 유형. 없으면 null(docs/244 § A-4).
+        /// 유형 매개변수 대조는 하지 않는다 — 유형명 DN 파싱만.</summary>
+        public FamilySymbol? FindByNominalDiameter(string familyName, double diameterMm)
+            => TypesOf(familyName).FirstOrDefault(x => NominalDiameterParser.Parse(x.Name) is { } dn && Math.Abs(dn - diameterMm) < 0.5);
 
         private Dictionary<(string, string), FamilySymbol> Symbols()
         {

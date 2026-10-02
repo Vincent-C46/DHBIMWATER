@@ -125,6 +125,9 @@
                     <Line X1="{Binding SubLineBX1, Mode=OneWay}" Y1="{Binding SubLineBY1, Mode=OneWay}" X2="{Binding SubLineBX2, Mode=OneWay}" Y2="{Binding SubLineBY2, Mode=OneWay}"
                           Stroke="#F5B041" StrokeThickness="1" StrokeDashArray="4,3" IsHitTestVisible="False"
                           Visibility="{Binding IsSubLineVisible, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                    <!-- 정척 수직보조선(docs/245): 선 시작점부터 정척 길이마다 SubLine A–B를 잇는다. 참고용 — 부속 폭 미반영 -->
+                    <Path Data="{Binding SubLineTicks, Mode=OneWay}" Stroke="#F5B041" StrokeThickness="1" IsHitTestVisible="False"
+                          Visibility="{Binding IsSubLineVisible, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                     <Line X1="{Binding PreviewX1}" Y1="{Binding PreviewY1}" X2="{Binding PreviewX2}" Y2="{Binding PreviewY2}" Stroke="#E67E22" StrokeThickness="3" StrokeDashArray="6,3" IsHitTestVisible="False" Visibility="{Binding IsPreviewVisible, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                     <!-- 분할 표식: [선 분할] 중 커서가 올라탄 지점에서 선에 수직하게 긋는 짧은 선분(docs/181 § A).
                          선·절점 위에 얹혀야 어디가 잘리는지 보이므로 ZIndex를 올린다(스냅 표식 1000보다는 아래). -->
@@ -140,14 +143,15 @@
                     <Line X1="{Binding FittingDimX1}" Y1="{Binding FittingDimY1}" X2="{Binding FittingDimX2}" Y2="{Binding FittingDimY2}" Stroke="#F39C12" StrokeThickness="1" StrokeDashArray="3,2" IsHitTestVisible="False" Visibility="{Binding IsFittingPreviewVisible, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                     <TextBlock Canvas.Left="{Binding FittingPreviewX}" Canvas.Top="{Binding FittingPreviewY}" Margin="8,-18,0,0" Text="{Binding FittingDimLabel}" FontSize="10" FontWeight="SemiBold" Foreground="#B9770E" Background="#FEF9E7" IsHitTestVisible="False" Visibility="{Binding IsFittingPreviewVisible, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                     <!-- docs/228 § B — 바이패스 세트 미리보기(개략). 실제 치수는 Revit이 패밀리를 재서 정한다. -->
-                    <Path Data="{Binding BypassPreviewLine, Mode=OneWay}" Stroke="#8E44AD" StrokeThickness="2.5" StrokeDashArray="5,3" Opacity="0.7" IsHitTestVisible="False" Visibility="{Binding IsBypassPreviewVisible, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                    <Path Data="{Binding BypassPreviewMarkers, Mode=OneWay}" Fill="#8E44AD" Stroke="White" StrokeThickness="1" Opacity="0.7" IsHitTestVisible="False" Visibility="{Binding IsBypassPreviewVisible, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                    <Path Data="{Binding BypassPreviewLine, Mode=OneWay}" Stroke="#283593" StrokeThickness="2.5" StrokeDashArray="5,3" Opacity="0.7" IsHitTestVisible="False" Visibility="{Binding IsBypassPreviewVisible, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                    <Path Data="{Binding BypassPreviewMarkers, Mode=OneWay}" Fill="#283593" Stroke="White" StrokeThickness="1" Opacity="0.7" IsHitTestVisible="False" Visibility="{Binding IsBypassPreviewVisible, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                     <Grid Canvas.Left="{Binding FittingPreviewX}" Canvas.Top="{Binding FittingPreviewY}" Width="18" Height="18" Margin="-9,-9,0,0" IsHitTestVisible="False" Visibility="{Binding IsFittingPreviewVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <Polygon Points="9,1 17,9 9,17 1,9" Fill="#F39C12" Stroke="White" StrokeThickness="1.5"/>
+                        <Polygon Points="9,1 17,9 9,17 1,9" Fill="#D81B60" Stroke="White" StrokeThickness="1.5"/>
                     </Grid>
                     <ItemsControl ItemsSource="{Binding Edges}" IsHitTestVisible="True"><ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas/></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Canvas>
                         <Line X1="{Binding SubAX1, Mode=OneWay}" Y1="{Binding SubAY1, Mode=OneWay}" X2="{Binding SubAX2, Mode=OneWay}" Y2="{Binding SubAY2, Mode=OneWay}" Stroke="#F5B041" StrokeThickness="1" Opacity="0.35" IsHitTestVisible="False"/>
                         <Line X1="{Binding SubBX1, Mode=OneWay}" Y1="{Binding SubBY1, Mode=OneWay}" X2="{Binding SubBX2, Mode=OneWay}" Y2="{Binding SubBY2, Mode=OneWay}" Stroke="#F5B041" StrokeThickness="1" Opacity="0.35" IsHitTestVisible="False"/>
+                        <Path Data="{Binding StraightTicks, Mode=OneWay}" Stroke="#F5B041" StrokeThickness="1" Opacity="0.35" IsHitTestVisible="False"/>
                         <Line X1="{Binding X1}" Y1="{Binding Y1}" X2="{Binding X2}" Y2="{Binding Y2}" MouseLeftButtonDown="OnEdgeMouseLeftButtonDown"><Line.Style><!-- Stroke/StrokeThickness를 로컬 속성으로 두면 아래 트리거가 먹지 않는다(XAML:47 주석 참조). --><Style TargetType="Line"><Setter Property="Stroke" Value="{Binding Stroke}"/><Setter Property="StrokeThickness" Value="4"/><Style.Triggers><MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True"/><Condition Binding="{Binding DataContext.IsSelectionMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"/><Condition Binding="{Binding IsSelected}" Value="False"/></MultiDataTrigger.Conditions><Setter Property="Stroke" Value="#5DADE2"/><Setter Property="StrokeThickness" Value="6"/></MultiDataTrigger></Style.Triggers></Style></Line.Style></Line>
                         <TextBlock Canvas.Left="{Binding LengthX}" Canvas.Top="{Binding LengthY}" Margin="4,-20,0,0" Text="{Binding LengthLabel}" FontSize="11" FontWeight="SemiBold" Foreground="#1B4F72" Background="#F8FBFD" IsHitTestVisible="False"/>
                         <TextBlock Canvas.Left="{Binding LengthX}" Canvas.Top="{Binding LengthY}" Margin="4,-8,0,0" Text="{Binding DiameterLabel, Mode=OneWay}" FontSize="10" Foreground="#5D6D7E" Background="#F8FBFD" IsHitTestVisible="False"/>
@@ -157,8 +161,8 @@
                          (전 항목이 (0,0)에 겹친다). 위 Edges 템플릿과 같이 루트를 Canvas로 감싸 절대 위치를 살린다. -->
                     <ItemsControl ItemsSource="{Binding InlineFittings}" IsHitTestVisible="{Binding IsSelectionMode}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas/></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Canvas>
                         <!-- docs/228 § B — 바이패스 세트 개략 그림(A 사각형 · B 원 · 바이패스 밸브 다이아몬드). 본관 밸브는 아래 기존 다이아몬드다. -->
-                        <Path Data="{Binding BypassLine, Mode=OneWay}" Stroke="#8E44AD" StrokeThickness="2.5" IsHitTestVisible="False"/>
-                        <Path Data="{Binding BypassMarkers, Mode=OneWay}" Fill="#8E44AD" Stroke="White" StrokeThickness="1" IsHitTestVisible="False"/>
+                        <Path Data="{Binding BypassLine, Mode=OneWay}" Stroke="#283593" StrokeThickness="2.5" IsHitTestVisible="False"/>
+                        <Path Data="{Binding BypassMarkers, Mode=OneWay}" Fill="#283593" Stroke="White" StrokeThickness="1" IsHitTestVisible="False"/>
                         <StackPanel Canvas.Left="{Binding X, Mode=OneWay}" Canvas.Top="{Binding Y, Mode=OneWay}" Width="120" Margin="-60,-7,0,0">
                             <Grid Width="14" Height="14" HorizontalAlignment="Center" ToolTip="{Binding FamilyTypeName, Mode=OneWay}" MouseLeftButtonDown="OnFittingMouseLeftButtonDown">
                                 <Polygon Points="7,0 14,7 7,14 0,7" Stroke="White" StrokeThickness="1"><Polygon.Style><Style TargetType="Polygon"><Setter Property="Fill" Value="{Binding Fill, Mode=OneWay}"/><Style.Triggers><!-- 부속 ItemsControl은 선택 모드에서만 hit test가 켜지므로 모드 조건이 따로 필요 없다. --><MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Grid}}" Value="True"/><Condition Binding="{Binding IsSelected, Mode=OneWay}" Value="False"/></MultiDataTrigger.Conditions><Setter Property="Fill" Value="#F8C471"/></MultiDataTrigger></Style.Triggers></Style></Polygon.Style></Polygon>
@@ -258,13 +262,13 @@
                 <!-- 관경은 관 전용 값이 아니다 — 곡관·이형관·밸브 직경까지 구동하고, 선택이 있으면 그 선의 관경 편집칸이 된다.
                      관 패밀리 Expander(기본 접힘) 안에 두면 창을 열자마자 보이지 않는다(docs/163 § E). -->
                 <Grid Margin="0,4,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions><TextBlock Text="{Binding DiameterCaption, Mode=OneWay}" VerticalAlignment="Center"/><TextBox x:Name="DiameterTextBox" Grid.Column="1" Style="{StaticResource PrimaryTextBoxStyle}" KeyDown="OnDiameterTextBoxKeyDown" PreviewKeyDown="OnDiameterTextBoxPreviewKeyDown" LostKeyboardFocus="OnDiameterTextBoxLostKeyboardFocus" Text="{Binding DiameterMm, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="2" Text="mm" Margin="4,0"/></Grid>
-                <TextBlock Text="관·곡관·이형관·밸브에 모두 적용됩니다. 선을 선택하면 그 선의 관경만 바뀝니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
-                <TextBlock Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6">
-                    <Run Text="길이 "/><Run Text="{Binding StraightLengthMm, Mode=OneWay, StringFormat={}{0:N0}mm}" FontWeight="SemiBold"/><Run Text="는 직관, 나머지는 단관. 절점엔 곡관·T형이 자동 배치"/>
-                </TextBlock>
-                <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions><TextBlock Text="관 중심 높이(EL)" VerticalAlignment="Center"/><TextBox Grid.Column="1" Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding Elevation, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True, StringFormat={}{0:0.###}}"/><TextBlock Grid.Column="2" Text="mm" Margin="4,0"/></Grid>
+                <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions><TextBlock Text="관 중심 높이(EL)" VerticalAlignment="Center"/><TextBox Grid.Column="1" Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding ElevationM, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True, StringFormat={}{0:0.###}}"/><TextBlock Grid.Column="2" Text="m" Margin="4,0"/></Grid>
                 <!-- 관종은 DH_관종과 직관·단관의 DH_비고(관 재료 코드)를 구동한다(docs/141 § B). -->
-                <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="99"/></Grid.ColumnDefinitions><TextBlock Text="관종" VerticalAlignment="Center" ToolTip="DH_관종에 기록하고, 직관·단관의 DH_비고에 관 재료 코드(DCIP·SP·PE·PVC)를 자동으로 적습니다."/><ComboBox Grid.Column="1" ItemsSource="{Binding PipeMaterialLabels, Mode=OneWay}" SelectedItem="{Binding PipeMaterialLabel, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}"/></Grid>
+                <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="관종" VerticalAlignment="Center" ToolTip="DH_관종에 기록하고, 직관·단관의 DH_비고에 관 재료 코드(DCIP·SP·PE·PVC)를 자동으로 적습니다."/><StackPanel Grid.Column="1" Orientation="Horizontal"><RadioButton Content="주철관" GroupName="PipeLayoutMaterial" Tag="6,0,0,6" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding IsDuctileIronSelected, Mode=TwoWay}"/><RadioButton Content="강관" GroupName="PipeLayoutMaterial" Tag="0,6,6,0" Margin="-1,0,0,0" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding IsSteelSelected, Mode=TwoWay}"/></StackPanel></Grid>
+                <!-- 관 등급 — 직관·단관 단위중량(DH_무게) 조회와 DH_관종등급(docs/260 § C). -->
+                <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="99"/></Grid.ColumnDefinitions><TextBlock Text="관 등급" VerticalAlignment="Center" ToolTip="직관·단관 단위중량(DH_무게) 조회 등급이며 DH_관종등급에 기록됩니다. 강관 '자동'은 DN≤300 STWW 290, 그 밖 STWW 400 A입니다."/><ComboBox Grid.Column="1" ItemsSource="{Binding PipeKindLabels, Mode=OneWay}" SelectedItem="{Binding PipeKindLabel, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}"/></Grid>
+                <!-- 강관 밸브부관 등급 — 바이패스 지관 규격표 조회에 쓴다(docs/256). 강관일 때만 보인다(docs/263 § C). -->
+                <Grid Margin="0,0,0,8" Visibility="{Binding IsSteelFittingClassEnabled, Converter={StaticResource BooleanToVisibilityConverter}}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="99"/></Grid.ColumnDefinitions><TextBlock Text="강관 등급" VerticalAlignment="Center" ToolTip="강관 밸브부관 규격 등급(KS D 3578 F12/F15/F20). 등급별 규격 범위를 벗어난 주관의 바이패스 세트는 만들지 않습니다."/><ComboBox Grid.Column="1" ItemsSource="{Binding SteelFittingClassLabels, Mode=OneWay}" SelectedItem="{Binding SteelFittingClassLabel, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}"/></Grid>
                 <!-- 접합 종류는 부재명 표기(2F·2S)와 접합 개소 매개변수를 구동한다(docs/170 § E). 부재가 자기 패밀리 파라미터로 접합을 밝히면 그쪽이 이긴다. -->
                 <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="99"/></Grid.ColumnDefinitions><TextBlock Text="접합 종류" VerticalAlignment="Center" ToolTip="부재명 앞에 2F·2S 표기를 붙이고, 관종과 함께 접합 개소를 어느 매개변수에 적을지 정합니다(강관+소켓=용접합수, 주철관+소켓=KP접합수, 플랜지=플랜지접합수). 패밀리가 접합 형식을 자체 매개변수로 갖고 있으면 그 값이 우선합니다."/><ComboBox Grid.Column="1" ItemsSource="{Binding JointConnectionLabels, Mode=OneWay}" SelectedItem="{Binding JointConnectionLabel, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}"/></Grid>
             </StackPanel></Expander>
@@ -331,7 +335,7 @@
                 <TextBlock Text="이음관 길이는 패밀리가 구경에서 자동 계산합니다. 밸브 옆 50mm 안에 찍으면 밸브 커넥터에 밀착됩니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,0"/>
                 </StackPanel></Border>
                 <TextBlock Text="밸브·이음관 목록" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                <ListBox Style="{StaticResource PrimaryListBoxStyle}" ItemsSource="{Binding InlineFittings, Mode=OneWay}" Height="180"><ListBox.ItemTemplate><DataTemplate><DockPanel Margin="3"><Button Content="삭제" Style="{StaticResource CancelButtonStyle}" DockPanel.Dock="Right" Command="{Binding DataContext.RemoveFittingCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/><TextBlock Text="{Binding DisplayOrder, Mode=OneWay}" Width="24"/><TextBlock DockPanel.Dock="Right" Text="{Binding KindBadge, Mode=OneWay}" Foreground="#16A085" FontSize="11" FontWeight="SemiBold" Margin="6,0,6,0" VerticalAlignment="Center"/><TextBlock Text="{Binding FamilyTypeName, Mode=OneWay}" ToolTip="{Binding TypeKey, Mode=OneWay}" TextTrimming="CharacterEllipsis"/></DockPanel></DataTemplate></ListBox.ItemTemplate></ListBox>
+                <ListBox Style="{StaticResource PrimaryListBoxStyle}" ItemsSource="{Binding InlineFittings, Mode=OneWay}" Height="180"><ListBox.ItemTemplate><DataTemplate><DockPanel Margin="3"><Button Content="삭제" Style="{StaticResource CancelButtonStyle}" DockPanel.Dock="Right" Command="{Binding DataContext.RemoveFittingCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/><TextBlock Text="{Binding DisplayOrder, Mode=OneWay}" Width="24"/><TextBlock DockPanel.Dock="Right" Text="{Binding KindBadge, Mode=OneWay}" Foreground="#16A085" FontSize="11" FontWeight="SemiBold" Margin="6,0,6,0" VerticalAlignment="Center"/><TextBlock Text="{Binding DisplayName, Mode=OneWay}" ToolTip="{Binding TypeKey, Mode=OneWay}" TextTrimming="CharacterEllipsis"/></DockPanel></DataTemplate></ListBox.ItemTemplate></ListBox>
             </StackPanel></Expander>
             <!-- docs/228 § B — 바이패스 세트. 본관 위를 클릭하면 A 2개 · B 2개 · 바이패스 밸브를 한 세트로 넣는다(본관 밸브는 세트가 아니다, docs/230).
                  밸브부관 A·B 패밀리·파라미터는 이 섹션에서 고른다(docs/229 § B). -->
@@ -339,28 +343,33 @@
                 <TextBlock Text="본관 위를 클릭하면 그 점을 중심으로 밸브부관 A 2개 · 밸브부관 B 2개 · 바이패스 밸브를 넣습니다. A–A 사이는 관으로 이어지며, 본관 밸브는 [4. 밸브 · 이음관 배치]로 그 자리에 놓으면 됩니다. 캔버스 그림은 개략이고, 실제 자리는 모델 생성 때 커넥터를 재서 맞춥니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,8"/>
                 <Border Background="#F7F9FB" BorderBrush="#DCE6EE" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,10"><StackPanel>
                     <TextBlock Text="바이패스 밸브 (B–B 사이)" FontWeight="Bold" Foreground="#4A6FA5" Margin="0,0,0,6"/>
-                    <TextBlock Text="밸브 패밀리 (배관 밸브류)" FontWeight="SemiBold"/>
+                    <!-- docs/255 § D-2 — 밸브 개수. 2개면 V1–단관–V2로 놓는다. 목록의 [밸브 적용]으로 기존 세트에도 넣는다. -->
+                    <TextBlock Text="밸브 개수" FontWeight="SemiBold"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,4,0,6">
+                        <RadioButton x:Name="BypassValveCountOne" GroupName="BypassValveCount" Content="1개" IsChecked="{Binding IsBypassSingleValve, Mode=TwoWay}" Margin="0,0,16,0"/>
+                        <RadioButton x:Name="BypassValveCountTwo" GroupName="BypassValveCount" Content="2개 (사이 단관)" IsChecked="{Binding IsBypassTwoValves, Mode=TwoWay}"/>
+                    </StackPanel>
+                    <TextBlock Text="밸브 1 패밀리 (선 시작 쪽)" FontWeight="SemiBold"/>
                     <ComboBox ItemsSource="{Binding ValveFamilyNames, Mode=OneWay}" SelectedValue="{Binding BypassValveFamilyName, Mode=TwoWay}" SelectedValuePath="Name" DisplayMemberPath="Name" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,6"/>
-                    <TextBlock Text="유형" FontWeight="SemiBold"/>
-                    <ListBox Style="{StaticResource PrimaryListBoxStyle}" ItemsSource="{Binding BypassValveTypeNames, Mode=OneWay}" SelectedItem="{Binding BypassValveTypeName, Mode=TwoWay}" Height="70" Margin="0,4,0,6">
-                        <ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Converter={StaticResource FamilyTypeNameToTypeNameConverter}, Mode=OneWay}"/></DataTemplate></ListBox.ItemTemplate>
-                    </ListBox>
+                    <!-- docs/244 § D-1 — 유형 목록·유형 직경 확인·바이패스 관경 입력은 없앴다. 관경은 밸브부관 B가 본관 구경으로 정하고 유형은 같은 DN으로 고른다. -->
                     <!-- docs/232 § C — 바이패스 밸브 직경 파라미터. 패밀리 기준 자동 추정 + 패밀리별 기억(4번 섹션과 같은 사전). -->
                     <TextBlock Text="인스턴스 직경 파라미터" FontWeight="SemiBold"/>
                     <ComboBox ItemsSource="{Binding BypassValveParameterNames, Mode=OneWay}" SelectedItem="{Binding BypassValveDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,6"/>
-                    <!-- docs/233 § B-3 — 게이트밸브는 공칭지름이 유형 매개변수라 인스턴스 후보가 비는 것이 정상. 유형 매개변수 값으로 바이패스 관경을 대조한다. -->
-                    <TextBlock Text="유형 직경 매개변수 (확인용)" FontWeight="SemiBold"/>
-                    <ComboBox ItemsSource="{Binding BypassValveTypeParameterNames, Mode=OneWay}" SelectedItem="{Binding BypassValveTypeDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
-                    <TextBlock Text="{Binding BypassValveTypeDiameterText, Mode=OneWay}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6">
-                        <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="#7F8C8D"/><Style.Triggers><DataTrigger Binding="{Binding IsBypassValveTypeDiameterMismatch, Mode=OneWay}" Value="True"><Setter Property="Foreground" Value="#B03A2E"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
-                    </TextBlock>
-                    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions><TextBlock Text="바이패스 관경" VerticalAlignment="Center"/><TextBox Grid.Column="1" Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding BypassDiameterMm, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="2" Text="mm" Margin="4,0" VerticalAlignment="Center"/></Grid>
+                    <!-- docs/255 § D-2 — 밸브 2개일 때만 보인다. V2 직경 파라미터는 4번 섹션과 같은 패밀리별 사전을 쓴다(G-4). -->
+                    <StackPanel Visibility="{Binding IsBypassTwoValves, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock Text="밸브 2 패밀리 (선 끝 쪽)" FontWeight="SemiBold"/>
+                        <ComboBox ItemsSource="{Binding ValveFamilyNames, Mode=OneWay}" SelectedValue="{Binding BypassSecondValveFamilyName, Mode=TwoWay}" SelectedValuePath="Name" DisplayMemberPath="Name" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,6"/>
+                        <TextBlock Text="밸브 사이 단관 길이" FontWeight="SemiBold"/>
+                        <Grid Margin="0,4,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions><TextBox x:Name="BypassSpoolLengthTextBox" Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding BypassSpoolLengthMm, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="1" Text="mm" Margin="4,0" VerticalAlignment="Center"/></Grid>
+                        <TextBlock Text="0 = 두 밸브 직결. 1~9mm는 넣을 수 없습니다(관 최소 10mm). 밸브 2 직경 파라미터는 4번 섹션 밸브 설정의 패밀리별 값을 씁니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    </StackPanel>
+                    <TextBlock Text="바이패스 관경과 밸브 유형은 모델 생성 때 정합니다 — 밸브부관 B에 본관 구경을 넣어 부관 관경을 정하고, 같은 DN의 밸브 유형을 고릅니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap"/>
                 </StackPanel></Border>
                 <!-- docs/229 § B — 밸브부관 A·B 패밀리·파라미터는 [설정…] 창이 아니라 여기서 고른다.
                      목록은 배관 부속류 전체, 기본값은 이름에 '밸브부관'이 든 것(역가져오기 판정 키워드와 같다). -->
                 <Border Background="#F7F9FB" BorderBrush="#DCE6EE" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,10"><StackPanel>
                     <TextBlock Text="밸브부관 A (본관 T자)" FontWeight="Bold" Foreground="#4A6FA5" Margin="0,0,0,6"/>
-                    <TextBlock Text="패밀리 (배관 부속류, 커넥터 4개)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding SegmentFamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding ValveTeeFamilyTypeName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,6"/>
+                    <TextBlock Text="패밀리 (배관 부속류, 커넥터 3~4개)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding SegmentFamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding ValveTeeFamilyTypeName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,6"/>
                     <!-- docs/232 § B — 콤보마다 컬렉션을 따로 쓴다(공유하면 갱신 Clear 때 다른 칸이 비워진다). § A-4 — 수평·수직분기 콤보는 뺐다(자동 예/아니오). -->
                     <TextBlock Text="주관 직경 파라미터" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding ValveTeeMainParameterNames, Mode=OneWay}" SelectedItem="{Binding ValveTeeMainDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,6"/>
                     <TextBlock Text="분기 직경 파라미터" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding ValveTeeBranchParameterNames, Mode=OneWay}" SelectedItem="{Binding ValveTeeBranchDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
@@ -369,8 +378,8 @@
                 <Border Background="#F7F9FB" BorderBrush="#DCE6EE" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,10"><StackPanel>
                     <TextBlock Text="밸브부관 B (바이패스 90°)" FontWeight="Bold" Foreground="#4A6FA5" Margin="0,0,0,6"/>
                     <TextBlock Text="패밀리 (배관 부속류, 커넥터 2개)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding SegmentFamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding ValveBendFamilyTypeName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,6"/>
-                    <TextBlock Text="호칭지름 파라미터" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding ValveBendParameterNames, Mode=OneWay}" SelectedItem="{Binding ValveBendDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
-                    <TextBlock Text="첫 번째 커넥터가 밸브 쪽입니다. 본관 구경은 구동하지 않고 규격(D1650xD300)에만 적습니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap"/>
+                    <TextBlock Text="본관 구경 파라미터" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding ValveBendParameterNames, Mode=OneWay}" SelectedItem="{Binding ValveBendDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
+                    <TextBlock Text="첫 번째 커넥터가 밸브 쪽입니다. 본관 구경을 이 파라미터에 넣고, 부관 관경은 패밀리가 정합니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap"/>
                 </StackPanel></Border>
                 <Button Content="밸브부관 설정 저장" Command="{Binding SaveFamilySettingsCommand}" Style="{StaticResource CancelButtonStyle}" Margin="0,0,0,10" ToolTip="밸브부관 A·B 패밀리·파라미터를 프로젝트에 저장합니다. [설정…] 창의 [저장]과 같은 저장입니다."/>
                 <Button Content="{Binding BypassPlacementButtonText, Mode=OneWay}" Command="{Binding ToggleBypassPlacementCommand}" Style="{StaticResource PrimaryButtonStyle}" Margin="0,0,0,4"/>
@@ -379,15 +388,14 @@
                 <ListBox Style="{StaticResource PrimaryListBoxStyle}" ItemsSource="{Binding BypassSetItems, Mode=OneWay}" Height="110"><ListBox.ItemTemplate><DataTemplate><DockPanel Margin="3">
                     <Button Content="삭제" Style="{StaticResource CancelButtonStyle}" DockPanel.Dock="Right" Command="{Binding DataContext.RemoveFittingCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                     <Button Content="방향 뒤집기" Style="{StaticResource CancelButtonStyle}" DockPanel.Dock="Right" Margin="0,0,4,0" Command="{Binding DataContext.FlipBypassSetCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
-                    <Button Content="밸브 적용" Style="{StaticResource CancelButtonStyle}" DockPanel.Dock="Right" Margin="0,0,4,0" ToolTip="위에서 고른 본관·바이패스 밸브 유형과 관경을 이 세트에 넣습니다. 되가져온 세트의 빈 본관 밸브를 채울 때 씁니다." Command="{Binding DataContext.ApplyBypassValvesCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                    <!-- docs/255 § D-4 — 밸브 2개 세트만 V1·V2를 맞바꾼다. -->
+                    <Button Content="순서 바꾸기" Style="{StaticResource CancelButtonStyle}" DockPanel.Dock="Right" Margin="0,0,4,0" ToolTip="밸브 1(선 시작 쪽)과 밸브 2(선 끝 쪽)의 자리를 맞바꿉니다." Visibility="{Binding HasTwoBypassValves, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" Command="{Binding DataContext.SwapBypassValvesCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                    <Button Content="밸브 적용" Style="{StaticResource CancelButtonStyle}" DockPanel.Dock="Right" Margin="0,0,4,0" ToolTip="위에서 고른 밸브 개수·패밀리·단관 길이를 이 세트에 넣습니다. 유형·관경은 모델 생성 때 정합니다." Command="{Binding DataContext.ApplyBypassValvesCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                     <TextBlock Text="{Binding BypassSummary, Mode=OneWay}" ToolTip="{Binding BypassSummary, Mode=OneWay}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
                 </DockPanel></DataTemplate></ListBox.ItemTemplate></ListBox>
             </StackPanel></Expander>
             <!-- 패밀리 매핑·스냅·기준점은 손대는 빈도가 낮아 별도 창으로 뺐다(docs/185). 창 안에서 탭으로 나뉜다. -->
             <Button Content="설정…  (패밀리 · 스냅 · 기준점)" Command="{Binding OpenFamilySettingsCommand}" Style="{StaticResource PrimaryButtonStyle}" Margin="0,0,0,4"/>
-                <TextBlock Text="{Binding FamilySettingsSummary, Mode=OneWay}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10">
-                    <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="#566573"/><Style.Triggers><DataTrigger Binding="{Binding HasIncompleteFamilySettings, Mode=OneWay}" Value="True"><Setter Property="Foreground" Value="#B03A2E"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
-                </TextBlock>
         </StackPanel></ScrollViewer></Border>
         </Grid>
         <Grid Grid.Row="2" Margin="20,0,20,16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><!-- 안내·검증 문구가 길어져도 행 높이가 늘지 않게 최대 높이 + 세로 스크롤로 가둔다. 복사할 수 있게 읽기 전용 TextBox로 둔다(2026-09-28 사용자 요청). -->

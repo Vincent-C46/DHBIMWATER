@@ -163,6 +163,11 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                     var beamDefs = PumpingStationGeometryCalculator.CalculateBeams(dto).ToList();
                     var beamLevels = _levelQueryRepo.GetLevelIds(beamDefs.Select(b => b.LevelName));
                     var beamTypes = beamDefs.GroupBy(b => b.Part == "HAUNCH" ? "HAUNCH" : b.TypeName ?? $"{b.Width} x {b.Height}").ToDictionary(g => g.Key, g => g.Key == "HAUNCH" ? _elementTypeCmdRepo.FindHaunchBeamSymbol() : !string.IsNullOrEmpty(g.First().TypeName) ? _elementTypeCmdRepo.FindBeamSymbol(g.First().TypeName) : _elementTypeCmdRepo.FindOrCreateBeamType(new Core.Structures.BeamTypeSpec(g.First().Width, g.First().Height, g.Key, dto.Materials.Girder)));
+                    // 보·헌치 유형의 구조 재료를 거더 강도로 바꾼다. FindOrCreateBeamType은 spec.Concrete를 쓰지 않는다(docs/249 § D).
+                    var girderMaterialId = beamTypes.Count > 0 ? _elementTypeCmdRepo.FindOrCreateConcreteMaterial(dto.Materials.Girder) : 0;
+                    if (girderMaterialId != 0)
+                        foreach (var beamTypeId in beamTypes.Values.Where(id => id != 0).Distinct())
+                            _elementTypeCmdRepo.ApplyStructuralMaterial(beamTypeId, girderMaterialId);
                     foreach (var beamDef in beamDefs)
                         _beamCmdRepo.CreateBeam(beamDef, beamLevels[beamDef.LevelName], beamTypes[beamDef.Part == "HAUNCH" ? "HAUNCH" : beamDef.TypeName ?? $"{beamDef.Width} x {beamDef.Height}"]);
                     #endregion

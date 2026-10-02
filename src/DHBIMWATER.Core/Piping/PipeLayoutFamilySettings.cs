@@ -55,7 +55,11 @@ public sealed record PipeLayoutFamilySettings(
     string ValveTeeMainDiameterParameterName = "",
     string ValveTeeBranchDiameterParameterName = "",
     string ValveTeeHorizontalBranchParameterName = "",
-    string ValveTeeVerticalBranchParameterName = "")
+    string ValveTeeVerticalBranchParameterName = "",
+    /// <summary>강관 밸브부관 등급(docs/256). 바이패스 지관 규격표 조회에 쓴다. 옛 저장본에는 키가 없어 기본값 F12로 읽힌다.</summary>
+    SteelFittingClass SteelFittingClass = SteelFittingClass.F12,
+    /// <summary>관 등급(docs/260 § C). null이면 옛 저장본 — 창이 재료별 기본값을 쓴다. 빈 문자열은 강관 "DN별 기본 등급"이다.</summary>
+    string? PipeKind = null)
 {
     public static PipeLayoutFamilySettings Empty { get; } = new();
 

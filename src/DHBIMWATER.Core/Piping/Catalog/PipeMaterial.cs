@@ -1,4 +1,4 @@
-namespace DHBIMWATER.Core.Gis;
+namespace DHBIMWATER.Core.Piping;
 
 /// <summary>
 /// 관종(재질). <see cref="PipeKindCatalog"/>의 "상수 1종관" 등은 관종이 아니라

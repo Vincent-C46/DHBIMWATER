@@ -18,56 +18,13 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             _doc = doc;
         }
 
+        // 재료 찾기·만들기는 계단과 같이 쓰도록 ConcreteMaterialFactory로 옮겼다(docs/250 § A).
         public int FindOrCreateConcreteMaterial(ConcreteSpec concrete)
         {
             var doc = _doc();
             if (doc == null) return 0;
-            var allMaterials = new FilteredElementCollector(doc)
-                .OfClass(typeof(Material))
-                .Cast<Material>()
-                .ToList();
-
-            var strength = UnitUtils.ConvertToInternalUnits(concrete.CompressiveStrength, UnitTypeId.Megapascals);
-
-            var existing = allMaterials.FirstOrDefault(m =>
-                m.Name.Equals(concrete.MaterialName, StringComparison.OrdinalIgnoreCase));
-            if (existing != null)
-            {
-                // 이전(구조자산 미반영) 버전에서 생성돼 남아있는 재료일 수 있으므로, 강도가 다르면 갱신.
-                ApplyConcreteCompression(doc, existing, concrete.MaterialName, strength);
-                return (int)existing.Id.Value;
-            }
-
-            var baseMaterial = allMaterials.FirstOrDefault(m =>
-                m.Name.IndexOf("concrete", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                m.Name.Contains("콘크리트"));
-
-            if (baseMaterial == null)
-                return 0;
-
-            var newMat = baseMaterial.Duplicate(concrete.MaterialName) as Material;
-            newMat.get_Parameter(BuiltInParameter.PHY_MATERIAL_PARAM_CONCRETE_COMPRESSION)?.Set(strength);
-            ApplyConcreteCompression(doc, newMat, concrete.MaterialName, strength);
-
-            return (int)newMat.Id.Value;
-        }
-
-        // 재료 이름뿐 아니라 구조자산(StructuralAsset)에도 강도 반영.
-        // Duplicate() 직후에는 원본과 구조자산(PropertySetElement)을 공유하므로,
-        // 값이 다를 때만 별도 자산으로 복제해서 재료에 연결한다(공유 중인 원본/라이브러리 자산을 직접 수정하지 않음).
-        // ConcreteCompression은 StructuralAssetClass가 Concrete인 자산에만 유효(그 외 설정 시 예외 발생).
-        private static void ApplyConcreteCompression(Document doc, Material material, string materialName, double strengthInternal)
-        {
-            if (doc.GetElement(material.StructuralAssetId) is not PropertySetElement pse) return;
-
-            var asset = pse.GetStructuralAsset();
-            if (asset == null || asset.StructuralAssetClass != StructuralAssetClass.Concrete) return;
-            if (Math.Abs(asset.ConcreteCompression - strengthInternal) < 1e-9) return;
-
-            asset.Name = $"{materialName} - 구조자산";
-            asset.ConcreteCompression = strengthInternal;
-            var newPse = PropertySetElement.Create(doc, asset);
-            material.StructuralAssetId = newPse.Id;
+            var id = ConcreteMaterialFactory.FindOrCreate(doc, concrete);
+            return id == ElementId.InvalidElementId ? 0 : (int)id.Value;
         }
 
         public int FindOrCreateSlabType(FloorTypeSpec spec, int materialId)
@@ -122,10 +79,17 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
             if (wallType == null)
             {
-                var baseWallType = new FilteredElementCollector(doc)
+                // 첫 복합 구조 유형을 쓰면 벽돌·조적 벽이 원본이 될 수 있다(docs/248 § B).
+                // 기본 벽 중 콘크리트 구조 레이어 → 조적 이름 아님 → 아무 기본 벽 순으로 고른다.
+                var basicWallTypes = new FilteredElementCollector(doc)
                     .OfClass(typeof(WallType))
                     .Cast<WallType>()
-                    .FirstOrDefault(wt => wt.GetCompoundStructure() != null);
+                    .Where(wt => wt.Kind == WallKind.Basic && wt.GetCompoundStructure() != null)
+                    .ToList();
+                var baseWallType =
+                    basicWallTypes.FirstOrDefault(wt => !ConcreteMaterialFactory.IsMasonryName(wt.Name) && HasConcreteStructureLayer(doc, wt)) ??
+                    basicWallTypes.FirstOrDefault(wt => !ConcreteMaterialFactory.IsMasonryName(wt.Name)) ??
+                    basicWallTypes.FirstOrDefault();
 
                 if (baseWallType == null)
                 {
@@ -135,6 +99,11 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
                 wallType = baseWallType.Duplicate(name) as WallType;
                 if (wallType == null) return 0;
+
+                // 원본의 개략 축척 채우기 패턴(벽돌 해치 등)을 물려받지 않도록 새 복제분만 비운다.
+                var coarseFill = wallType.get_Parameter(BuiltInParameter.COARSE_SCALE_FILL_PATTERN_ID_PARAM);
+                if (coarseFill != null && !coarseFill.IsReadOnly)
+                    coarseFill.Set(ElementId.InvalidElementId);
             }
 
             var cs = wallType.GetCompoundStructure();
@@ -145,6 +114,15 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             wallType.SetCompoundStructure(cs);
 
             return (int)wallType.Id.Value;
+        }
+
+        // 구조 레이어(없으면 첫 레이어)의 재료가 콘크리트인지.
+        private static bool HasConcreteStructureLayer(Document doc, WallType wallType)
+        {
+            var cs = wallType.GetCompoundStructure();
+            if (cs == null || cs.LayerCount == 0) return false;
+            var index = cs.StructuralMaterialIndex >= 0 ? cs.StructuralMaterialIndex : 0;
+            return doc.GetElement(cs.GetMaterialId(index)) is Material material && ConcreteMaterialFactory.IsConcreteMaterial(doc, material);
         }
 
         public int FindOrCreateBeamType(BeamTypeSpec spec)
@@ -219,6 +197,28 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
         }
 
         public int FindGenericModelSymbol(string symbolName) => FindFamilySymbol(BuiltInCategory.OST_GenericModel, fs => fs.Name.Contains(symbolName));
+
+        // 보·기둥·독립기초 유형의 구조 재료 지정(docs/249 § C). 인스턴스 Id를 받으면 그 유형에 적용한다.
+        // 유형 매개변수라 같은 유형을 쓰는 문서 전체 인스턴스가 바뀐다 — 사용자 결정(docs/249 § 0).
+        public bool ApplyStructuralMaterial(int elementOrTypeId, int materialId)
+        {
+            var doc = _doc();
+            if (doc == null || elementOrTypeId == 0 || materialId == 0) return false;
+
+            var element = doc.GetElement(new ElementId((long)elementOrTypeId));
+            var type = element is FamilyInstance instance ? instance.Symbol : element as ElementType;
+            var param = type?.get_Parameter(BuiltInParameter.STRUCTURAL_MATERIAL_PARAM);
+            if (param == null || param.IsReadOnly || param.StorageType != StorageType.ElementId)
+            {
+                Logging.LogManager.Logger.Warn($"CONCRETE_MATERIAL 구조 재료를 지정할 수 없습니다: 유형 '{type?.Name ?? elementOrTypeId.ToString()}'");
+                return false;
+            }
+
+            var materialElementId = new ElementId((long)materialId);
+            if (param.AsElementId() != materialElementId)
+                param.Set(materialElementId);
+            return true;
+        }
 
         private int FindFamilySymbol(BuiltInCategory category, Func<FamilySymbol, bool> predicate)
         {

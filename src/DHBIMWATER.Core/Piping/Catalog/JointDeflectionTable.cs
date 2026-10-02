@@ -1,4 +1,4 @@
-namespace DHBIMWATER.Core.Gis;
+namespace DHBIMWATER.Core.Piping;
 
 public enum JointApplicationMode { SingleJoint, BothJoints }
 

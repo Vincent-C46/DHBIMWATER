@@ -13,6 +13,7 @@ using DHBIMWATER.Core.Gis;
 using DHBIMWATER.UI.Base;
 using DHBIMWATER.UI.Commands;
 using DHBIMWATER.UI.Views.Modeling;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.UI.ViewModels.Modeling;
 
@@ -25,6 +26,12 @@ public sealed record BendConnectionOption(string Label, BendConnection Value)
 }
 
 public sealed record BendFormOption(string Label, BendForm Value)
+{
+    public override string ToString() => Label;
+}
+
+/// <summary>주철 소켓 편락관 형식 콤보 항목(docs/260 § G-6). 곡관 형식과 별개다.</summary>
+public sealed record ReducerFormOption(string Label, ReducerForm Value)
 {
     public override string ToString() => Label;
 }
@@ -196,6 +203,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
     private readonly Stopwatch _phaseStopwatch = new();
     private PipeAlignmentPhase? _phaseTrackedPhase;
     private double _reducerBodyLengthMm = 250d;
+    private ReducerFormOption _reducerFormOption = ReducerFormChoices[0];
     private int _phaseStartCompleted;
     private AlignmentOverviewModel? _overview;
     private bool _suspendDirectionSelection;
@@ -483,6 +491,15 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
     public Array ZDatums => Enum.GetValues(typeof(ZDatum));
     public double IntervalM { get => _intervalM; set { if (SetProperty(ref _intervalM, value)) { if (Exclusions is not null) Exclusions.IntervalM = value; RefreshPreflightIssues(); } } }
     public double ReducerBodyLengthMm { get => _reducerBodyLengthMm; set => SetProperty(ref _reducerBodyLengthMm, value); }
+    /// <summary>주철 소켓 편락관 형식 — B형이 기본이다. 플랜지 편락관·강관에는 영향이 없다(docs/260 § G).</summary>
+    public IReadOnlyList<ReducerFormOption> ReducerFormOptions => ReducerFormChoices;
+    private static readonly ReducerFormOption[] ReducerFormChoices =
+    {
+        new ReducerFormOption("B형 (소경 쪽 직관부 200)", ReducerForm.BType),
+        new ReducerFormOption("A형 (테이퍼만)", ReducerForm.AType),
+        new ReducerFormOption("C형 (대경 쪽 직관부 200)", ReducerForm.CType)
+    };
+    public ReducerFormOption ReducerFormOption { get => _reducerFormOption; set => SetProperty(ref _reducerFormOption, value); }
     public string? StraightFamilyTypeName { get => _straightFamilyTypeName; set { if (SetProperty(ref _straightFamilyTypeName, value)) { UpdateStraightParameterOptions(); RefreshPreflightIssues(); } } }
     public string? BendFamilyTypeName { get => _bendFamilyTypeName; set { if (SetProperty(ref _bendFamilyTypeName, value)) { UpdateBendParameterOptions(); RefreshPreflightIssues(); } } }
     public string? PipingSystemTypeName { get => _pipingSystemTypeName; set => SetProperty(ref _pipingSystemTypeName, value); }
@@ -1192,7 +1209,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         var reference = ResolveReference();
         // DH_야간은 항상 0(주간)으로 기록한다. PipeAlignmentModelingRequest.IsNightWork 기본값이 false이므로
         // 값을 넘기지 않아도 파라미터가 비지 않는다 — 관공사 수량 집계의 "값 없음" 방지(docs/141 § C-5, docs/146).
-        RequestedModeling = new PipeAlignmentModelingRequest { Files = SourceFiles(), ReferenceX = reference.X, ReferenceY = reference.Y, ApplySharedCoordinates = ApplySharedCoordinates, ZDatum = ZDatum, OutputMode = OutputMode, IntervalMm = IntervalM * 1000, ReducerBodyLengthMm = ReducerBodyLengthMm, StraightFamilyTypeName = StraightFamilyTypeName, StraightDiameterParameterName = ResolvedParameter(StraightDiameterParameterName), StraightOuterDiameterParameterName = ResolvedParameter(StraightOuterDiameterParameterName), StraightThicknessParameterName = ResolvedParameter(StraightThicknessParameterName), BendFamilyTypeName = BendFamilyTypeName, BendDiameterParameterName = ResolvedParameter(BendDiameterParameterName), BendWallThicknessParameterName = ResolvedParameter(BendWallThicknessParameterName), BendOuterDiameterParameterName = ResolvedParameter(BendOuterDiameterParameterName), PipingSystemTypeName = PipingSystemTypeName, PipeTypeName = PipeTypeName, LevelName = LevelName, SnapToleranceMm = SnapToleranceMm, CurrentBendSettings = _settings };
+        RequestedModeling = new PipeAlignmentModelingRequest { Files = SourceFiles(), ReferenceX = reference.X, ReferenceY = reference.Y, ApplySharedCoordinates = ApplySharedCoordinates, ZDatum = ZDatum, OutputMode = OutputMode, IntervalMm = IntervalM * 1000, ReducerBodyLengthMm = ReducerBodyLengthMm, ReducerForm = ReducerFormOption.Value, StraightFamilyTypeName = StraightFamilyTypeName, StraightDiameterParameterName = ResolvedParameter(StraightDiameterParameterName), StraightOuterDiameterParameterName = ResolvedParameter(StraightOuterDiameterParameterName), StraightThicknessParameterName = ResolvedParameter(StraightThicknessParameterName), BendFamilyTypeName = BendFamilyTypeName, BendDiameterParameterName = ResolvedParameter(BendDiameterParameterName), BendWallThicknessParameterName = ResolvedParameter(BendWallThicknessParameterName), BendOuterDiameterParameterName = ResolvedParameter(BendOuterDiameterParameterName), PipingSystemTypeName = PipingSystemTypeName, PipeTypeName = PipeTypeName, LevelName = LevelName, SnapToleranceMm = SnapToleranceMm, CurrentBendSettings = _settings };
         SetResultWarnings([]); HasResult = false; ResultSummary = string.Empty;
         ProgressPercent = 0; PhaseText = "모델링 준비 중"; ProgressDetail = string.Empty; IsBusy = true;
         try

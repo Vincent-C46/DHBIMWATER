@@ -1,7 +1,7 @@
 using System.IO;
-using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Infrastructure.Repositories.Local;
 using Xunit;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.UI.Tests.Gis;
 

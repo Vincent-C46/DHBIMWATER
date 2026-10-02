@@ -1,5 +1,6 @@
 using Autodesk.Revit.DB;
 using DHBIMWATER.Core.Gis;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.Infrastructure.Helpers;
 

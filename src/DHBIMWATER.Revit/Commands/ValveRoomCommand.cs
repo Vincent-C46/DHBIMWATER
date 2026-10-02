@@ -35,6 +35,8 @@ public class ValveRoomCommand : CommandBase
             actionHandler.Enqueue(() => view.Dispatcher.Invoke(action));
             actionEvent.Raise();
         };
+        // 콘크리트 강도 설정 읽기·저장도 같은 ExternalEvent로 돈다 — 모델리스 창이라 API 컨텍스트 밖이다(docs/249 § E).
+        viewModel.ConcreteLauncher.RunInRevitContext = viewModel.RunInRevitContext;
         viewModel.CreateModelAction = request =>
         {
             handler.PendingRequest = request;

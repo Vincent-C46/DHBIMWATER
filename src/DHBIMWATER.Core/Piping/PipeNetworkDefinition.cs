@@ -11,7 +11,7 @@ public enum PipeOutputMode
 }
 /// <param name="FittingKind">절점의 부속 종류(docs/225 § A-5, docs/227 § A). 지정과 절점 모양이 맞지 않으면 Bend(기본)다.</param>
 /// <param name="ValveSideEdgeId">밸브부관 B일 때 밸브 쪽 레그의 엣지 Id. 정할 수 없으면 null — 검증에서 막는다.</param>
-/// <param name="MainDiameterMm">밸브부관 B일 때 이어진 밸브부관 A의 주관 구경(docs/227 § A). 규격 `D주관xD분기`에 쓴다(구동은 하지 않는다, docs/229 § A).
+/// <param name="MainDiameterMm">밸브부관 B일 때 이어진 밸브부관 A의 주관 구경(docs/227 § A). 규격 `D주관xD분기`의 주관이자, B의 `부관_구경`(본관 구경 키)에 구동하는 값이다(docs/244 § C, docs/229 § A 번복).
 /// A의 분기에 닿지 않으면 null — 검증에서 막는다.</param>
 public sealed record PipeNodeDefinition(Guid Id, Point2D Position, NodeKind NodeKind,
     PipeNodeFittingKind FittingKind = PipeNodeFittingKind.Bend, Guid? ValveSideEdgeId = null, double? MainDiameterMm = null)
@@ -110,7 +110,7 @@ public sealed record PipeNetworkDefinition(
     /// <summary>격점상세도 배관재료표에 쓰는 격점 식별자(docs/131). 비어 있으면 기록만 건너뛴다.</summary>
     string JunctionId = "",
     /// <summary>관 재료. `DH_관종`과 `DH_비고`(직관·단관)의 원본 값이다(docs/141 § B).</summary>
-    Gis.PipeMaterial Material = Gis.PipeMaterial.DuctileIron,
+    PipeMaterial Material = PipeMaterial.DuctileIron,
     /// <summary>야간 작업 여부. 체크가 야간, 해제가 주간이다(docs/141 § C).</summary>
     bool IsNightWork = false,
     /// <summary>재생성 전에 삭제할 기존 요소 Id(docs/158 § F). 캔버스로 되가져온 원본을 사용자가
@@ -122,6 +122,13 @@ public sealed record PipeNetworkDefinition(
     /// <summary>이 배치의 <b>기본</b> 접합 방식(docs/170 § E). 부재가 자기 패밀리 파라미터로 접합을 밝히면
     /// 그쪽이 이긴다 — 이 값은 밝히지 않은 부재에만 쓰인다(<c>PipeJointResolution.Resolve</c>).
     /// <para>기본값이 플랜지인 이유: 원장에서 밸브실은 실당 용접 1개소를 빼면 전량 플랜지다(docs/168 § 5-3).</para></summary>
-    Gis.BendConnection JointConnection = Gis.BendConnection.Flanged);
+    BendConnection JointConnection = BendConnection.Flanged,
+    /// <summary>강관 밸브부관 등급(docs/256). 바이패스 지관 규격표 조회에 쓴다. 덕타일주철관 등에서는 쓰지 않는다.</summary>
+    SteelFittingClass SteelFittingClass = SteelFittingClass.F12,
+    /// <summary>관 등급(`상수 1종관`·`STWW 400 A` 등, docs/260 § C). 직관·단관 단위중량 조회 키이며 `DH_관종등급`에 그대로 적는다.
+    /// 비어 있으면 강관은 DN별 기본 등급으로 무게를 구하고, 주철관은 무게를 비운다.</summary>
+    string PipeKind = "",
+    /// <summary>직관·곡관 규격표(규격표 창 편집값). UseCase가 프로젝트 저장값을 실어 보낸다. null이면 코드 내장 기본값(docs/260 § D).</summary>
+    BendSettings? CatalogSettings = null);
 // 이탈방지압륜 플래그는 창에서 지정하지 않는다(docs/175 § A). 신규 배치는 압륜 없음으로 기록하고,
 // 사용자가 인스턴스 접합 슬롯 종류(이탈방지압륜접합)로 제어한다. 재기록 경로는 그 값을 보존한다(PipeJointCountWriter.ReadRestraintGland).

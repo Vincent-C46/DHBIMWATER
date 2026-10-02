@@ -6,7 +6,9 @@ namespace DHBIMWATER.Core.Gis;
 public sealed record ReducerPlacement(
     int AlignmentIndex, int VertexIndex, Point3D UpstreamEnd, Point3D DownstreamEnd,
     double UpstreamDiameterMm, double DownstreamDiameterMm, string PipeKind,
-    double BodyLengthMm, ReducerAlignment Alignment, double StaStartM, double StaEndM, Vector3D RunDirection);
+    double BodyLengthMm, ReducerAlignment Alignment, double StaStartM, double StaEndM, Vector3D RunDirection,
+    /// <summary>대경·소경 쪽 원통 길이와 카탈로그 무게(docs/260 § G, docs/261). 고정 길이 소스에서는 기본값이다.</summary>
+    double LargeStraightMm = 0d, double SmallStraightMm = 0d, double? WeightKg = null);
 
 public sealed record ReducerTrimPlan(
     IReadOnlyList<IReadOnlyList<VertexTrim>> Trims,
@@ -32,6 +34,9 @@ public static class ReducerTrimPlanner
         double? shortSpacingBodyLengthMm = null;
         // 곡관과 같은 절점에서 DN이 바뀌면 곡관(큰 DN)만 두고 이경관은 생략한다 — 현행 동작 유지, 경고만 낸다(docs/215 § E).
         var bendOverlapCount = 0;
+        // 카탈로그에 대·소경 조합이 없어 입력 길이로 대체 배치한 지점(docs/260 § G-3).
+        var fallbackCount = 0;
+        double? fallbackLengthMm = null;
 
         for (var a = 0; a < alignments.Count; a++)
         {
@@ -81,7 +86,13 @@ public static class ReducerTrimPlanner
                     upstreamDiameter, downstreamDiameter, alignment.PipeKind, spec.BodyLengthMm, spec.Alignment,
                     // 시·종점 위치(3D 거리)를 평면 측점으로 환산한다(docs/215 § B-2).
                     stations.StationAt(midpointDistance - halfLengthM),
-                    stations.StationAt(midpointDistance + halfLengthM), downstream));
+                    stations.StationAt(midpointDistance + halfLengthM), downstream,
+                    spec.LargeStraightMm, spec.SmallStraightMm, spec.WeightKg));
+                if (spec.IsFallback)
+                {
+                    fallbackCount++;
+                    fallbackLengthMm ??= spec.BodyLengthMm;
+                }
                 if (vertices[upstreamVertex - 1].DistanceTo(vertices[upstreamVertex]) < reachM
                     || vertices[v].DistanceTo(vertices[v + 1]) < reachM)
                 {
@@ -95,6 +106,8 @@ public static class ReducerTrimPlanner
         var warnings = new List<string>();
         if (missingLengthCount > 0)
             warnings.Add($"이경관 길이가 0이어서 DN 변경 지점 {missingLengthCount}곳에 이경관을 배치하지 못했습니다. 모델링 탭의 [이경관 길이]를 확인하세요.");
+        if (fallbackCount > 0)
+            warnings.Add($"카탈로그에 없는 대·소경 조합 {fallbackCount}곳은 [이경관 길이] {fallbackLengthMm:0.##}mm로 배치했고 무게는 비웠습니다.");
         if (directionFailureCount > 0)
             warnings.Add($"인접 방향을 찾지 못해 DN 변경 지점 {directionFailureCount}곳에 이경관을 배치하지 못했습니다.");
         if (shortStepCount > 0)

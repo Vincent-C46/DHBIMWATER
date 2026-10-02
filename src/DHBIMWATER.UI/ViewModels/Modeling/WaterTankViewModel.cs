@@ -290,13 +290,18 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         }
         #endregion
 
+        /// <summary>[콘크리트 강도] 버튼(docs/249 § E). 배수지 생성 UseCase가 문서 설정을 직접 읽는다.</summary>
+        public ConcreteSettingsLauncher ConcreteLauncher { get; }
+
         #region Constructor
-        public WaterTankViewModel(CreateReservoirUseCase useCase, IDialogService dialogService, IElementTypeQueryRepo typeQueryRepo, IFileDialogService fileDialogService)
+        public WaterTankViewModel(CreateReservoirUseCase useCase, IDialogService dialogService, IElementTypeQueryRepo typeQueryRepo, IFileDialogService fileDialogService,
+            IConcreteSettingsRepo? concreteSettingsRepo = null, SaveConcreteSettingsUseCase? saveConcreteSettings = null)
         {
             _createReservoirUseCase = useCase;
             _dialogService          = dialogService;
             _typeQueryRepo          = typeQueryRepo;
             _fileDialogService      = fileDialogService;
+            ConcreteLauncher        = new ConcreteSettingsLauncher(concreteSettingsRepo, saveConcreteSettings, dialogService);
 
             LoadTypeNames();
             UpdateCRT();

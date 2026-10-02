@@ -102,9 +102,12 @@ public class ValveRoomViewModel : ViewModelBase
     private double _foundationTopEl;
     private double _trueNorthToProjectNorthClockwiseDegrees;
     public ValveRoomViewModel(IDialogService dialogService, IElementTypeQueryRepo typeQueryRepo,
-        IProjectInformationQueryRepo projectInfoQueryRepo)
+        IProjectInformationQueryRepo projectInfoQueryRepo,
+        IConcreteSettingsRepo? concreteSettingsRepo = null, DHBIMWATER.Application.UseCases.AutoGenerator.SaveConcreteSettingsUseCase? saveConcreteSettings = null)
     {
         _dialogService = dialogService;
+        // 모델리스 창이라 읽기·저장은 ValveRoomCommand가 RunInRevitContext를 연결해 ExternalEvent로 돈다(docs/249 § E).
+        ConcreteLauncher = new ConcreteSettingsLauncher(concreteSettingsRepo, saveConcreteSettings, dialogService);
         _typeQueryRepo = typeQueryRepo;
         _projectInfoQueryRepo = projectInfoQueryRepo;
 
@@ -146,6 +149,8 @@ public class ValveRoomViewModel : ViewModelBase
     /// <summary>Revit API 컨텍스트에서 동작을 실행하는 훅(docs/238 § E). 창의 ExternalEvent로 연결된다.
     /// 드레인 피트 Void 매개변수 조회(EditFamily)를 WPF 디스패처에서 부르지 않기 위함이다. null이면(테스트) 바로 실행한다.</summary>
     public Action<Action>? RunInRevitContext { get; set; }
+    /// <summary>[콘크리트 강도] 버튼(docs/249 § E). 밸브실 생성 UseCase가 문서 설정을 직접 읽는다.</summary>
+    public ConcreteSettingsLauncher ConcreteLauncher { get; }
 
     // 숫자 칸 변환 오류 수(docs/238 § B). View의 Validation.Error가 올리고 내린다 — PipeLayoutViewModel과 같은 방식.
     private int _inputValidationErrorCount;
