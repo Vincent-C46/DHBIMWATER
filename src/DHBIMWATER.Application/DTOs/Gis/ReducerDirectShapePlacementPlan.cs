@@ -9,7 +9,8 @@ public sealed record ReducerDirectShapePlacementPlan(
     /// <summary>상류 DN 기준 Global Z 오프셋(m).</summary>
     double UpstreamZOffsetM,
     /// <summary>하류 DN 기준 Global Z 오프셋(m).</summary>
-    double DownstreamZOffsetM)
+    double DownstreamZOffsetM,
+    ReducerForm Form = ReducerForm.BType)
 {
     public ReducerEndProfiles EndProfiles()
     {

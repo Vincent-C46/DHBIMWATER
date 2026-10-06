@@ -1,6 +1,7 @@
 using Autodesk.Revit.DB;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Core.Piping;
+using DHBIMWATER.Application.Interfaces.Piping;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
 
 namespace DHBIMWATER.Infrastructure.Helpers;
@@ -8,6 +9,8 @@ namespace DHBIMWATER.Infrastructure.Helpers;
 /// <summary>DH_*와 배치 태그 기록. 기존 이름 정의 재사용.</summary>
 internal sealed class PipeParameterWriter
 {
+    private readonly IPipeQuantityRules _rules;
+    public PipeParameterWriter(IPipeQuantityRules rules) => _rules = rules;
     private readonly HashSet<string> _missing = new(StringComparer.Ordinal);
     private readonly HashSet<string> _invalidTypes = new(StringComparer.Ordinal);
     private readonly HashSet<string> _unmappedJointMaterials = new(StringComparer.Ordinal);
@@ -57,7 +60,7 @@ internal sealed class PipeParameterWriter
             JointSlots(element, Array.Empty<(string Kind, string Spec, int Count)>());
             return;
         }
-        var kind = PipeAlignmentParameters.JointKindFor(material, connection, useRestraintGland);
+        var kind = _rules.JointKindFor(material, connection, useRestraintGland);
         if (kind is null)
         {
             if (slots is { Count: > 0 })
@@ -113,14 +116,16 @@ internal sealed class PipeParameterWriter
 
     /// <summary>접합 구성(<c>DH_접합구성</c>)을 적는다 — 플랜지면 단부 전부가 플랜지(`2F`), 소켓 계열(용접·KP·압륜)이면
     /// <b>소켓 단부 수</b>만 적는다(`1S`·`2S`). 스피곳(삽입) 단부는 접합 형상이 아니라 세지 않는다(docs/199, 2026-09-21).
-    /// <para>docs/178 § B는 단부 수 기준 `2S`로 정했으나 <see cref="PipeJointComposition"/>의 정의(소켓 수 + 플랜지 수)와
+    /// <para>docs/178 § B는 단부 수 기준 `2S`로 정했으나 접합 구성의 정의(소켓 수 + 플랜지 수)와
     /// 어긋났다 — B형(한쪽 소켓)은 `1S`다. 밸브실(<see cref="PipeJointFlagReader"/>)이 단부 플래그를 세어 찍는 값과 같아진다.</para>
     /// <para><see cref="JointSlots"/>의 개소(편측 1·양측 2)와는 여전히 별개다 — 그쪽은 산출 개소, 이쪽은 부재의 실제 단부 형상이다.</para></summary>
     /// <param name="endCount">부재의 단부 수. 플랜지일 때 전부 플랜지로 적는다.</param>
     /// <param name="socketEnds">소켓 단부 수. 직관 1(항상), 곡관 A형 2·B형 1, 이경관 2.</param>
     public void JointComposition(Element element, BendConnection connection, int endCount, int socketEnds)
         => Text(element, PipeAlignmentParameters.JointComposition,
-            connection == BendConnection.Flanged ? PipeJointComposition.Encode(0, endCount) : PipeJointComposition.Encode(socketEnds, 0));
+            connection == BendConnection.Flanged
+                ? _rules.EncodeComposition(0, endCount)
+                : _rules.EncodeComposition(socketEnds, 0));
 
     /// <summary>접합 종류를 정하지 못한 관종이 있으면 결과 창에 남길 한 줄. 전부 대응됐으면 null.
     /// <para>관종은 요소마다 다를 수 있어(한 실행에 여러 선형) 실행 단위가 아니라 <b>기록하면서</b> 모은다.</para></summary>

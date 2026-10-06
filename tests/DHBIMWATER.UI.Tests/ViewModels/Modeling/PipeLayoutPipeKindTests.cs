@@ -38,7 +38,7 @@ public sealed class PipeLayoutPipeKindTests
         vm.IsSteelSelected = true;
 
         Assert.Equal(PipeLayoutViewModel.AutoSteelGradeLabel, vm.PipeKindLabel);
-        Assert.Equal(PipeKindCatalog.Steel290, FittingWeightResolver.ResolveGrade(PipeMaterial.Steel, vm.ToFamilySettings().PipeKind, 300d));
+        Assert.Equal(string.Empty, vm.ToFamilySettings().PipeKind);
     }
 
     [Fact]

@@ -3,12 +3,12 @@ using System.IO;
 using DHBIMWATER.Application.DTOs.Gis;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Interfaces.Gis;
+using DHBIMWATER.Application.Interfaces.Piping;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Infrastructure.Helpers;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
 using DHBIMWATER.Shared.Errors;
 using DHBIMWATER.Core.Piping;
-using PipeCountRules = DHBIMWATER.Core.Piping.PipeCountRules;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Gis;
 
@@ -16,8 +16,11 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
 {
     private readonly Func<Document?> _doc;
     private readonly IProjectLocationCoordinateTransformRepo _coordinateTransform;
-    public RevitBendDirectShapeRepo(Func<Document?> doc, IProjectLocationCoordinateTransformRepo coordinateTransform)
-    { _doc = doc; _coordinateTransform = coordinateTransform; }
+    private readonly IPipeQuantityRules _rules;
+    private readonly IPipeCatalogSource _catalogSource;
+    public RevitBendDirectShapeRepo(Func<Document?> doc, IProjectLocationCoordinateTransformRepo coordinateTransform,
+        IPipeQuantityRules rules, IPipeCatalogSource catalogSource)
+    { _doc = doc; _coordinateTransform = coordinateTransform; _rules = rules; _catalogSource = catalogSource; }
 
     public AdaptiveBendPlacementResult Place(IReadOnlyList<AdaptiveBendPlacementPlan> plans, AlignmentPlacementOrigin origin,
         PipeInfoParameterContext? info = null, IProgress<PipeAlignmentProgress>? progress = null, CancellationToken cancellationToken = default)
@@ -25,7 +28,8 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
         if (plans.Count == 0) return new AdaptiveBendPlacementResult(0, Array.Empty<string>());
         var doc = _doc() ?? throw new DhbimwaterException(ErrorCodes.NoActiveDocument, "활성 Revit 문서가 없습니다.");
         var materialIds = new Dictionary<PipeMaterial, ElementId>();   // 관종별 재질(docs/212 § B)
-        var writer = new PipeParameterWriter();
+        var writer = new PipeParameterWriter(_rules);
+        var catalog = info is { Enabled: true } ? _catalogSource.OpenCatalog() : null;
         var warnings = new List<string>();
         var overrideWarnings = new List<string>();
         var overrideView = BendOverrideGraphics.ResolveOverrideView(doc);
@@ -56,7 +60,7 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
                 // 강관 곡관은 이름·등급에 STWW 대신 곡관 종류(F12/F15/F20)를 쓴다(2026-09-22 사용자 확정).
                 var gradeLabel = info is not null && PipeKindCatalog.MaterialOf(plan.PipeKind) == PipeMaterial.Steel ? info.SteelFittingClass.ToString() : plan.PipeKind;
                 shape.Name = $"곡관_{gradeLabel}_{plan.DiameterMm:0}_{BendKindParser.Label(plan.StandardAngleDeg)}도";
-                if (info is { Enabled: true }) WriteParameters(writer, shape, plan, info);
+                if (info is { Enabled: true }) WriteParameters(writer, shape, plan, info, catalog!);
                 if (plan.OuterDiameterMm is { } outerDiameterMm) outerDiameters[(plan.PipeKind, plan.DiameterMm)] = outerDiameterMm;
                 if (!plan.IsAcceptable || plan.HasLegOverlap) BendOverrideGraphics.ApplyExceededOverride(overrideView, shape.Id, solidFillPatternId, plan.NodeId, overrideWarnings);
                 count++;
@@ -107,7 +111,8 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
         return true;
     }
 
-    private static void WriteParameters(PipeParameterWriter writer, DirectShape shape, AdaptiveBendPlacementPlan plan, PipeInfoParameterContext info)
+    private void WriteParameters(PipeParameterWriter writer, DirectShape shape, AdaptiveBendPlacementPlan plan,
+        PipeInfoParameterContext info, IPipeCatalog catalog)
     {
         writer.Text(shape, PipeAlignmentParameters.Addin, PipeAlignmentParameters.AddinValue);
         writer.Text(shape, PipeAlignmentParameters.Part, PipeAlignmentParameters.BendPartValue);
@@ -132,11 +137,14 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
         writer.JointSlots(shape, PipeKindCatalog.MaterialOf(plan.PipeKind), info.BendConnection,
             new[] { (Spec: string.Empty, Count: socketEnds) },
             info.UseRestraintGland);
-        writer.Integer(shape, PipeAlignmentParameters.LayingCount, PipeCountRules.PlannedBendLayingCount);
+        writer.Integer(shape, PipeAlignmentParameters.LayingCount, _rules.PlannedBendLayingCount);
         // 곡관은 자르지 않는다 — 0과 미기록을 구분하려고 명시한다(docs/266 § 2-4).
-        writer.Integer(shape, PipeAlignmentParameters.CutCount, PipeCountRules.PlannedBendCutCount);
+        writer.Integer(shape, PipeAlignmentParameters.CutCount, _rules.PlannedBendCutCount);
         writer.JointComposition(shape, info.BendConnection, endCount: 2, socketEnds: socketEnds);   // A형 `2S` · B형 `1S`(docs/199 § 2)
-        writer.MassKg(shape, PipeAlignmentParameters.Weight, plan.WeightKg);   // 곡관표의 한 개 무게(docs/178 § A-2)
+        var weight = isSteel
+            ? _rules.SteelBendWeightKg(catalog, info.BendConnection, info.SteelFittingClass, plan.DiameterMm, plan.StandardAngleDeg)
+            : _rules.DuctileBendWeightKg(catalog, info.BendConnection, plan.Form, info.JointType, plan.DiameterMm, plan.StandardAngleDeg);
+        if (weight is { } weightKg) writer.MassKg(shape, PipeAlignmentParameters.Weight, weightKg);
         // DirectShape는 측점편집 대상이 아니다(docs/214, 2026-09-22 사용자 확정) — 갱신용 태그는 적지 않는다.
         // 수량산출이 읽는 셋(구간·측점시작·측점끝)만 남긴다.
         writer.Text(shape, PlacementStationParameters.Alignment, plan.RecordNumber);

@@ -7,8 +7,8 @@ public sealed record ReducerPlacement(
     int AlignmentIndex, int VertexIndex, Point3D UpstreamEnd, Point3D DownstreamEnd,
     double UpstreamDiameterMm, double DownstreamDiameterMm, string PipeKind,
     double BodyLengthMm, ReducerAlignment Alignment, double StaStartM, double StaEndM, Vector3D RunDirection,
-    /// <summary>대경·소경 쪽 원통 길이와 카탈로그 무게(docs/260 § G, docs/261). 고정 길이 소스에서는 기본값이다.</summary>
-    double LargeStraightMm = 0d, double SmallStraightMm = 0d, double? WeightKg = null);
+    /// <summary>대경·소경 쪽 원통 길이(docs/260 § G, docs/261). 고정 길이 소스에서는 기본값이다.</summary>
+    double LargeStraightMm = 0d, double SmallStraightMm = 0d, bool IsFallback = false);
 
 public sealed record ReducerTrimPlan(
     IReadOnlyList<IReadOnlyList<VertexTrim>> Trims,
@@ -87,7 +87,7 @@ public static class ReducerTrimPlanner
                     // 시·종점 위치(3D 거리)를 평면 측점으로 환산한다(docs/215 § B-2).
                     stations.StationAt(midpointDistance - halfLengthM),
                     stations.StationAt(midpointDistance + halfLengthM), downstream,
-                    spec.LargeStraightMm, spec.SmallStraightMm, spec.WeightKg));
+                    spec.LargeStraightMm, spec.SmallStraightMm, spec.IsFallback));
                 if (spec.IsFallback)
                 {
                     fallbackCount++;

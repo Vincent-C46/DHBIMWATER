@@ -87,13 +87,12 @@ public static class PipeMaterialSpecText
     /// (`2S1F T형`·`1S1F 단관`), 없으면 접합 방식 단일 표기(`3F T형`)로 폴백한다.
     /// <para>2026-09-15 사용자 결정: 부재명(합친 이름)과 접합구성을 <b>둘 다 유지</b>하되 접두는 접합구성에서 유도한다 —
     /// 종전(docs/170 § C)의 부재 단위 단일 표기는 `2S1F` T형을 `3F T형`으로 적어 실제 형상과 어긋났다.</para>
-    /// <para>구형 `KP:2+플랜지:1` 값도 <see cref="PipeJointComposition.Decode"/>가 읽으므로 `2S1F`로 정규화된다.</para></summary>
-    public static string WithJointMark(string partName, string? composition, BendConnection connection, int endCount)
+    /// <para>호출부가 구성을 정규화해 넘긴다.</para></summary>
+    public static string WithJointMark(string partName, string? normalizedComposition, BendConnection connection, int endCount)
     {
-        var ends = PipeJointComposition.Decode(composition);
-        return ends.IsEmpty
+        return string.IsNullOrWhiteSpace(normalizedComposition)
             ? WithJointMark(partName, connection, endCount)
-            : $"{PipeJointComposition.Encode(ends)} {StripJointMark(partName)}";
+            : $"{normalizedComposition} {StripJointMark(partName)}";
     }
 
     /// <summary>접합 방식 단일 표기 — `2F 단관`·`2S 곡관`·`3F T형`(docs/170 § C). 접합 구성을 모를 때의 폴백이며,

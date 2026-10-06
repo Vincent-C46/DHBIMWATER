@@ -8,6 +8,7 @@ using DHBIMWATER.Application.DTOs.Gis;
 using DHBIMWATER.Application.Gis;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Interfaces.Gis;
+using DHBIMWATER.Application.Interfaces.Piping;
 using DHBIMWATER.Application.UseCases.Gis;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.UI.Base;
@@ -169,7 +170,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
     public const string UseKindFieldOption = "(관종 필드 사용)";
     private readonly IFileDialogService _fileDialog; private readonly IDialogService _dialog;
     private readonly IReadOnlyList<IAlignmentSourceReader> _readers; private readonly AnalyzePipeNetworkUseCase _analyze;
-    private readonly BendSettingsProvider _settingsProvider; private readonly SaveBendSettingsUseCase _save; private readonly IBendSettingsFileStore _settingsFileStore; private readonly IExcelAlignmentSourceReader _excelReader;
+    private readonly BendSettingsProvider _settingsProvider; private readonly IPipeCatalogSource _catalog; private readonly IExcelAlignmentSourceReader _excelReader;
     private readonly IProjectLocationQueryRepo _projectLocationQuery; private readonly IElementTypeQueryRepo _typeRepo;
     private readonly IRevitDispatcher _revit;
     private readonly ILevelQueryRepo _levelRepo;
@@ -210,9 +211,9 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
     private const int MinEtaSampleCount = 5;
 
     public PipeAlignmentModelingViewModel(IFileDialogService fileDialog, IDialogService dialog, IEnumerable<IAlignmentSourceReader> readers,
-        IElementTypeQueryRepo typeRepo, ILevelQueryRepo levelRepo, AnalyzePipeNetworkUseCase analyze, BendSettingsProvider settingsProvider, SaveBendSettingsUseCase save, IBendSettingsFileStore settingsFileStore, IExcelAlignmentSourceReader excelReader, IProjectLocationQueryRepo projectLocationQuery, IRevitDispatcher revit)
+        IElementTypeQueryRepo typeRepo, ILevelQueryRepo levelRepo, AnalyzePipeNetworkUseCase analyze, BendSettingsProvider settingsProvider, IPipeCatalogSource catalog, IExcelAlignmentSourceReader excelReader, IProjectLocationQueryRepo projectLocationQuery, IRevitDispatcher revit)
     {
-        _fileDialog = fileDialog; _dialog = dialog; _readers = readers.ToList(); _analyze = analyze; _settingsProvider = settingsProvider; _save = save; _settingsFileStore = settingsFileStore; _excelReader = excelReader; _projectLocationQuery = projectLocationQuery; _typeRepo = typeRepo; _revit = revit; _levelRepo = levelRepo;
+        _fileDialog = fileDialog; _dialog = dialog; _readers = readers.ToList(); _analyze = analyze; _settingsProvider = settingsProvider; _catalog = catalog; _excelReader = excelReader; _projectLocationQuery = projectLocationQuery; _typeRepo = typeRepo; _revit = revit; _levelRepo = levelRepo;
         AdaptiveComponentTypeNames = typeRepo.GetAdaptiveComponentTypeNames().ToList(); PipingSystemTypeNames = typeRepo.GetPipingSystemTypeNames().ToList(); PipeTypeNames = typeRepo.GetPipeTypeNames().ToList(); LevelNames = levelRepo.GetExistingLevelNames().ToList();
         _straightFamilyTypeName = MaterialFamilyTypeName(_selectedMaterial, "직관") ?? AdaptiveComponentTypeNames.FirstOrDefault(); _bendFamilyTypeName = MaterialFamilyTypeName(_selectedMaterial, "곡관") ?? DefaultBendFamilyTypeName(); _pipingSystemTypeName = PipingSystemTypeNames.FirstOrDefault(); _pipeTypeName = PipeTypeNames.FirstOrDefault(); _levelName = LevelNames.FirstOrDefault();
         UpdateStraightParameterOptions();
@@ -449,6 +450,19 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         {
             if (!SetProperty(ref _bendFormOption, value) || value is null) return;
             _settings = _settings with { ActiveBendForm = value.Value };
+            Summary = string.Empty;
+        }
+    }
+    /// <summary>주철관 소켓 허용굴곡·무게에 쓸 조인트 종류. [모델링 실행] 때 프로젝트에 저장된다.</summary>
+    public IReadOnlyList<string> JointTypeOptions => JointTypeCatalog.All;
+    public string ActiveJointType
+    {
+        get => _settings.ActiveJointType;
+        set
+        {
+            if (value is null || _settings.ActiveJointType == value) return;
+            _settings = _settings with { ActiveJointType = value };
+            OnPropertyChanged();
             Summary = string.Empty;
         }
     }
@@ -1269,22 +1283,23 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
     /// 창을 열 때마다 "저장된 값이 없어…" 안내가 반복되지 않게 한다. 저장이 실패하면 안내만 남기고 창은 연다.</summary>
     private void LoadSettings()
     {
-        var (settings, source) = _revit.Run(() => _settingsProvider.Load());
-        _settings = settings;
+        var resolution = _revit.Run(() => _settingsProvider.Load());
+        _settings = resolution.Settings;
         SyncBendConnectionOption();
         SettingsNotice = string.Empty;
-        if (source == BendSettingsSource.BuiltInDefault)
-        {
-            // settings는 이미 WithSteelDefaults()가 적용된 값이라 그대로 저장한다. 생성자에서 호출되므로 예외를 밖으로 내보내면 창이 안 뜬다.
-            try { _revit.Run(() => _save.Execute(settings)); }
-            catch (Exception ex) { SettingsNotice = $"저장값 없음 → 내장 기본값 (자동 저장 실패: {UiErrors.Report("PipeAlignment", ex)})"; }
-        }
         // 기본값은 핸드북 규격으로 교체됐지만, 그 전에 저장한 프로젝트에는 임시값이 그대로 남아 있어 안내가 필요하다.
         if (_settings.Fittings.NeedsRestore)
             SettingsNotice = (SettingsNotice + " 저장된 곡관 치수 구조 불일치(중복 행·플랜지곡관 누락) → [관·곡관 설정]에서 [기본값 복원] 후 저장").Trim();
         UpdateBendParameterOptions();
     }
-    private void OpenPipeSpecs() { var vm = new PipeSpecTableViewModel(_settings, _save, _dialog, _fileDialog, _settingsFileStore, _revit, SelectedMaterial); ShowDialog(new PipeSpecTableView(vm)); if (vm.Result is not null) { _settings = vm.Result; SyncBendConnectionOption(); SettingsNotice = string.Empty; RefreshDiameterMappingPreviews(); } }
+    private void OpenPipeSpecs()
+    {
+        if (!_revit.Run(() => _catalog.ShowEditor(SelectedMaterial))) return;
+        _settings = _revit.Run(() => _settingsProvider.Load()).Settings;
+        SyncBendConnectionOption();
+        SettingsNotice = string.Empty;
+        RefreshDiameterMappingPreviews();
+    }
     private void SyncBendConnectionOption()
     {
         BendConnectionOption = BendConnectionOptions.First(x => x.Value == _settings.ActiveBendConnection);
@@ -1294,6 +1309,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         SteelApplicationModeOption = SteelApplicationModeOptions.FirstOrDefault(x => x.Value == _settings.SteelApplicationMode) ?? SteelApplicationModeOptions[0];
         // 이 속성은 _settings를 직접 읽으므로 설정을 통째로 갈아끼운 뒤 알려주지 않으면 체크박스가 옛 값을 보여준다.
         OnPropertyChanged(nameof(UseRestraintGland));
+        OnPropertyChanged(nameof(ActiveJointType));
     }
     private void ShowDialog(System.Windows.Window dialog) { if (OwnerWindow is { } owner) dialog.Owner = owner; dialog.ShowDialog(); OwnerWindow?.Activate(); }
 

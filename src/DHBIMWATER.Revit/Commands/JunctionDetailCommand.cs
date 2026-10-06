@@ -2,6 +2,7 @@ using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using DHBIMWATER.Application.Interfaces;
+using DHBIMWATER.Application.Interfaces.Piping;
 using DHBIMWATER.Application.UseCases.Documentation;
 using DHBIMWATER.Revit.DependencyInjection;
 
@@ -77,7 +78,15 @@ public class JunctionDetailCommand : CommandBase
             CommonButtons = TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No,
             DefaultButton = TaskDialogResult.No
         };
-        return dialog.Show() == TaskDialogResult.Yes ? useCase.Execute() : null;
+        if (dialog.Show() != TaskDialogResult.Yes) return null;
+        var catalog = ServiceContainer.GetService<IPipeCatalogSource>();
+        if (!catalog.TryEnsureAvailable(out var catalogError))
+        {
+            TaskDialog.Show("관로 규격표", catalogError);
+            return null;
+        }
+        if (!string.IsNullOrEmpty(catalogError)) TaskDialog.Show("관로 규격표", catalogError);
+        return useCase.Execute();
     }
 
     /// <summary>이미 있는 도면 뷰를 최신 모델 값으로 다시 그릴지 묻는다(docs/173).

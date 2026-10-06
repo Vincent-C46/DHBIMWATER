@@ -3,13 +3,13 @@ using System.IO;
 using DHBIMWATER.Application.DTOs.Gis;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Interfaces.Gis;
+using DHBIMWATER.Application.Interfaces.Piping;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Infrastructure.Helpers;
 using DHBIMWATER.Shared.Diagnostics;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
 using DHBIMWATER.Shared.Errors;
 using DHBIMWATER.Core.Piping;
-using PipeCountRules = DHBIMWATER.Core.Piping.PipeCountRules;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Gis;
 
@@ -24,12 +24,16 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
     private readonly Func<Document?> _doc;
     private readonly IProjectLocationCoordinateTransformRepo _coordinateTransform;
     private readonly IAlignmentSnapshotStore? _snapshotStore;
+    private readonly IPipeQuantityRules _rules;
+    private readonly IPipeCatalogSource _catalogSource;
     public RevitAlignmentStraightDirectShapeRepo(Func<Document?> doc, IProjectLocationCoordinateTransformRepo coordinateTransform,
-        IAlignmentSnapshotStore? snapshotStore = null)
+        IPipeQuantityRules rules, IPipeCatalogSource catalogSource, IAlignmentSnapshotStore? snapshotStore = null)
     {
         _doc = doc;
         _coordinateTransform = coordinateTransform;
         _snapshotStore = snapshotStore;
+        _rules = rules;
+        _catalogSource = catalogSource;
     }
 
     public AlignmentStraightPlacementResult PlaceAlong(IReadOnlyList<PipeAlignment> alignments, string straightFamilyTypeName, double intervalM, AlignmentPlacementOrigin origin,
@@ -126,7 +130,8 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
         progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.PlacingStraights, total, total));
         PlacementProfiler.Count("직관 DirectShape", placed.Count);
 
-        var writer = new PipeParameterWriter();
+        var writer = new PipeParameterWriter(_rules);
+        var catalog = info is { Enabled: true } && placed.Count > 0 ? _catalogSource.OpenCatalog() : null;
         using (PlacementProfiler.Step("06c 직관 파라미터 기록"))
         {
             PipeAlignment? previousAlignment = null;
@@ -149,7 +154,7 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
                 var endStationM = stationProfile.StationAt(segment.DistanceFromStart + lengthM);
                 writer.Text(shape, PipeAlignmentParameters.Addin, PipeAlignmentParameters.AddinValue);
                 // 6 m 정척 − 1 mm 미만 토막은 단관(부설 1 · 절단 1), 이상은 직관(부설 0 · 절단 0)이다(docs/266 R-1·R-6).
-                var segmentCounts = PipeCountRules.ForPlannedSegment(lengthM * 1000d);
+                var segmentCounts = _rules.CountPlannedSegment(lengthM * 1000d);
                 writer.Text(shape, PipeAlignmentParameters.Part, segmentCounts.PartName);
                 writer.Text(shape, PipeAlignmentParameters.NominalDiameter, PipeAlignmentParameters.DiameterText(diameterMm));
                 writer.Text(shape, PipeAlignmentParameters.Material, MaterialCodeOf(alignment.PipeKind));
@@ -158,7 +163,7 @@ internal sealed class RevitAlignmentStraightDirectShapeRepo : IAlignmentStraight
                 writer.Text(shape, PipeAlignmentParameters.ElevationDatum, PipeAlignmentParameters.Label(info.ZDatum));
                 writer.LengthM(shape, PipeAlignmentParameters.Length, lengthM);
                 // 무게 = 단위중량 × 연장 + 소켓 무게(docs/178 § A-2). 가변 패밀리 경로와 같은 규칙이다.
-                if (StraightPipeWeight.TotalKg(spec, lengthM, info.JointType) is { } weightKg)
+                if (_rules.StraightWeightKg(catalog!, alignment.PipeKind, diameterMm, lengthM, info.JointType) is { } weightKg)
                 {
                     writer.MassPerLengthKgPerM(shape, PipeAlignmentParameters.UnitWeight, spec!.UnitWeightKgPerM);
                     writer.MassKg(shape, PipeAlignmentParameters.Weight, weightKg);

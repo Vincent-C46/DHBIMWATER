@@ -1,14 +1,14 @@
 namespace DHBIMWATER.Core.Piping;
 
 /// <summary>
-/// 패밀리의 Yes/No 매개변수에서 접합 구성(<see cref="PipeJointComposition"/>)과 곡관 형식을 읽는다.
+/// 패밀리의 Yes/No 매개변수에서 접합 단부 수와 곡관 형식을 읽는다.
 /// <para><b>패밀리마다 분기하지 않는다.</b> `DH_플랜지_직관`은 `좌측_플랜지`·`우측_플랜지`로,
 /// `DH_소켓_곡관`은 `소켓곡관(A형)`↔`소켓곡관(B형)`로 형상·형식을 제어하는데, 이름만 다를 뿐 축은 둘뿐이다 —
 /// <b>단부 형상 · 형식</b>. 축별 규칙 하나로 읽으면 패밀리가 늘어도 코드가 늘지 않는다.</para>
 /// <para>소켓의 세부 종류(`KP접합`↔`이탈방지압륜`)는 접합 구성에 싣지 않는다(2026-09-15 사용자 결정,
-/// <see cref="PipeJointComposition"/>) — 개소 매개변수 넷이 관종+압륜으로 그 구분을 담는다.</para>
+/// 개소 매개변수 넷이 관종+압륜으로 그 구분을 담는다.</para>
 /// <para><b>모르면 null이다.</b> 단부 플래그도 없고 이름으로도 못 정하면 값을 지어내지 않고
-/// 호출부의 폴백에 맡긴다 — <see cref="PipeJointResolution.ParseConnection"/>과 같은 태도다.</para>
+/// 호출부의 폴백에 맡긴다.</para>
 /// </summary>
 public static class PipeJointFlagReader
 {
@@ -16,13 +16,13 @@ public static class PipeJointFlagReader
     private const string FlangeWord = "플랜지";
 
     /// <summary>
-    /// 켜져 있는 단부 플래그를 세어 구성 문자열을 만든다. 정하지 못하면 null.
+    /// 켜져 있는 단부 플래그를 센다. 정하지 못하면 null.
     /// </summary>
     /// <param name="flags">인스턴스·유형의 Yes/No 매개변수 전체(이름 → 값).</param>
     /// <param name="familyName">단부 플래그가 하나도 없는 패밀리의 2순위 근거. `DH_플랜지_플랜지소켓관`처럼
     /// 구성이 패밀리에 고정된 경우가 있다.</param>
     /// <param name="endCount">부재의 단부 수(<see cref="PipeMaterialSpecText.EndCountFor"/>). 2순위에서만 쓴다.</param>
-    public static string? Compose(IReadOnlyDictionary<string, bool> flags, string? familyName, int endCount)
+    public static (int Socket, int Flange)? Compose(IReadOnlyDictionary<string, bool> flags, string? familyName, int endCount)
     {
         var (socket, flange, hasSocketFlags, hasFlangeFlags) = CountEnds(flags);
         // 플래그가 있는데 전부 꺼진 것과, 플래그 자체가 없는 것은 다르다. 앞은 접합이 없는 상태이고
@@ -34,7 +34,7 @@ public static class PipeJointFlagReader
         else if (!hasFlangeFlags && NameHas(familyName, FlangeWord)) flange = Math.Max(0, endCount - socket);
         else if (!hasSocketFlags && NameHas(familyName, SocketWord)) socket = Math.Max(0, endCount - flange);
         if (socket == 0 && flange == 0) return null;
-        return PipeJointComposition.Encode(socket, flange);
+        return (socket, flange);
     }
 
     /// <summary>켜져 있는 형식 플래그의 괄호 라벨 — `소켓곡관(A형)` → `A형`. 없거나 둘 이상이면 null.</summary>

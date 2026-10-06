@@ -38,7 +38,6 @@ public sealed record AdaptiveBendPlacementPlan(
     double CenterlineRadiusMm = 0d,
     double LayingLengthMm = 0d,
     BendForm Form = BendForm.BType,
-    double WeightKg = 0d,
     double StaStartM = 0d,
     double StaEndM = 0d,
     string NodeStationText = "",

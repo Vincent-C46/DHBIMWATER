@@ -3,6 +3,7 @@ using System.IO;
 using DHBIMWATER.Application.DTOs.Gis;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Interfaces.Gis;
+using DHBIMWATER.Application.Interfaces.Piping;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Core.Piping;
 using DHBIMWATER.Infrastructure.Helpers;
@@ -15,8 +16,11 @@ internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
 {
     private readonly Func<Document?> _doc;
     private readonly IProjectLocationCoordinateTransformRepo _coordinateTransform;
-    public RevitReducerDirectShapeRepo(Func<Document?> doc, IProjectLocationCoordinateTransformRepo coordinateTransform)
-    { _doc = doc; _coordinateTransform = coordinateTransform; }
+    private readonly IPipeQuantityRules _rules;
+    private readonly IPipeCatalogSource _catalogSource;
+    public RevitReducerDirectShapeRepo(Func<Document?> doc, IProjectLocationCoordinateTransformRepo coordinateTransform,
+        IPipeQuantityRules rules, IPipeCatalogSource catalogSource)
+    { _doc = doc; _coordinateTransform = coordinateTransform; _rules = rules; _catalogSource = catalogSource; }
 
     public ReducerPlacementResult Place(IReadOnlyList<ReducerDirectShapePlacementPlan> plans, AlignmentPlacementOrigin origin,
         PipeInfoParameterContext? info = null, IProgress<PipeAlignmentProgress>? progress = null, CancellationToken cancellationToken = default)
@@ -24,7 +28,8 @@ internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
         if (plans.Count == 0) return new ReducerPlacementResult(0, Array.Empty<string>());
         var doc = _doc() ?? throw new DhbimwaterException(ErrorCodes.NoActiveDocument, "활성 Revit 문서가 없습니다.");
         var materialIds = new Dictionary<PipeMaterial, ElementId>();   // 관종별 재질(docs/212 § B)
-        var writer = new PipeParameterWriter();
+        var writer = new PipeParameterWriter(_rules);
+        var catalog = info is { Enabled: true } ? _catalogSource.OpenCatalog() : null;
         var count = 0;
         var failed = 0;
         var solidReducers = 0;
@@ -62,7 +67,7 @@ internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
                 var large = Math.Max(plan.Placement.UpstreamDiameterMm, plan.Placement.DownstreamDiameterMm);
                 var small = Math.Min(plan.Placement.UpstreamDiameterMm, plan.Placement.DownstreamDiameterMm);
                 shape.Name = $"이경관_{plan.Placement.PipeKind}_{large:0}x{small:0}";
-                if (info is { Enabled: true }) WriteParameters(writer, shape, plan, info);
+                if (info is { Enabled: true }) WriteParameters(writer, shape, plan, info, catalog!);
                 count++;
             }
             catch (Exception ex)
@@ -145,7 +150,8 @@ internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
         }
     }
 
-    private static void WriteParameters(PipeParameterWriter writer, DirectShape shape, ReducerDirectShapePlacementPlan plan, PipeInfoParameterContext info)
+    private void WriteParameters(PipeParameterWriter writer, DirectShape shape, ReducerDirectShapePlacementPlan plan,
+        PipeInfoParameterContext info, IPipeCatalog catalog)
     {
         var placement = plan.Placement;
         var large = Math.Max(placement.UpstreamDiameterMm, placement.DownstreamDiameterMm);
@@ -156,7 +162,7 @@ internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
         // 수량산출 규격2 — 이경관은 작은 쪽이 분기 구경이다. DirectShape는 매번 새로 만들어지므로 그대로 쓴다.
         writer.Text(shape, PipeAlignmentParameters.BranchSpec, PipeAlignmentParameters.BranchSpecText(small));
         // 현장 절단 개소. 이경관도 관 부재라 기본 1을 적어 두고 사용자가 고친다.
-        writer.Integer(shape, PipeAlignmentParameters.CutCount, PipeCountRules.PlannedReducerCutCount);
+        writer.Integer(shape, PipeAlignmentParameters.CutCount, _rules.PlannedReducerCutCount);
         writer.Text(shape, PipeAlignmentParameters.Material, PipeKindCatalog.MaterialOf(placement.PipeKind) is { } material ? PipeAlignmentParameters.Code(material) : string.Empty);
         writer.Text(shape, PipeAlignmentParameters.Grade, placement.PipeKind);
         writer.YesNo(shape, PipeAlignmentParameters.NightWork, info.IsNightWork);   // docs/141 § C-4
@@ -167,9 +173,11 @@ internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
         writer.JointSlots(shape, PipeKindCatalog.MaterialOf(placement.PipeKind), info.BendConnection,
             new[] { (Spec: $"D{large:0}", Count: 1), (Spec: $"D{small:0}", Count: 1) },
             info.UseRestraintGland);
-        writer.Integer(shape, PipeAlignmentParameters.LayingCount, PipeCountRules.PlannedReducerLayingCount);
-        // 카탈로그(핸드북 편락관) 무게. 표에 없는 조합·강관은 비운다(docs/260 § G-5).
-        if (placement.WeightKg is { } weightKg) writer.MassKg(shape, PipeAlignmentParameters.Weight, weightKg);
+        writer.Integer(shape, PipeAlignmentParameters.LayingCount, _rules.PlannedReducerLayingCount);
+        if (!placement.IsFallback && PipeKindCatalog.MaterialOf(placement.PipeKind) is { } weightMaterial
+            && _rules.ReducerWeightKg(catalog, weightMaterial, info.BendConnection, plan.Form,
+                info.JointType, info.SteelFittingClass, large, small) is { } weightKg)
+            writer.MassKg(shape, PipeAlignmentParameters.Weight, weightKg);
         // 이경관은 `DH_접합구성`을 비워 둔다(docs/199 § 2, 2026-09-21 사용자 확정). 관로 이경관은 패밀리가 아니라
         // 생성한 DirectShape 솔리드라 밸브실처럼 단부 플래그(`좌측_소켓`…)를 읽어 소켓/플랜지를 정할 근거가 없다.
         // 모르는 값을 지어내지 않는다 — 필요하면 사용자가 속성창에서 `1S1F`처럼 직접 적는다.

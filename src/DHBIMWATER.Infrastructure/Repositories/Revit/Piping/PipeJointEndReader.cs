@@ -3,11 +3,14 @@ using Autodesk.Revit.DB;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Core.Parameters;
 using DHBIMWATER.Core.Piping;
+using DHBIMWATER.Application.Interfaces.Piping;
+using PipeJointMemberInput = DHBIMWATER.Application.DTOs.Piping.PipeJointMemberInput;
+using PipeJointEndInput = DHBIMWATER.Application.DTOs.Piping.PipeJointEndInput;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
 
-/// <summary>연결 패스(<see cref="PipeJointConnectionPass"/>) 입력을 모델에서 모은다(docs/266 § 1-1). 규칙은 두지 않고 값만 읽는다.</summary>
+/// <summary>연결 패스 입력을 모델에서 모은다(docs/266 § 1-1). 규칙은 두지 않고 값만 읽는다.</summary>
 internal static class PipeJointEndReader
 {
     /// <summary>패스 입력과, 결과를 쓸 요소 표.</summary>
@@ -16,14 +19,14 @@ internal static class PipeJointEndReader
 
     private static readonly Regex DiameterNumber = new(@"\d+(\.\d+)?", RegexOptions.Compiled);
 
-    public static Snapshot Read(Document document)
+    public static Snapshot Read(Document document, IPipeQuantityRules rules)
     {
         var members = new List<PipeJointMemberInput>();
         var ends = new List<PipeJointEndInput>();
         var elements = new Dictionary<long, Element>();
 
         ReadPipingFittings(document, members, ends, elements);
-        ReadAdaptivePipes(document, members, ends, elements);
+        ReadAdaptivePipes(document, rules, members, ends, elements);
 
         return new Snapshot(members, ends, elements, IsValveRoom(document));
     }
@@ -87,7 +90,7 @@ internal static class PipeJointEndReader
     /// <summary>계획관로 가변 패밀리 — 직관 배치점 [0]·[1], 곡관 [0]·[4](P1·P5)가 단부다(docs/266 § 1-1). 커넥터가 없으니 위치 일치로만 짝을 찾는다.
     /// <para>플랜지 구성인 부재만 넣는다 — 계획관로 문서는 유입부 절단이 없어 소켓 부재는 결과가 언제나 비고,
     /// 선형 전체(수천 개)를 넣으면 한 번의 배치마다 모든 점을 다시 읽게 된다.</para></summary>
-    private static void ReadAdaptivePipes(Document document, List<PipeJointMemberInput> members, List<PipeJointEndInput> ends,
+    private static void ReadAdaptivePipes(Document document, IPipeQuantityRules rules, List<PipeJointMemberInput> members, List<PipeJointEndInput> ends,
         Dictionary<long, Element> elements)
     {
         var instances = new FilteredElementCollector(document)
@@ -99,7 +102,7 @@ internal static class PipeJointEndReader
         {
             if (!string.Equals(instance.LookupParameter(PipeAlignmentParameters.Addin)?.AsString(), PipeAlignmentParameters.AddinValue, StringComparison.Ordinal)) continue;
             var composition = instance.LookupParameter(PipeAlignmentParameters.JointComposition)?.AsString();
-            if (PipeJointComposition.Decode(composition).Flange <= 0) continue;
+            if (rules.DecodeComposition(composition).Flange <= 0) continue;
             var pointIds = AdaptiveComponentInstanceUtils.GetInstancePlacementPointElementRefIds(instance);
             int[] endPoints = pointIds.Count switch { 2 => [0, 1], 5 => [0, 4], _ => [] };
             if (endPoints.Length == 0) continue;

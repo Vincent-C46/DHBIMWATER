@@ -2,6 +2,7 @@ using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using DHBIMWATER.Application.UseCases.Gis;
+using DHBIMWATER.Application.Interfaces.Piping;
 using DHBIMWATER.Revit.DependencyInjection;
 using DHBIMWATER.UI.ViewModels.Modeling;
 using DHBIMWATER.UI.Views.Modeling;
@@ -15,6 +16,16 @@ public class PipeAlignmentModelingCommand : ModelessCommandBase
 {
     protected override Result ExecuteInternal(ExternalCommandData commandData, ref string message, ElementSet elements)
     {
+        var catalog = ServiceContainer.GetService<IPipeCatalogSource>();
+        if (!catalog.TryEnsureAvailable(out var catalogError))
+        {
+            TaskDialog.Show("관로 규격표", catalogError);
+            return Result.Cancelled;
+        }
+        if (!string.IsNullOrEmpty(catalogError)) TaskDialog.Show("관로 규격표", catalogError);
+        var migration = ServiceContainer.GetService<MigratePipeTablesUseCase>().Execute();
+        if (!string.IsNullOrEmpty(migration.Error))
+            TaskDialog.Show("관로 규격표", $"기존 규격표를 가져오지 못했습니다: {migration.Error}");
         // 생성자는 Revit API 조회를 포함하므로 반드시 Revit 메인 스레드에서 해석한다.
         var viewModel = ServiceContainer.GetService<PipeAlignmentModelingViewModel>();
         var handler = new PipeAlignmentModelingRequestHandler(ServiceContainer.GetService<ModelPipeAlignmentUseCase>())

@@ -1,6 +1,9 @@
 ﻿using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Structure;
 using DHBIMWATER.Application.Interfaces;
+using DHBIMWATER.Application.Interfaces.Piping;
+using FittingWeightInput = DHBIMWATER.Application.DTOs.Piping.FittingWeightInput;
+using FittingWeightPart = DHBIMWATER.Application.DTOs.Piping.FittingWeightPart;
 using DHBIMWATER.Core.Piping;
 using DHBIMWATER.Infrastructure.Helpers;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
@@ -71,7 +74,10 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
     private static double AxisDistanceMm(XYZ point, EdgeAxis axis)
         => UC.FtToMm((point - axis.Start).DotProduct(axis.Direction));
     private readonly Func<Document?> _document;
-    public RevitPipeSegmentCommandRepo(Func<Document?> document) => _document = document;
+    private readonly IPipeQuantityRules _rules;
+    private readonly IPipeCatalogSource _catalogSource;
+    public RevitPipeSegmentCommandRepo(Func<Document?> document, IPipeQuantityRules rules, IPipeCatalogSource catalogSource)
+    { _document = document; _rules = rules; _catalogSource = catalogSource; }
     public PipeOutputMode OutputMode => PipeOutputMode.PipeAccessorySegment;
 
     public PipeCreationResult CreateNetwork(PipeNetworkDefinition network)
@@ -356,7 +362,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         RecordMaterialParameters(document, materialParts, network, warnings);
         // 6) 연결에 의존하는 개수 — 플랜지 접합(연결 1건 = 1개소) · 유입부 소켓 절단을 문서 전체로 다시 센다(docs/266 § 1).
         // 새 부재가 기존 부재와 맞닿으면 이웃의 플랜지 귀속도 바뀌므로 이번 배치분만이 아니라 문서 전체를 본다.
-        PipeJointConnectionRecorder.Apply(document, warnings);
+        PipeJointConnectionRecorder.Apply(document, warnings, _rules);
 
         if (singlePortCount > 0)
             warnings.Add($"1포트 배관부속 {singlePortCount}개는 주관을 분할하거나 연결하지 않고 지정 위치에 배치했습니다.");
@@ -1500,7 +1506,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
     /// 부재번호는 `명칭 + 규격` 조합별 일련번호다 — 같은 조합은 같은 번호를 받아야
     /// 일람표 항목화를 끄고 수량을 집계했을 때 행 1개에 번호 1개가 대응한다.
     /// <para>모델은 이미 만들어졌고 트랜잭션도 진행 중이므로 쓰기 실패는 예외로 올리지 않고 경고로 남긴다.</para></summary>
-    private static void RecordMaterialParameters(Document document,
+    private void RecordMaterialParameters(Document document,
         IReadOnlyList<MaterialPart> parts, PipeNetworkDefinition network, List<string> warnings)
     {
         if (parts.Count == 0) return;
@@ -1517,15 +1523,17 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         {
             // 밸브류는 명칭이 곧 패밀리명이고 접합 개소도 세지 않는다. 표기를 붙이지 않는다.
             if (PipeJointCountWriter.IsAccessory(part.Instance)) { marked.Add(part); continue; }
-            var connection = PipeJointCountWriter.ResolveConnection(part.Instance, network.JointConnection);
+            var connection = PipeJointCountWriter.ResolveConnection(part.Instance, network.JointConnection, _rules);
             var endCount = PipeMaterialSpecText.EndCountFor(part.Name);
             // 인스턴스+유형 파라미터 전수 열거는 부재당 1회면 된다 — Write에도 같은 결과를 넘긴다(docs/206 § F).
             var flags = PipeJointCountWriter.ReadFlags(part.Instance);
             flagsById[part.Instance.Id] = flags;
-            var composition = PipeJointCountWriter.ResolveComposition(part.Instance, network.Material, connection, useRestraintGland: false, endCount, flags);
+            var composition = PipeJointCountWriter.ResolveComposition(part.Instance, network.Material, connection, useRestraintGland: false, endCount, _rules, flags);
             connections[part.Instance.Id] = connection;
             compositions[part.Instance.Id] = composition;
-            marked.Add(part with { Name = PipeMaterialSpecText.WithJointMark(part.Name, composition, connection, endCount) });
+            var normalized = _rules.DecodeComposition(composition);
+            marked.Add(part with { Name = PipeMaterialSpecText.WithJointMark(part.Name,
+                _rules.EncodeComposition(normalized.Socket, normalized.Flange), connection, endCount) });
         }
         parts = marked;
 
@@ -1543,8 +1551,8 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
 
         var failed = new List<string>();
         var diagnostics = new JointCountDiagnostics();
-        // 무게 조회용 규격표(docs/260 § D). UseCase가 프로젝트 저장값을 실어 보낸다.
-        var catalog = network.CatalogSettings ?? BendSettings.Default.WithSteelDefaults();
+        // 무게 조회용 규격표(docs/260 § D). 실행마다 활성 문서 규격표를 한 번 연다.
+        var catalog = _catalogSource.OpenCatalog();
         foreach (var part in parts)
         {
             SetOptionalTextParameter(part.Instance, ValvePipingParameters.Addin, ValvePipingParameters.AddinValue, failed);
@@ -1585,21 +1593,21 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             PipeJointCountWriter.Write(part.Instance, network.Material,
                 connections.TryGetValue(part.Instance.Id, out var connection) ? connection : network.JointConnection,
                 useRestraintGland: false, compositions.GetValueOrDefault(part.Instance.Id), failed, diagnostics,
-                flagsById.GetValueOrDefault(part.Instance.Id));
+                _rules, flagsById.GetValueOrDefault(part.Instance.Id));
             // 카탈로그 무게(docs/260 § B). 관 등급은 관·이형관에만 적는다 — 밸브류는 등급이 없다.
             var weightPart = WeightPartOf(part);
             if (weightPart is FittingWeightPart.Straight or FittingWeightPart.Bend or FittingWeightPart.Tee
                     or FittingWeightPart.Cross or FittingWeightPart.Wye
-                && FittingWeightResolver.ResolveGrade(network.Material, network.PipeKind, part.DiameterMm) is { } grade)
+                && _rules.ResolveGrade(network.Material, network.PipeKind, part.DiameterMm) is { } grade)
                 SetOptionalTextParameter(part.Instance, ValvePipingParameters.Grade, grade, failed);
             PipeWeightParameterWriter.Write(part.Instance,
                 // 밸브부관은 밸브류라 위 connections에 없다(TryGetValue 실패 시 connection은 기본값 Socket) — 따로 해석한다.
                 new FittingWeightInput(weightPart, network.Material,
                     connections.TryGetValue(part.Instance.Id, out var weightConnection) ? weightConnection
-                        : PipeJointCountWriter.ResolveConnection(part.Instance, network.JointConnection),
+                        : PipeJointCountWriter.ResolveConnection(part.Instance, network.JointConnection, _rules),
                     network.SteelFittingClass, network.PipeKind,
                     part.DiameterMm, part.BranchDiameterMm, part.LengthMm, part.DeflectionDeg, part.WyeAngleDeg),
-                catalog, failed);
+                catalog, _rules, failed);
         }
 
         if (diagnostics.Warning is { } jointWarning) warnings.Add(jointWarning);
@@ -1612,13 +1620,13 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
     }
 
     /// <summary>무게 규칙용 부재 종류. 밸브부관은 표시값, 밸브류는 패밀리 매개변수(<see cref="FittingWeightPart.Other"/>), 나머지는 품목명으로 가른다.</summary>
-    private static FittingWeightPart WeightPartOf(MaterialPart part) => part.ValveFitting switch
+    private FittingWeightPart WeightPartOf(MaterialPart part) => part.ValveFitting switch
     {
         ValveFittingKind.Tee => FittingWeightPart.ValveTee,
         ValveFittingKind.Bend => FittingWeightPart.ValveBend,
         _ => PipeJointCountWriter.IsAccessory(part.Instance)
             ? FittingWeightPart.Other
-            : FittingWeightResolver.PartOf(PipeMaterialSpecText.StripJointMark(part.Name))
+            : _rules.PartOf(PipeMaterialSpecText.StripJointMark(part.Name))
     };
 
     private static void SetOptionalTextParameter(FamilyInstance instance, string parameterName, string value, ICollection<string> failed)

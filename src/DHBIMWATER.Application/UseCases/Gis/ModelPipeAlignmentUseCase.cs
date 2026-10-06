@@ -28,14 +28,16 @@ public sealed class ModelPipeAlignmentUseCase
     private readonly IElementTypeQueryRepo _typeQueryRepo;
     /// <summary>플랜지 선형의 연결 기준 접합(docs/266 § 1). 테스트·옛 조립은 넘기지 않아도 된다.</summary>
     private readonly IPipeJointConnectionRepo? _jointConnectionRepo;
+    private readonly IBendSettingsRepo? _placementSettingsRepo;
 
     public ModelPipeAlignmentUseCase(ITransactionContext transaction, AlignmentSourceLoader loader, IPipeAlignmentCommandRepo alignmentRepo,
         IAlignmentStraightPlacementRepo straightRepo, IAlignmentPipePlacementRepo pipeRepo, IProjectLocationCommandRepo projectLocationRepo,
         IProjectLocationQueryRepo projectLocationQueryRepo,
         ISharedParameterRepository sharedParameterRepo, BendSettingsProvider bendSettings, IAdaptiveBendPlacementRepo adaptiveBendRepo,
         IBendDirectShapeRepo bendDirectShapeRepo, IReducerDirectShapeRepo reducerRepo, IAlignmentStraightDirectShapeRepo straightDirectShapeRepo,
-        IElementTypeQueryRepo typeQueryRepo, IPipeJointConnectionRepo? jointConnectionRepo = null)
-    { _jointConnectionRepo = jointConnectionRepo; _transaction = transaction; _loader = loader; _alignmentRepo = alignmentRepo; _straightRepo = straightRepo; _pipeRepo = pipeRepo; _projectLocationRepo = projectLocationRepo; _projectLocationQueryRepo = projectLocationQueryRepo; _sharedParameterRepo = sharedParameterRepo; _bendSettings = bendSettings; _adaptiveBendRepo = adaptiveBendRepo; _bendDirectShapeRepo = bendDirectShapeRepo; _reducerRepo = reducerRepo; _straightDirectShapeRepo = straightDirectShapeRepo; _typeQueryRepo = typeQueryRepo; }
+        IElementTypeQueryRepo typeQueryRepo, IPipeJointConnectionRepo? jointConnectionRepo = null,
+        IBendSettingsRepo? placementSettingsRepo = null)
+    { _jointConnectionRepo = jointConnectionRepo; _placementSettingsRepo = placementSettingsRepo; _transaction = transaction; _loader = loader; _alignmentRepo = alignmentRepo; _straightRepo = straightRepo; _pipeRepo = pipeRepo; _projectLocationRepo = projectLocationRepo; _projectLocationQueryRepo = projectLocationQueryRepo; _sharedParameterRepo = sharedParameterRepo; _bendSettings = bendSettings; _adaptiveBendRepo = adaptiveBendRepo; _bendDirectShapeRepo = bendDirectShapeRepo; _reducerRepo = reducerRepo; _straightDirectShapeRepo = straightDirectShapeRepo; _typeQueryRepo = typeQueryRepo; }
 
     /// <summary>최종 모델 전 Line DirectShape 선형 미리보기 커밋.</summary>
     public PipeAlignmentModelingResult Preview(PipeAlignmentModelingRequest request, IProgress<PipeAlignmentProgress>? progress = null, CancellationToken cancellationToken = default)
@@ -218,7 +220,7 @@ public sealed class ModelPipeAlignmentUseCase
                 using (PlacementProfiler.Step("08 이경관 배치 전체"))
                     reducerResult = request.OutputMode is PipeAlignmentOutputMode.DirectShape or PipeAlignmentOutputMode.Adaptive
                         && reducerPlan is not null
-                        ? PlaceReducers(reducerPlan, alignments, origin, infoContext, progress, cancellationToken)
+                        ? PlaceReducers(reducerPlan, alignments, origin, infoContext, request.ReducerForm, progress, cancellationToken)
                         : new ReducerPlacementResult(0, Array.Empty<string>());
                 // 플랜지 선형은 부재끼리 맞닿은 연결 1건 = 1개소로 센다 — 부재별로는 정할 수 없어 배치를 다 끝낸 뒤 문서 전체로 센다(docs/266 § 1).
                 IReadOnlyList<string> jointWarnings = [];
@@ -226,6 +228,8 @@ public sealed class ModelPipeAlignmentUseCase
                     using (PlacementProfiler.Step("08b 연결 기준 접합"))
                         jointWarnings = _jointConnectionRepo.RecordConnectionJoints();
                 progress?.Report(new PipeAlignmentProgress(PipeAlignmentPhase.Committing, 0, 0));
+                // 모델링에 쓴 배치 설정을 다음 실행 기본값으로 남긴다. 표 칸은 건드리지 않는다.
+                if (request.CurrentBendSettings is { } current) _placementSettingsRepo?.SavePlacementSettings(current);
                 using (PlacementProfiler.Step("09 트랜잭션 Commit")) _transaction.Commit();
                 var suppressedWarningSummary = SummarizeSuppressedWarnings(_transaction.SuppressedWarnings);
                 return new PipeAlignmentModelingResult(request.OutputMode, count, skipped,
@@ -405,7 +409,7 @@ public sealed class ModelPipeAlignmentUseCase
             return new AdaptiveBendPlacementPlan(x.NodeId, familyName, typeName, x.Points, x.DiameterMm, x.WallThicknessMm,
                 origin.GetZOffsetM(x.PipeKind, x.DiameterMm), isAdaptive ? request.BendDiameterParameterName : null, isAdaptive ? request.BendWallThicknessParameterName : null, isAdaptive ? request.BendOuterDiameterParameterName : null, x.IsAcceptable,
                 isAdaptive ? x.RotXYDeg : Array.Empty<double>(), isAdaptive ? x.RotXZDeg : Array.Empty<double>(), x.PipeKind, alignment.SourceFile, alignment.RecordNumber, outerDiameterMm,
-                x.DeflectionDeg, x.AngleDeg, x.EffectiveAllowableDeg, x.ResidualDeg, x.CenterlineRadiusMm, x.LayingLengthMm, x.Form, x.WeightKg,
+                x.DeflectionDeg, x.AngleDeg, x.EffectiveAllowableDeg, x.ResidualDeg, x.CenterlineRadiusMm, x.LayingLengthMm, x.Form,
                 profile.StationAt(nodeDistanceM - x.UpstreamLegMm / 1000d), profile.StationAt(nodeDistanceM + x.DownstreamLegMm / 1000d), nodeStationText,
                 x.HasLegOverlap);
         }).ToList();
@@ -454,7 +458,8 @@ public sealed class ModelPipeAlignmentUseCase
     private static PipeMaterial MaterialOf(string pipeKind) => PipeKindCatalog.MaterialOf(pipeKind) ?? PipeMaterial.DuctileIron;
 
     private ReducerPlacementResult PlaceReducers(ReducerTrimPlan plan, IReadOnlyList<PipeAlignment> alignments,
-        AlignmentPlacementOrigin origin, PipeInfoParameterContext info, IProgress<PipeAlignmentProgress>? progress, CancellationToken cancellationToken)
+        AlignmentPlacementOrigin origin, PipeInfoParameterContext info, ReducerForm form,
+        IProgress<PipeAlignmentProgress>? progress, CancellationToken cancellationToken)
     {
         var warnings = new HashSet<string>();
         var placements = plan.Placements.Select(x =>
@@ -471,7 +476,7 @@ public sealed class ModelPipeAlignmentUseCase
             return new ReducerDirectShapePlacementPlan(x, alignment.SourceFile, alignment.RecordNumber,
                 largeSpec?.OuterDiameterMm ?? largeFallback?.OuterDiameterMm ?? largeDiameter, smallSpec?.OuterDiameterMm ?? smallFallback?.OuterDiameterMm ?? smallDiameter,
                 largeSpec?.ThicknessMm ?? 0d, smallSpec?.ThicknessMm ?? 0d,
-                origin.GetZOffsetM(x.PipeKind, x.UpstreamDiameterMm), origin.GetZOffsetM(x.PipeKind, x.DownstreamDiameterMm));
+                origin.GetZOffsetM(x.PipeKind, x.UpstreamDiameterMm), origin.GetZOffsetM(x.PipeKind, x.DownstreamDiameterMm), form);
         }).ToList();
         var result = _reducerRepo.Place(placements, origin, info, progress, cancellationToken);
         return result with { Warnings = warnings.Concat(result.Warnings).ToList() };

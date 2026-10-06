@@ -2,11 +2,13 @@ using Autodesk.Revit.DB;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Core.Piping;
 using DHBIMWATER.Infrastructure.Helpers;
+using DHBIMWATER.Application.Interfaces.Piping;
+using PipeJointSlotValue = DHBIMWATER.Application.DTOs.Piping.PipeJointSlotValue;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
 
 /// <summary>
-/// 문서 전체 연결 패스를 돌려 플랜지 슬롯 · 유입부 절단을 기록한다(docs/266 § 1). 값은 <see cref="PipeJointConnectionPass"/>가 정하고
+/// 문서 전체 연결 패스를 돌려 플랜지 슬롯 · 유입부 절단을 기록한다(docs/266 § 1). 값은 수량 규칙이 정하고
 /// 여기서는 쓰기만 한다. 신규 배치(PipeLayout) · 재기록 · 계획관로 배치가 같은 함수를 부른다.
 /// <para>부재별 기록(<see cref="PipeJointCountWriter.Write"/>)이 소켓 슬롯을 다시 쓰면 플랜지 슬롯이 지워지므로, 그 뒤에 불러야 한다.
 /// 기존 슬롯 중 플랜지가 아닌 것(소켓)은 그대로 두고 플랜지 슬롯만 갈아 끼운다. 값이 같은 부재는 건드리지 않는다.</para>
@@ -17,20 +19,20 @@ internal static class PipeJointConnectionRecorder
     /// <summary>패스를 돌려 기록한다.</summary>
     /// <param name="warnings">짝 없는 플랜지 · 판정 불가 · 쓰기 실패 경고를 더한다.</param>
     /// <returns>값이 바뀐 부재 수.</returns>
-    public static int Apply(Document document, ICollection<string> warnings)
+    public static int Apply(Document document, ICollection<string> warnings, IPipeQuantityRules rules)
     {
-        var snapshot = PipeJointEndReader.Read(document);
+        var snapshot = PipeJointEndReader.Read(document, rules);
         if (snapshot.Members.Count == 0) return 0;
 
-        var result = PipeJointConnectionPass.Run(snapshot.Members, snapshot.Ends, snapshot.IsValveRoom);
-        var writer = new PipeParameterWriter();
+        var result = rules.RunConnectionPass(snapshot.Members, snapshot.Ends, snapshot.IsValveRoom);
+        var writer = new PipeParameterWriter(rules);
         var changed = new HashSet<long>();
 
         foreach (var (id, flangeSlots) in result.FlangeSlots)
         {
             if (!snapshot.Elements.TryGetValue(id, out var element)) continue;
             var existing = ReadSlots(element);
-            var merged = existing.Where(x => !string.Equals(x.Kind, PipeCountRules.FlangeJointKind, StringComparison.Ordinal))
+            var merged = existing.Where(x => !string.Equals(x.Kind, rules.FlangeJointKind, StringComparison.Ordinal))
                 .Concat(flangeSlots)
                 .ToList();
             if (SameSlots(existing, merged)) continue;

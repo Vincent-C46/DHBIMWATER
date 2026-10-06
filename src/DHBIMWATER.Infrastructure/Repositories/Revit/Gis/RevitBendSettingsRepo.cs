@@ -61,17 +61,38 @@ public sealed class RevitBendSettingsRepo : IBendSettingsRepo
         var storage = FindStorage(doc) ?? CreateStorage(doc);
 
         var entity = new Entity(schema);
-        entity.Set(schema.GetField(StraightPipeField), JsonSerializer.Serialize(settings.StraightPipes.Entries, JsonOptions));
-        entity.Set(schema.GetField(JointDeflectionField), JsonSerializer.Serialize(settings.JointDeflections.Entries, JsonOptions));
-        entity.Set(schema.GetField(FittingField), JsonSerializer.Serialize(settings.Fittings.Entries, JsonOptions));
+        entity.Set(schema.GetField(StraightPipeField), "[]");
+        entity.Set(schema.GetField(JointDeflectionField), "[]");
+        entity.Set(schema.GetField(FittingField), "[]");
         entity.Set(schema.GetField(ActiveJointTypeField), settings.ActiveJointType);
         // 기존 Schema에 필드를 추가할 수 없으므로 같은 문자열 필드에 함께 저장한다. 구 값("SingleJoint")도 ParseModes가 그대로 읽는다.
         // 5번째 토큰 = 강관 곡관 종류(docs/211 § C-8). 4토큰 구 저장본은 ParseModes가 F12로 읽는다.
         // 6번째 토큰 = 강관 곡관 접합 적용(docs/243 § B). 5토큰 구 저장본은 편측으로 읽는다.
-        entity.Set(schema.GetField(ApplicationModeField),
-            $"{settings.ApplicationMode}|{settings.ActiveBendConnection}|{settings.ActiveBendForm}|{settings.UseRestraintGland}|{settings.ActiveSteelFittingClass}|{settings.SteelApplicationMode}");
+        entity.Set(schema.GetField(ApplicationModeField), BuildApplicationMode(settings));
         storage.SetEntity(entity);
     }
+
+    public void SavePlacementSettings(BendSettings settings)
+    {
+        var doc = _doc() ?? throw new DhbimwaterException(ErrorCodes.NoActiveDocument, "활성 Revit 문서가 없습니다.");
+        var schema = GetOrCreateSchema();
+        var storage = FindStorage(doc) ?? CreateStorage(doc);
+        var existing = storage.GetEntity(schema);
+        var entity = new Entity(schema);
+
+        entity.Set(schema.GetField(StraightPipeField), GetExistingTable(existing, schema, StraightPipeField));
+        entity.Set(schema.GetField(JointDeflectionField), GetExistingTable(existing, schema, JointDeflectionField));
+        entity.Set(schema.GetField(FittingField), GetExistingTable(existing, schema, FittingField));
+        entity.Set(schema.GetField(ActiveJointTypeField), settings.ActiveJointType);
+        entity.Set(schema.GetField(ApplicationModeField), BuildApplicationMode(settings));
+        storage.SetEntity(entity);
+    }
+
+    private static string GetExistingTable(Entity existing, Schema schema, string fieldName)
+        => existing.IsValid() ? existing.Get<string>(schema.GetField(fieldName)) ?? "[]" : "[]";
+
+    private static string BuildApplicationMode(BendSettings settings)
+        => $"{settings.ApplicationMode}|{settings.ActiveBendConnection}|{settings.ActiveBendForm}|{settings.UseRestraintGland}|{settings.ActiveSteelFittingClass}|{settings.SteelApplicationMode}";
 
     private static List<T> Deserialize<T>(string? json)
         => string.IsNullOrWhiteSpace(json) ? new List<T>() : JsonSerializer.Deserialize<List<T>>(json, JsonOptions) ?? new List<T>();

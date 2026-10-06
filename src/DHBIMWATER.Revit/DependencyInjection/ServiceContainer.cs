@@ -3,6 +3,7 @@ using Autodesk.Revit.UI;
 using DHBIMWATER.Application.DependencyInjection;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Interfaces.Gis;
+using DHBIMWATER.Application.Interfaces.Piping;
 using DHBIMWATER.Infrastructure.DependencyInjection;
 using DHBIMWATER.Revit.Interop;
 using DHBIMWATER.Revit.Commands;
@@ -37,6 +38,8 @@ namespace DHBIMWATER.Revit.DependencyInjection
             services.AddApplicationServices();          // Application 서비스
             services.AddInfrastructureServices();       // Infrastructure 서비스
             services.AddSingleton<IAlignmentSnapshotStore, AlignmentSnapshotStore>();
+            services.AddSingleton<IPipeCatalogSource, PipeCatalogAdapter>();
+            services.AddSingleton<IPipeQuantityRules, PipeQuantityRulesAdapter>();
             services.AddTransient<ProjectLocationAdapter>();
             services.AddTransient<IProjectLocationCommandRepo>(provider => provider.GetRequiredService<ProjectLocationAdapter>());
             services.AddTransient<IProjectLocationQueryRepo>(provider => provider.GetRequiredService<ProjectLocationAdapter>());

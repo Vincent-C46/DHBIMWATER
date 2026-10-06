@@ -54,7 +54,6 @@ public class SteelBendRuleTests
         Assert.Equal(5690, result.CenterlineRadiusMm);
         Assert.Equal(1000, result.LayingLengthMm);
         Assert.Equal(8.0, result.WallThicknessMm);
-        Assert.Equal(398, result.WeightKg);
     }
 
     [Theory]
@@ -93,9 +92,7 @@ public class SteelBendRuleTests
         Assert.Equal(weld.CenterlineRadiusMm, flanged.CenterlineRadiusMm);
         Assert.Equal(weld.LayingLengthMm, flanged.LayingLengthMm);
         Assert.Equal(4.2, weld.WallThicknessMm);
-        Assert.Equal(6.24, weld.WeightKg);
         Assert.Equal(4.5, flanged.WallThicknessMm);
-        Assert.Equal(6.66, flanged.WeightKg);
         Assert.Equal("용접", weld.JointType);
         Assert.Equal("플랜지", flanged.JointType);
         Assert.Equal(0d, weld.ExtraLegLengthMm);

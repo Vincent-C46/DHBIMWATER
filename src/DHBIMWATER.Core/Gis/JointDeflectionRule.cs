@@ -74,19 +74,11 @@ public sealed class JointDeflectionRule : IBendingRule
         // 플랜지도 형식 선택을 그대로 따른다(2026-09-04 확정).
         var form = settings.ActiveBendForm;
         var extraLeg = form == BendForm.BType ? 200d : 0d;
-        var weightKg = jointType == JointTypeCatalog.Tyton ? fitting.WeightTytonKg : fitting.WeightKpMechanicalKg;
-        if (settings.ActiveBendConnection == BendConnection.Socket
-            && BendFittingCatalog.TryGetHandbookWeight(node.MaxDiameterMm, selectedAngle, form, out var kpKg, out var tytonKg))
-            weightKg = jointType == JointTypeCatalog.Tyton ? tytonKg : kpKg;
-        // 플랜지곡관은 조인트 무관 한 개 무게다. 저장본 플랜지 행은 무게가 0이라 형식(A/B)에 맞춰 핸드북에서 찾는다(docs/260 § A).
-        if (settings.ActiveBendConnection == BendConnection.Flanged)
-            weightKg = BendFittingCatalog.TryGetFlangedHandbookWeight(node.MaxDiameterMm, selectedAngle, form, out var flangedKg)
-                ? flangedKg : fitting.WeightKg;
         return new BendResolution(
             node.NodeId, kind, actual, selectedAngle, singleAllowable, residual,
             fitting.LayingLengthMm, fitting.CenterlineRadiusMm, tangent, true,
             jointType, settings.ApplicationMode, effective, isAcceptable,
-            extraLeg, fitting.WallThicknessMm, form, weightKg);
+            extraLeg, fitting.WallThicknessMm, form);
     }
 
     private static BendResolution Empty(NodeClassification node, BendResolutionKind kind, double actual, double standardAngle,

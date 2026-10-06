@@ -27,6 +27,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<AnalyzePipeNetworkUseCase>();
         services.AddTransient<BendSettingsProvider>();
         services.AddTransient<SaveBendSettingsUseCase>();
+        services.AddTransient<MigratePipeTablesUseCase>();
         services.AddTransient<CreatePipeMaterialScheduleUseCase>();
         services.AddTransient<CreatePipeMaterialDraftingUseCase>();
         services.AddTransient<BackfillPipeMaterialParametersUseCase>();

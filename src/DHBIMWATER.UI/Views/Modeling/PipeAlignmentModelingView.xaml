@@ -317,6 +317,11 @@
                             <!-- 주철관 소켓 전용 항목. 관종이 강관이면 접는다(docs/211 § G-4·§ N). -->
                             <StackPanel Visibility="{Binding IsDuctileIronSelected, Converter={StaticResource BoolToVisibility}}">
                             <!-- 이탈방지압륜 체크박스는 사용자 지시로 UI에서 제거(2026-09-22). 설정값 UseRestraintGland는 저장 파일·기록 경로에 그대로 남는다. -->
+                            <TextBlock Text="적용 Joint Type" Margin="0,10,0,3"/>
+                            <ComboBox Style="{StaticResource PrimaryComboBoxStyle}"
+                                      ItemsSource="{Binding JointTypeOptions, Mode=OneWay}"
+                                      SelectedItem="{Binding ActiveJointType, Mode=TwoWay}"
+                                      ToolTip="주철관 소켓 허용굴곡각·직관 소켓 무게 기준. [모델링 실행] 시 프로젝트에 저장"/>
                             <TextBlock Text="곡관 형식" Margin="0,10,0,3"/>
                             <ComboBox Style="{StaticResource PrimaryComboBoxStyle}"
                                       ItemsSource="{Binding BendFormOptions, Mode=OneWay}"

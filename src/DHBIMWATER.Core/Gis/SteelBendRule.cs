@@ -84,7 +84,7 @@ public sealed class SteelBendRule : IBendingRule
             node.NodeId, kind, actual, selectedAngle, tolerance, residual,
             fitting.LayingLengthMm, fitting.CenterlineRadiusMm, tangent, true,
             jointType, JointApplicationMode.SingleJoint, tolerance, isAcceptable,
-            0d, fitting.WallThicknessMm, BendForm.BType, fitting.WeightKg);
+            0d, fitting.WallThicknessMm, BendForm.BType);
     }
 
     private static BendResolution Empty(NodeClassification node, BendResolutionKind kind, double actual, double standardAngle,

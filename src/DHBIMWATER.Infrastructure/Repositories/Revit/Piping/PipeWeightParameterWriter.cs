@@ -1,6 +1,9 @@
 using Autodesk.Revit.DB;
 using DHBIMWATER.Core.Piping;
 using DHBIMWATER.Infrastructure.Converters;
+using DHBIMWATER.Application.Interfaces.Piping;
+using FittingWeightInput = DHBIMWATER.Application.DTOs.Piping.FittingWeightInput;
+using FittingWeightPart = DHBIMWATER.Application.DTOs.Piping.FittingWeightPart;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
 
@@ -13,8 +16,9 @@ internal static class PipeWeightParameterWriter
     /// <summary>밸브·이음관 패밀리에서 무게를 읽을 매개변수 이름(우선순위 순). 사용자 결정 2026-10-02.</summary>
     private static readonly string[] FamilyWeightParameterNames = { "무게", "중량" };
 
-    /// <summary>카탈로그 부재는 <see cref="FittingWeightResolver"/>로, 밸브류(<see cref="FittingWeightPart.Other"/>)는 패밀리 매개변수에서 무게를 구해 적는다.</summary>
-    public static void Write(FamilyInstance instance, FittingWeightInput input, BendSettings catalog, ICollection<string> failed)
+    /// <summary>카탈로그 부재는 수량 규칙으로, 밸브류는 패밀리 매개변수에서 무게를 구해 적는다.</summary>
+    public static void Write(FamilyInstance instance, FittingWeightInput input, IPipeCatalog catalog,
+        IPipeQuantityRules rules, ICollection<string> failed)
     {
         if (input.Part == FittingWeightPart.Other)
         {
@@ -22,7 +26,7 @@ internal static class PipeWeightParameterWriter
             return;
         }
 
-        var weight = FittingWeightResolver.Resolve(input, catalog);
+        var weight = rules.ResolveFittingWeight(catalog, input);
         if (weight.WeightKg is { } kg) SetMass(instance, ValvePipingParameters.Weight, kg, failed);
         if (weight.UnitWeightKgPerM is { } unit) SetMassPerLength(instance, ValvePipingParameters.UnitWeight, unit, failed);
     }

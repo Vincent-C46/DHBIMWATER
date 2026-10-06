@@ -10,12 +10,11 @@ public enum ReducerForm { AType, BType, CType }
 /// <param name="BodyLengthMm">이경관 전체 길이(대경 원통 + 테이퍼 + 소경 원통). 트림 계산은 이 값만 본다.</param>
 /// <param name="LargeStraightMm">대경 쪽 원통 길이 — 주철 C형 200, 강관 C. 없으면 0.</param>
 /// <param name="SmallStraightMm">소경 쪽 원통 길이 — 주철 B형 200, 강관 E. 없으면 0.</param>
-/// <param name="WeightKg">카탈로그 무게. 표에 없으면 null.</param>
 /// <param name="IsFallback">카탈로그에 조합이 없어 사용자 입력 대체 길이를 쓴 경우(<see cref="CatalogReducerSpecSource"/>만 켠다).
 /// 고정 길이 소스(<see cref="FixedReducerSpecSource"/>)는 대체가 아니므로 false다.</param>
 public sealed record ReducerSpec(double BodyLengthMm, ReducerAlignment Alignment,
     double LargeStraightMm = 0d, double SmallStraightMm = 0d,
-    double? WeightKg = null, bool IsFallback = false)
+    bool IsFallback = false)
 {
     /// <summary>원뿔(테이퍼) 구간 길이.</summary>
     public double TaperLengthMm => BodyLengthMm - LargeStraightMm - SmallStraightMm;
@@ -38,12 +37,12 @@ public sealed class FixedReducerSpecSource : IReducerSpecSource
         => _bodyLengthMm > 0d ? new ReducerSpec(_bodyLengthMm, _alignment) : null;
 }
 
-/// <summary>핸드북 편락관 카탈로그로 이경관 길이·무게를 정한다(docs/260 § G, 2026-10-02 사용자 결정).
+/// <summary>핸드북 편락관 카탈로그로 이경관 길이를 정한다(docs/260 § G, 2026-10-02 사용자 결정).
 /// <list type="bullet">
-/// <item>주철 소켓: 소켓 편락관 표의 L. B·C형은 L + 200(직관부). 무게는 KP면 형식 열, 타이튼이면 B형만(A·C형은 null).</item>
-/// <item>주철 플랜지: 플랜지 편락관 표의 L·무게(형식 무시).</item>
-/// <item>강관: 편락관 표(docs/261)의 C + W + E = L 형상, 무게는 강관 이형관 종류(F12/F15/F20) 열. 형식 선택은 무관하다.</item>
-/// <item>표에 없는 대·소경 조합: 사용자 입력 대체 길이, 무게 null, <see cref="ReducerSpec.IsFallback"/> true.</item>
+/// <item>주철 소켓: 소켓 편락관 표의 L. B·C형은 L + 200(직관부).</item>
+/// <item>주철 플랜지: 플랜지 편락관 표의 L(형식 무시).</item>
+/// <item>강관: 편락관 표(docs/261)의 C + W + E = L 형상. 형식 선택은 무관하다.</item>
+/// <item>표에 없는 대·소경 조합: 사용자 입력 대체 길이, <see cref="ReducerSpec.IsFallback"/> true.</item>
 /// </list>
 /// 편심 이경관도 동심 표를 쓴다 — 핸드북에 편심 표가 없다(사용자 결정).</summary>
 public sealed class CatalogReducerSpecSource : IReducerSpecSource
@@ -66,37 +65,23 @@ public sealed class CatalogReducerSpecSource : IReducerSpecSource
     {
         var material = PipeKindCatalog.MaterialOf(pipeKind);
         if (material == PipeMaterial.Steel && SteelFittingSpecTable.FindReducer(largeDiameterMm, smallDiameterMm) is { } steel)
-            return new ReducerSpec(steel.L, _alignment, steel.C, steel.SmallStraightMm,
-                Positive(steel.WeightFor(ValveBypassSpecTable.NormalizeSteelClass(_steelClass))));
+            return new ReducerSpec(steel.L, _alignment, steel.C, steel.SmallStraightMm);
         if (material == PipeMaterial.DuctileIron)
         {
             if (_connection == BendConnection.Flanged)
             {
                 if (DuctileFittingSpecTable.FindFlangedTaper(largeDiameterMm, smallDiameterMm) is { } flanged)
-                    return new ReducerSpec(flanged.L, _alignment, WeightKg: Positive(flanged.Weight));
+                    return new ReducerSpec(flanged.L, _alignment);
             }
             else if (DuctileFittingSpecTable.FindSocketTaper(largeDiameterMm, smallDiameterMm) is { } socket)
             {
                 var straight = DuctileFittingSpecTable.TaperStraightLengthMm;
                 var large = _form == ReducerForm.CType ? straight : 0d;
                 var small = _form == ReducerForm.BType ? straight : 0d;
-                return new ReducerSpec(socket.L + large + small, _alignment, large, small, SocketWeight(socket));
+                return new ReducerSpec(socket.L + large + small, _alignment, large, small);
             }
         }
         return _fallbackLengthMm > 0d ? new ReducerSpec(_fallbackLengthMm, _alignment, IsFallback: true) : null;
     }
 
-    private double? SocketWeight(DuctileSocketTaperSpec row)
-    {
-        if (string.Equals(_jointType, JointTypeCatalog.Tyton, StringComparison.OrdinalIgnoreCase))
-            return _form == ReducerForm.BType ? Positive(row.TytonB) : null;
-        return Positive(_form switch
-        {
-            ReducerForm.AType => row.KpA,
-            ReducerForm.CType => row.KpC,
-            _ => row.KpB
-        });
-    }
-
-    private static double? Positive(double value) => value > 0d ? value : null;
 }

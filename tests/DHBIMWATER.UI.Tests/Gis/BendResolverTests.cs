@@ -65,10 +65,10 @@ public class BendResolverTests
     }
 
     [Theory]
-    [InlineData(BendForm.AType, JointApplicationMode.BothJoints, 0d, 12.7d)]
-    [InlineData(BendForm.BType, JointApplicationMode.SingleJoint, 200d, 11.4d)]
+    [InlineData(BendForm.AType, JointApplicationMode.BothJoints, 0d)]
+    [InlineData(BendForm.BType, JointApplicationMode.SingleJoint, 200d)]
     public void Socket_form_controls_application_mode_spigot_and_handbook_weight(
-        BendForm form, JointApplicationMode expectedMode, double expectedExtraLegMm, double expectedWeightKg)
+        BendForm form, JointApplicationMode expectedMode, double expectedExtraLegMm)
     {
         var fitting = new BendFittingEntry(100, 45, BendForm.BType, 90, 100, WeightKpMechanicalKg: 999d);
         var settings = Settings(1, form: form, fittings: fitting);
@@ -77,7 +77,6 @@ public class BendResolverTests
 
         Assert.Equal(expectedMode, settings.ApplicationMode);
         Assert.Equal(expectedExtraLegMm, result.ExtraLegLengthMm);
-        Assert.Equal(expectedWeightKg, result.WeightKg);
         Assert.Equal(form, result.Form);
     }
 

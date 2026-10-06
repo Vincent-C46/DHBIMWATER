@@ -11,4 +11,14 @@ public sealed class MockBendSettingsRepo : IBendSettingsRepo
     public BendSettings? Load() => _stored;
 
     public void Save(BendSettings settings) => _stored = settings;
+
+    public void SavePlacementSettings(BendSettings settings)
+        => _stored = _stored is { } stored
+            ? settings with
+            {
+                StraightPipes = stored.StraightPipes,
+                JointDeflections = stored.JointDeflections,
+                Fittings = stored.Fittings
+            }
+            : settings;
 }

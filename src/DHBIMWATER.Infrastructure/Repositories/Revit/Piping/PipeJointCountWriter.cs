@@ -2,6 +2,8 @@ using Autodesk.Revit.DB;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Core.Piping;
 using DHBIMWATER.Infrastructure.Helpers;
+using DHBIMWATER.Application.Interfaces.Piping;
+using RuleDtos = DHBIMWATER.Application.DTOs.Piping;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
 
@@ -36,7 +38,7 @@ internal sealed class JointCountDiagnostics
 /// <para><b>플랜지는 슬롯에 적지 않는다(docs/262·263, 2026-10-02)</b> — 플랜지 접합은 맞붙은 두 부재가 플랜지를 하나씩 내어
 /// 1개소를 이루므로, 부재마다 단부 수를 적으면 2배가 된다(제수밸브실 D600 원장 3 / 종전 6). 플랜지 접합 수량은 연결 패스가
 /// 모델 연결(플랜지 ↔ 플랜지 1건 = 1개소)로 세어 귀속 부재 슬롯에 적는다(docs/266 § 1). 소켓은 종전대로 부재당 단부 수다. `DH_접합구성`(`1S2F`)은 그대로 기록한다.</para>
-/// <para><b>docs/266 개정(2026-10-02)</b> — 개수 규칙은 Core <see cref="PipeCountRules"/> 한곳에 두고 여기서는 결과를 쓰기만 한다.
+/// <para><b>docs/266 개정(2026-10-02)</b> — 개수 규칙의 결과를 여기서 쓴다.
 /// 플랜지 개소는 DHBIMWATER 연결 패스(<see cref="PipeJointConnectionRecorder"/>)가 연결을 세어 귀속 부재 슬롯에 적는다
 /// (수량산출 애드인은 읽기만 한다). 부설은 직관 0 · 나머지 1, 절단은 평단 단관 1 + 유입부 소켓(연결 패스) — 옛 「관·이형관 절단 1」 기본값은 없앴다.
 /// 밸브부관은 개수에서 이형관으로 본다(R-7) — 밸브 판정은 카테고리만 본다(<see cref="IsValveForCount"/>).</para>
@@ -59,18 +61,18 @@ internal static class PipeJointCountWriter
     /// <para><b>부재명은 인스턴스에서 직접 읽는다</b> — 호출부가 방금 만든 이름이 아니라 <b>이미 찍혀 있던</b>
     /// <c>DH_부재명칭</c>이어야 한다. 재기록 경로는 이름을 커넥터 실측으로 새로 만들기 때문에, 호출부의 이름을
     /// 받으면 사용자가 손으로 적어 둔 `1S1F 단관` 표기를 영영 못 본다(docs/170 § C-⚠2).</para></summary>
-    public static BendConnection ResolveConnection(FamilyInstance instance, BendConnection fallback)
-        => PipeJointResolution.Resolve(
-            ReadJointParameter(instance),
+    public static BendConnection ResolveConnection(FamilyInstance instance, BendConnection fallback, IPipeQuantityRules rules)
+        => rules.ResolveConnection(
+            ReadJointParameter(instance, rules),
             instance.LookupParameter(ValvePipingParameters.ItemName)?.AsString(),
             fallback);
 
-    /// <summary><see cref="PipeJointResolution.ParameterNames"/>를 순회해 처음 값이 잡히는 것을 쓴다.
+    /// <summary>접합 파라미터 이름 목록을 순회해 처음 값이 잡히는 것을 쓴다.
     /// 인스턴스를 먼저 보고 없으면 유형에서 찾는다 — 접합 형식은 유형 파라미터인 패밀리가 많다(docs/170 § B-2).
     /// <para>목록이 비어 있으면(조사 전) 항상 null이고, 그러면 해석이 부재명 표기·폴백으로 내려간다.</para></summary>
-    private static string? ReadJointParameter(FamilyInstance instance)
+    private static string? ReadJointParameter(FamilyInstance instance, IPipeQuantityRules rules)
     {
-        foreach (var name in PipeJointResolution.ParameterNames)
+        foreach (var name in rules.ConnectionParameterNames)
         {
             var value = instance.LookupParameter(name)?.AsString();
             if (!string.IsNullOrWhiteSpace(value)) return value;
@@ -88,7 +90,7 @@ internal static class PipeJointCountWriter
             .Any(slot => string.Equals(instance.LookupParameter(ValvePipingParameters.JointSlotKind(slot))?.AsString(),
                 "이탈방지압륜접합", StringComparison.Ordinal));
 
-    /// <summary>한 부재의 개소 수를 기록한다. 값은 <see cref="PipeCountRules.ForValveRoomMember"/>가 정한다(docs/266 § 2-1).
+    /// <summary>한 부재의 개소 수를 기록한다. 값은 수량 규칙이 정한다(docs/266 § 2-1).
     /// <para>밸브류는 `DH_접합및부설수 = 1`만 쓴다. 그 밖은 부설·절단·소켓 슬롯을 쓴다 — 슬롯을 다시 쓰면 플랜지 슬롯도 지워지므로
     /// 호출부는 이 뒤에 연결 패스(<see cref="PipeJointConnectionRecorder.Apply"/>)를 돌려야 플랜지가 다시 붙는다.</para>
     /// <para>절단은 부재 자체 몫(평단 단관)만 쓴다. 밸브실 문서의 유입부 몫은 연결 패스가 더해 다시 쓴다.</para></summary>
@@ -96,12 +98,12 @@ internal static class PipeJointCountWriter
     /// 이미 구했으므로 여기서 다시 구하지 않는다 — 두 번 구하면 부재명과 접합구성이 어긋날 수 있다.</param>
     public static void Write(FamilyInstance instance, PipeMaterial? material, BendConnection connection,
         bool useRestraintGland, string? composition, ICollection<string> failed, JointCountDiagnostics diagnostics,
-        IReadOnlyDictionary<string, bool>? flags = null)
+        IPipeQuantityRules rules, IReadOnlyDictionary<string, bool>? flags = null)
     {
         var part = instance.LookupParameter(ValvePipingParameters.Part)?.AsString()
             ?? instance.LookupParameter(ValvePipingParameters.ItemName)?.AsString()
             ?? string.Empty;
-        var counts = PipeCountRules.ForValveRoomMember(new PipeMemberCountInput(
+        var counts = rules.CountValveRoomMember(new RuleDtos.PipeMemberCountInput(
             part, composition, material is { } m ? PipeAlignmentParameters.Code(m) : null,
             IsValveForCount(instance), connection == BendConnection.Flanged, useRestraintGland));
 
@@ -114,7 +116,7 @@ internal static class PipeJointCountWriter
         if (counts.CutCount is { } cut) SetInteger(instance, ValvePipingParameters.CutCount, cut, failed);
         if (counts.MaterialAssumedSteel) diagnostics.CountMaterialAssumedSteel();
 
-        var writer = new PipeParameterWriter();
+        var writer = new PipeParameterWriter(rules);
         writer.JointSlots(instance, counts.SocketSlots.Select(x => (x.Kind, x.Spec, x.Count)).ToList());
         foreach (var name in writer.Missing) failed.Add(name);
 
@@ -130,15 +132,16 @@ internal static class PipeJointCountWriter
     /// <param name="endCount">부재의 단부 수(<see cref="PipeMaterialSpecText.EndCountFor"/>). 접두를 떼기 전의 기본명으로 구한다.</param>
     /// <param name="flags">호출부가 <see cref="ReadFlags"/>로 미리 읽은 플래그. 없으면 여기서 읽는다(docs/206 § F — 부재당 2회 열거를 1회로).</param>
     public static string? ResolveComposition(FamilyInstance instance, PipeMaterial? material, BendConnection connection,
-        bool useRestraintGland, int endCount, IReadOnlyDictionary<string, bool>? flags = null)
+        bool useRestraintGland, int endCount, IPipeQuantityRules rules, IReadOnlyDictionary<string, bool>? flags = null)
     {
         if (IsAccessory(instance)) return null;
         var existing = instance.LookupParameter(ValvePipingParameters.JointComposition)?.AsString();
         if (!string.IsNullOrWhiteSpace(existing)) return existing;
-        return PipeJointFlagReader.Compose(flags ?? ReadFlags(instance), instance.Symbol?.Family?.Name, endCount)
-               ?? (connection == BendConnection.Flanged
-                   ? PipeJointComposition.Encode(0, endCount)
-                   : PipeJointComposition.Encode(endCount, 0));
+        if (PipeJointFlagReader.Compose(flags ?? ReadFlags(instance), instance.Symbol?.Family?.Name, endCount) is { } ends)
+            return rules.EncodeComposition(ends.Socket, ends.Flange);
+        return connection == BendConnection.Flanged
+                   ? rules.EncodeComposition(0, endCount)
+                   : rules.EncodeComposition(endCount, 0);
     }
 
     /// <summary>접합 구성(<c>DH_접합구성</c>, `2S1F` 표기)을 채운다. 곡관 형식(<c>DH_곡관형식</c>) 기록은 docs/214에서 폐지했다.

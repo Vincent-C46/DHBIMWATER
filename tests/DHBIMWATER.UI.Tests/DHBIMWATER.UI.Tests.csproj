@@ -24,4 +24,13 @@
     <ProjectReference Include="..\..\src\DHBIMWATER.Infrastructure\DHBIMWATER.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Reference Include="DHBoost.Revit">
+      <HintPath>..\..\src\DHBIMWATER.Revit\libs\DHBoost\DHBoost.Revit.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Compile Include="..\TestPipeCatalog.cs" Link="TestPipeCatalog.cs" />
+    <Compile Include="..\..\src\DHBIMWATER.Revit\Interop\PipeCatalogDataMapper.cs" Link="PipeCatalogDataMapper.cs" />
+  </ItemGroup>
+
 </Project>

@@ -1,5 +1,6 @@
 using Autodesk.Revit.DB;
 using DHBIMWATER.Application.Interfaces;
+using DHBIMWATER.Application.Interfaces.Piping;
 using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
@@ -8,14 +9,16 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
 internal sealed class RevitPipeJointConnectionRepo : IPipeJointConnectionRepo
 {
     private readonly Func<Document?> _document;
+    private readonly IPipeQuantityRules _rules;
 
-    public RevitPipeJointConnectionRepo(Func<Document?> document) => _document = document;
+    public RevitPipeJointConnectionRepo(Func<Document?> document, IPipeQuantityRules rules)
+    { _document = document; _rules = rules; }
 
     public IReadOnlyList<string> RecordConnectionJoints()
     {
         var document = _document() ?? throw new DhbimwaterException(ErrorCodes.NoActiveDocument, "활성 문서가 없습니다.");
         var warnings = new List<string>();
-        PipeJointConnectionRecorder.Apply(document, warnings);
+        PipeJointConnectionRecorder.Apply(document, warnings, _rules);
         return warnings;
     }
 }

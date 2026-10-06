@@ -4,6 +4,8 @@ using Autodesk.Revit.UI;
 using DHBIMWATER.Revit.DependencyInjection;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.UseCases.AutoGenerator;
+using DHBIMWATER.Application.UseCases.Gis;
+using DHBIMWATER.Application.Interfaces.Piping;
 using DHBIMWATER.UI.Views.Modeling;
 using System.Windows.Interop;
 using DHBIMWATER.Shared.Errors;
@@ -15,6 +17,16 @@ public class PipeLayoutCommand : CommandBase
 {
     protected override Result ExecuteInternal(ExternalCommandData commandData, ref string message, ElementSet elements)
     {
+        var catalog = ServiceContainer.GetService<IPipeCatalogSource>();
+        if (!catalog.TryEnsureAvailable(out var catalogError))
+        {
+            TaskDialog.Show("관로 규격표", catalogError);
+            return Result.Cancelled;
+        }
+        if (!string.IsNullOrEmpty(catalogError)) TaskDialog.Show("관로 규격표", catalogError);
+        var migration = ServiceContainer.GetService<MigratePipeTablesUseCase>().Execute();
+        if (!string.IsNullOrEmpty(migration.Error))
+            TaskDialog.Show("관로 규격표", $"기존 규격표를 가져오지 못했습니다: {migration.Error}");
         var view = ServiceContainer.GetService<PipeLayoutView>();
         var useCase = ServiceContainer.GetService<CreateValvePipingUseCase>();
         var outlinePick = ServiceContainer.GetService<IValveRoomOutlinePickRepo>();

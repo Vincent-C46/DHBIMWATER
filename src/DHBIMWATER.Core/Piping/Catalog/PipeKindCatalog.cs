@@ -26,18 +26,12 @@ public static class PipeKindCatalog
     public const string Steel400A = "STWW 400 A";
     public const string Steel400B = "STWW 400 B";
 
-    public static IReadOnlyList<string> DuctileIronAll { get; } = new[]
-    {
-        Water1, Water2, Water3, Water4, Sewer1, Sewer2, Sewer3
-    };
+    public static IReadOnlyList<string> DuctileIronAll => PipeCatalog.Current.DuctileIronGrades;
 
-    public static IReadOnlyList<string> SteelAll { get; } = new[]
-    {
-        Steel290, Steel370, Steel400A, Steel400B
-    };
+    public static IReadOnlyList<string> SteelAll => PipeCatalog.Current.SteelGrades;
 
     /// <summary>등급 전체(주철관 → 강관 순). UI 콤보가 그대로 쓴다.</summary>
-    public static IReadOnlyList<string> All { get; } = DuctileIronAll.Concat(SteelAll).ToList();
+    public static IReadOnlyList<string> All => PipeCatalog.Current.AllGrades;
 
     /// <summary>해당 관종에서 고를 수 있는 등급. 규격 자료가 없는 관종(PE·PVC)은 빈 목록이다.</summary>
     public static IReadOnlyList<string> AllFor(PipeMaterial material) => material switch

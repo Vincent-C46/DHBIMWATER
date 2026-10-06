@@ -29,8 +29,7 @@ public sealed record BendResolution(
     bool IsAcceptable,
     double ExtraLegLengthMm = 0d,
     double WallThicknessMm = 0d,
-    BendForm Form = BendForm.BType,
-    double WeightKg = 0d)
+    BendForm Form = BendForm.BType)
 {
     public double LongLegLengthMm => LayingLengthMm > 0d ? LayingLengthMm + ExtraLegLengthMm : 0d;
     public bool IsSizeConsistent => !HasFittingSize || LayingLengthMm + 1e-9 >= TangentLengthMm;

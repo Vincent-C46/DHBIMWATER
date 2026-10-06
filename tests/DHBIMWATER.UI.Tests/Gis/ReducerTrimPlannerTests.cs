@@ -118,7 +118,6 @@ public class ReducerTrimPlannerTests
         Assert.Equal(450d, placement.BodyLengthMm);
         Assert.Equal(200d, placement.SmallStraightMm);
         Assert.Equal(0d, placement.LargeStraightMm);
-        Assert.Equal(38.0d, placement.WeightKg);
         Assert.Empty(plan.Warnings);
     }
 
@@ -131,7 +130,6 @@ public class ReducerTrimPlannerTests
 
         var placement = Assert.Single(plan.Placements);
         Assert.Equal(250d, placement.BodyLengthMm);
-        Assert.Null(placement.WeightKg);
         Assert.Contains("카탈로그에 없는 대·소경 조합 1곳", Assert.Single(plan.Warnings));
     }
 

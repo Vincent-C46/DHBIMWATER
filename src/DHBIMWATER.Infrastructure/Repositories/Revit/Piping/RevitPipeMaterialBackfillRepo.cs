@@ -1,6 +1,9 @@
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using DHBIMWATER.Application.Interfaces;
+using DHBIMWATER.Application.Interfaces.Piping;
+using FittingWeightInput = DHBIMWATER.Application.DTOs.Piping.FittingWeightInput;
+using FittingWeightPart = DHBIMWATER.Application.DTOs.Piping.FittingWeightPart;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Core.Piping;
 using DHBIMWATER.Infrastructure.Helpers;
@@ -31,11 +34,16 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
 
     private readonly Func<Document?> _document;
     private readonly Func<UIDocument?> _uiDocument;
+    private readonly IPipeQuantityRules _rules;
+    private readonly IPipeCatalogSource _catalogSource;
 
-    public RevitPipeMaterialBackfillRepo(Func<Document?> document, Func<UIDocument?> uiDocument)
+    public RevitPipeMaterialBackfillRepo(Func<Document?> document, Func<UIDocument?> uiDocument,
+        IPipeQuantityRules rules, IPipeCatalogSource catalogSource)
     {
         _document = document;
         _uiDocument = uiDocument;
+        _rules = rules;
+        _catalogSource = catalogSource;
     }
 
     public PipeMaterialBackfillScan ScanCandidates()
@@ -49,6 +57,7 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
     public PipeMaterialBackfillResult Backfill(BendSettings catalog)
     {
         var document = Document();
+        var catalogHandle = _catalogSource.OpenCatalog();
         // UseCase가 방금 넣은 바인딩이 '기존' 요소에 반영된 뒤에 LookupParameter를 불러야 한다.
         // 이 한 줄이 빠지면 오래된 문서에서 전부 실패한다(docs/136 § 3-6.2).
         document.Regenerate();
@@ -81,15 +90,17 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
                 part.Instance.LookupParameter(ValvePipingParameters.Material)?.AsString());
             // 밸브류는 명칭이 곧 패밀리명이고 접합 개소도 세지 않는다. 표기를 붙이지 않는다.
             if (PipeJointCountWriter.IsAccessory(part.Instance)) { marked.Add(part); continue; }
-            var connection = PipeJointCountWriter.ResolveConnection(part.Instance, BendConnection.Flanged);
+            var connection = PipeJointCountWriter.ResolveConnection(part.Instance, BendConnection.Flanged, _rules);
             var endCount = PipeMaterialSpecText.EndCountFor(part.Name);
             var flags = PipeJointCountWriter.ReadFlags(part.Instance);
             flagsById[part.Instance.Id] = flags;
             var composition = PipeJointCountWriter.ResolveComposition(part.Instance, materials[part.Instance.Id], connection,
-                PipeJointCountWriter.ReadRestraintGland(part.Instance), endCount, flags);
+                PipeJointCountWriter.ReadRestraintGland(part.Instance), endCount, _rules, flags);
             connections[part.Instance.Id] = connection;
             compositions[part.Instance.Id] = composition;
-            marked.Add(part with { Name = PipeMaterialSpecText.WithJointMark(part.Name, composition, connection, endCount) });
+            var normalized = _rules.DecodeComposition(composition);
+            marked.Add(part with { Name = PipeMaterialSpecText.WithJointMark(part.Name,
+                _rules.EncodeComposition(normalized.Socket, normalized.Flange), connection, endCount) });
         }
         restored = marked;
 
@@ -130,20 +141,20 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             PipeJointCountWriter.Write(part.Instance, material,
                 connections.TryGetValue(part.Instance.Id, out var connection) ? connection : BendConnection.Flanged,
                 PipeJointCountWriter.ReadRestraintGland(part.Instance), compositions.GetValueOrDefault(part.Instance.Id), failed, diagnostics,
-                flagsById.GetValueOrDefault(part.Instance.Id));
+                _rules, flagsById.GetValueOrDefault(part.Instance.Id));
             // 카탈로그 무게(docs/260 § E) — 신규 배치와 같은 규칙. 관 등급은 이미 찍힌 DH_관종등급에서만 읽는다(없으면 직관 무게는 비움).
             // 강관 이형관 종류(F12…)는 이 경로에서 알 수 없어 None으로 넘긴다 — 강관 밸브부관 무게는 비운다.
             var weightPart = part.IsValveTee ? FittingWeightPart.ValveTee
                 : PipeJointCountWriter.IsAccessory(part.Instance) ? FittingWeightPart.Other
-                : FittingWeightResolver.PartOf(PipeMaterialSpecText.StripJointMark(part.Name));
+                : _rules.PartOf(PipeMaterialSpecText.StripJointMark(part.Name));
             PipeWeightParameterWriter.Write(part.Instance,
                 new FittingWeightInput(weightPart, material,
                     connections.TryGetValue(part.Instance.Id, out var weightConnection) ? weightConnection
-                        : PipeJointCountWriter.ResolveConnection(part.Instance, BendConnection.Flanged),
+                        : PipeJointCountWriter.ResolveConnection(part.Instance, BendConnection.Flanged, _rules),
                     SteelFittingClass.None,
                     part.Instance.LookupParameter(ValvePipingParameters.Grade)?.AsString(),
                     part.DiameterMm, part.BranchDiameterMm, part.LengthMm, part.DeflectionDeg, part.WyeAngleDeg),
-                catalog, failed);
+                catalogHandle, _rules, failed);
         }
 
         // 개수 재계산(docs/267 § 1) — 이미 태깅된 부재도 규칙 값으로 다시 쓴다. 개수는 이웃 연결에 따라 바뀌어 문서 전체를 봐야 맞다.
@@ -152,7 +163,7 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
         // 직접 배치한 계획관로 가변 패밀리 자동입력(docs/267 § 2).
         var adaptiveFilled = FillAdaptivePipes(document, warnings, failed);
         // 연결 기준 개수(플랜지 접합 · 유입부 절단) — 부재별 기록이 슬롯을 다시 쓴 뒤에 돈다(docs/266 § 1).
-        PipeJointConnectionRecorder.Apply(document, warnings);
+        PipeJointConnectionRecorder.Apply(document, warnings, _rules);
 
         if (diagnostics.Warning is { } jointWarning) warnings.Add(jointWarning);
 
@@ -164,21 +175,21 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
         return new PipeMaterialBackfillResult(restored.Count, skipped, Compress(warnings), recounted, adaptiveFilled);
     }
 
-    /// <summary>이미 태깅된 배관 이음쇠·밸브류의 개수 값을 규칙(<see cref="PipeCountRules"/>)으로 다시 쓴다(docs/267 § 1).
+    /// <summary>이미 태깅된 배관 이음쇠·밸브류의 개수 값을 수량 규칙으로 다시 쓴다(docs/267 § 1).
     /// 명칭·규격·번호는 건드리지 않는다. 압륜 플래그는 기록 전에 읽는다 — 기록이 슬롯을 덮는다(docs/170 § D-3).</summary>
-    private static int RecountTagged(Document document, IReadOnlySet<ElementId> skip, ICollection<string> failed, JointCountDiagnostics diagnostics)
+    private int RecountTagged(Document document, IReadOnlySet<ElementId> skip, ICollection<string> failed, JointCountDiagnostics diagnostics)
     {
         var count = 0;
         foreach (var instance in PipeMaterialPartCollector.AddinInstances(document))
         {
             if (skip.Contains(instance.Id)) continue;
             var material = PipeAlignmentParameters.MaterialFromModelValue(instance.LookupParameter(ValvePipingParameters.Material)?.AsString());
-            var connection = PipeJointCountWriter.ResolveConnection(instance, BendConnection.Flanged);
+            var connection = PipeJointCountWriter.ResolveConnection(instance, BendConnection.Flanged, _rules);
             var gland = PipeJointCountWriter.ReadRestraintGland(instance);
             var flags = PipeJointCountWriter.ReadFlags(instance);
             var endCount = PipeMaterialSpecText.EndCountFor(instance.LookupParameter(ValvePipingParameters.Part)?.AsString());
-            var composition = PipeJointCountWriter.ResolveComposition(instance, material, connection, gland, endCount, flags);
-            PipeJointCountWriter.Write(instance, material, connection, gland, composition, failed, diagnostics, flags);
+            var composition = PipeJointCountWriter.ResolveComposition(instance, material, connection, gland, endCount, _rules, flags);
+            PipeJointCountWriter.Write(instance, material, connection, gland, composition, failed, diagnostics, _rules, flags);
             count++;
         }
         return count;
@@ -206,7 +217,7 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             .ToList();
 
     /// <summary>직접 배치한 계획관로 가변 패밀리에 값을 채운다(docs/267 § 2-2). 값의 출처는 패밀리 매개변수(이름 목록은 설정 파일) →
-    /// 없으면 배치점 기하다. 관종·호칭지름은 못 찾으면 비우고 경고한다 — 지어내지 않는다(docs/141 § 2 판단 5). 개수는 <see cref="PipeCountRules"/>.</summary>
+    /// 없으면 배치점 기하다. 관종·호칭지름은 못 찾으면 비우고 경고한다 — 지어내지 않는다(docs/141 § 2 판단 5). 개수는 수량 규칙이 정한다.</summary>
     private int FillAdaptivePipes(Document document, ICollection<string> warnings, ICollection<string> failed)
     {
         var candidates = AdaptiveCandidates(document);
@@ -214,7 +225,7 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
         var names = AdaptivePipeParameterNamesStore.Load(out var nameWarning);
         if (nameWarning is not null) warnings.Add(nameWarning);
 
-        var writer = new PipeParameterWriter();
+        var writer = new PipeParameterWriter(_rules);
         int filled = 0, missingMaterial = 0, missingDiameter = 0, unknownSlot = 0;
         foreach (var instance in candidates)
         {
@@ -223,15 +234,17 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             if (points.Any(x => x is null)) continue;
             var lengthMm = ReadLengthMm(instance, names.Length)
                 ?? (points.Count == 2 ? UC.FtToMm(points[0]!.DistanceTo(points[1]!)) : 0d);
-            if (PipeCountRules.AdaptivePartFor(points.Count, lengthMm) is not { } part) continue;
+            if (_rules.AdaptivePartFor(points.Count, lengthMm) is not { } part) continue;
 
             var rawMaterial = ReadText(instance, names.Material);
             var materialCode = PipeAlignmentParameters.MaterialFromModelValue(rawMaterial) is { } material
                 ? PipeAlignmentParameters.Code(material) : rawMaterial;
             var diameterText = ReadDiameterText(instance, names.NominalDiameter);
-            var composition = PipeJointFlagReader.Compose(PipeJointCountWriter.ReadFlags(instance), instance.Symbol?.Family?.Name, 2)
-                ?? PipeCountRules.DefaultPlannedComposition(part);
-            var counts = PipeCountRules.ForPlannedMember(part, composition, materialCode);
+            var ends = PipeJointFlagReader.Compose(PipeJointCountWriter.ReadFlags(instance), instance.Symbol?.Family?.Name, 2);
+            var composition = ends is { } value
+                ? _rules.EncodeComposition(value.Socket, value.Flange)
+                : _rules.DefaultPlannedComposition(part);
+            var counts = _rules.CountPlannedMember(part, composition, materialCode);
 
             writer.Text(instance, PipeAlignmentParameters.Addin, PipeAlignmentParameters.AddinValue);
             writer.Text(instance, PipeAlignmentParameters.Part, part);

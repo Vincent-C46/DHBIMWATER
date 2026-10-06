@@ -34,7 +34,6 @@ public sealed record BendPlacement(
     string JointType = "",
     JointApplicationMode ApplicationMode = JointApplicationMode.SingleJoint,
     BendForm Form = BendForm.BType,
-    double WeightKg = 0d,
     bool HasLegOverlap = false);
 
 /// <param name="Trims">인덱스 = 폴리선 정점 인덱스. 차감이 없는 정점은 <see cref="VertexTrim.None"/>다.</param>
@@ -177,7 +176,7 @@ public static class BendTrimPlanner
                     bend.WallThicknessMm, bend.IsAcceptable, rotXy, rotXz,
                     polylineDeflectionDeg, bend.EffectiveAllowableDeg, bend.ResidualDeg,
                     bend.CenterlineRadiusMm, bend.LayingLengthMm, bend.JointType, bend.ApplicationMode,
-                    bend.Form, bend.WeightKg, legReachesEnd));
+                    bend.Form, legReachesEnd));
             }
 
             plans.Add(new AlignmentBendPlan(a, trims));

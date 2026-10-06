@@ -120,7 +120,7 @@ public sealed record PipeNetworkDefinition(
     /// 비어 있으면 기록하지 않는다(docs/161 § D).</summary>
     string Zone = "",
     /// <summary>이 배치의 <b>기본</b> 접합 방식(docs/170 § E). 부재가 자기 패밀리 파라미터로 접합을 밝히면
-    /// 그쪽이 이긴다 — 이 값은 밝히지 않은 부재에만 쓰인다(<c>PipeJointResolution.Resolve</c>).
+    /// 그쪽이 이긴다 — 이 값은 밝히지 않은 부재에만 쓰인다.
     /// <para>기본값이 플랜지인 이유: 원장에서 밸브실은 실당 용접 1개소를 빼면 전량 플랜지다(docs/168 § 5-3).</para></summary>
     BendConnection JointConnection = BendConnection.Flanged,
     /// <summary>강관 밸브부관 등급(docs/256). 바이패스 지관 규격표 조회에 쓴다. 덕타일주철관 등에서는 쓰지 않는다.</summary>

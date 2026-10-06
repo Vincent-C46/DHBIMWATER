@@ -3,13 +3,13 @@ using System.IO;
 using DHBIMWATER.Application.DTOs.Gis;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Interfaces.Gis;
+using DHBIMWATER.Application.Interfaces.Piping;
 using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Infrastructure.Helpers;
 using DHBIMWATER.Shared.Diagnostics;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
 using DHBIMWATER.Shared.Errors;
 using DHBIMWATER.Core.Piping;
-using PipeCountRules = DHBIMWATER.Core.Piping.PipeCountRules;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Gis;
 
@@ -25,8 +25,11 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
 
     private readonly Func<Document?> _doc;
     private readonly IProjectLocationCoordinateTransformRepo _coordinateTransform;
-    public RevitAdaptiveBendPlacementRepo(Func<Document?> doc, IProjectLocationCoordinateTransformRepo coordinateTransform)
-    { _doc = doc; _coordinateTransform = coordinateTransform; }
+    private readonly IPipeQuantityRules _rules;
+    private readonly IPipeCatalogSource _catalogSource;
+    public RevitAdaptiveBendPlacementRepo(Func<Document?> doc, IProjectLocationCoordinateTransformRepo coordinateTransform,
+        IPipeQuantityRules rules, IPipeCatalogSource catalogSource)
+    { _doc = doc; _coordinateTransform = coordinateTransform; _rules = rules; _catalogSource = catalogSource; }
 
     public AdaptiveBendPlacementResult Place(IReadOnlyList<AdaptiveBendPlacementPlan> plans, AlignmentPlacementOrigin origin, PipeInfoParameterContext? info = null, IProgress<PipeAlignmentProgress>? progress = null, CancellationToken cancellationToken = default)
     {
@@ -40,7 +43,8 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
                 ResolveSymbol(doc, symbols, key.FamilyName, key.TypeName);
         // 패밀리별로 한 번만 경고하면 충분하다 — 절점마다 같은 파라미터 누락 메시지가 반복되면 오히려 안 읽힌다.
         var missingParameters = new HashSet<(string Family, string Type, string Parameter)>();
-        var writer = new PipeParameterWriter();
+        var writer = new PipeParameterWriter(_rules);
+        var catalog = info is { Enabled: true } ? _catalogSource.OpenCatalog() : null;
         var overrideWarnings = new List<string>();
         var exceededOverrides = new List<(ElementId ElementId, int NodeId)>();
         var shapeParameterSuccesses = 0;
@@ -121,13 +125,16 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
                 writer.JointSlots(instance, PipeKindCatalog.MaterialOf(plan.PipeKind), info.BendConnection,
                     new[] { (Spec: string.Empty, Count: socketEnds) },
                     info.UseRestraintGland);
-                writer.Integer(instance, PipeAlignmentParameters.LayingCount, PipeCountRules.PlannedBendLayingCount);
+                writer.Integer(instance, PipeAlignmentParameters.LayingCount, _rules.PlannedBendLayingCount);
                 // 곡관은 자르지 않는다 — 0과 미기록을 구분하려고 명시한다(docs/266 § 2-4).
-                writer.Integer(instance, PipeAlignmentParameters.CutCount, PipeCountRules.PlannedBendCutCount);
+                writer.Integer(instance, PipeAlignmentParameters.CutCount, _rules.PlannedBendCutCount);
                 // 접합 구성은 소켓 단부 수로 적는다 — A형(양쪽 소켓) `2S`, B형(한쪽 소켓) `1S`. 위 슬롯 개소와 같은 축이다(docs/199 § 2).
                 writer.JointComposition(instance, info.BendConnection, endCount: 2, socketEnds: socketEnds);
                 // 곡관은 곡관표의 한 개 무게(소켓 포함)를 그대로 적는다(docs/178 § A-2). 단위중량은 직관에만 있다.
-                writer.MassKg(instance, PipeAlignmentParameters.Weight, plan.WeightKg);
+                var weight = isSteel
+                    ? _rules.SteelBendWeightKg(catalog!, info.BendConnection, info.SteelFittingClass, plan.DiameterMm, plan.StandardAngleDeg)
+                    : _rules.DuctileBendWeightKg(catalog!, info.BendConnection, plan.Form, info.JointType, plan.DiameterMm, plan.StandardAngleDeg);
+                if (weight is { } weightKg) writer.MassKg(instance, PipeAlignmentParameters.Weight, weightKg);
                 writer.Text(instance, PlacementStationParameters.SourceFile, plan.SourceFile);
                 writer.Text(instance, PlacementStationParameters.Alignment, plan.RecordNumber);
                 writer.Text(instance, PlacementStationParameters.Profile, string.Empty);

@@ -64,6 +64,18 @@ public class DatumPlacementIntegrationTests
         Assert.Equal(10, Shift(actual.Vertices[0], shift).DistanceTo(Shift(actual.Vertices[1], shift)), 8);
     }
 
+    [Fact]
+    public void Final_modeling_saves_current_placement_settings_once()
+    {
+        var settings = BendSettings.Default with { ActiveJointType = JointTypeCatalog.Tyton, ActiveBendForm = BendForm.AType };
+        var capture = new Capture(Alignment(new(0, 0, 0), new(8, 0, 0)));
+
+        capture.Execute(ZDatum.Invert, currentSettings: settings);
+
+        Assert.Equal(1, capture.PlacementSettingsSaveCount);
+        Assert.Equal(settings, capture.SavedPlacementSettings);
+    }
+
     [Theory]
     [InlineData(ZDatum.Centerline, false)]
     [InlineData(ZDatum.Invert, false)]
@@ -163,8 +175,10 @@ public class DatumPlacementIntegrationTests
         public IReadOnlyList<IReadOnlySet<int>>? Steps;
         public IReadOnlyList<AdaptiveBendPlacementPlan>? Bends;
         public IReadOnlyList<ReducerDirectShapePlacementPlan>? Reducers;
+        public int PlacementSettingsSaveCount;
+        public BendSettings? SavedPlacementSettings;
 
-        public PipeAlignmentModelingResult Execute(ZDatum datum, PipeAlignmentOutputMode mode = PipeAlignmentOutputMode.DirectShape)
+        public PipeAlignmentModelingResult Execute(ZDatum datum, PipeAlignmentOutputMode mode = PipeAlignmentOutputMode.DirectShape, BendSettings? currentSettings = null)
         {
             var reader = (IAlignmentSourceReader)Stub(typeof(IAlignmentSourceReader));
             var loader = new AlignmentSourceLoader(new[] { reader });
@@ -173,12 +187,13 @@ public class DatumPlacementIntegrationTests
                 ? (object)loader : p.ParameterType == typeof(BendSettingsProvider)
                     ? new BendSettingsProvider((IBendSettingsRepo)Stub(typeof(IBendSettingsRepo))) : Stub(p.ParameterType)).ToArray();
             var useCase = (ModelPipeAlignmentUseCase)constructor.Invoke(dependencies);
+            var settings = currentSettings ?? BendSettings.Default with { StraightPipes = Specs };
             return useCase.Execute(new PipeAlignmentModelingRequest
             {
                 Files = new[] { new AlignmentSourceFile(input.SourceFile, input.PipeKind, null, null, ManualDiameterMm: input.DiameterMm) },
                 ZDatum = datum, OutputMode = mode, ReferenceX = 0, ReferenceY = 0,
                 StraightFamilyTypeName = "Straight : Test", BendFamilyTypeName = "Bend : Test",
-                CurrentBendSettings = BendSettings.Default with { StraightPipes = Specs }
+                CurrentBendSettings = settings
             });
         }
 
@@ -197,6 +212,7 @@ public class DatumPlacementIntegrationTests
                     case "GetFamilyTypeCategoryId": return null;
                     case "FindMissingSymbols": return Array.Empty<(string FamilyName, string TypeName)>();
                     case "RecordConnectionJoints": return Array.Empty<string>();   // 연결 기준 접합(docs/266 § 1) — 배치 검증과 무관
+                    case "SavePlacementSettings": PlacementSettingsSaveCount++; SavedPlacementSettings = (BendSettings)args[0]!; return null;
                     case "PlaceAlong":
                         Alignments = (IReadOnlyList<PipeAlignment>)args[0]!;
                         Origin = (AlignmentPlacementOrigin)args[3]!;

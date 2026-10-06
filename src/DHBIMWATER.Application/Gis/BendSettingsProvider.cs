@@ -1,4 +1,5 @@
 using DHBIMWATER.Application.Interfaces.Gis;
+using DHBIMWATER.Application.Interfaces.Piping;
 using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.Application.Gis;
@@ -16,20 +17,30 @@ public enum BendSettingsSource
 public sealed record BendSettingsResolution(BendSettings Settings, BendSettingsSource Source);
 
 /// <summary>
-/// 프로젝트 저장값이 있으면 사용하고, 없으면 코드 내장 기본값을 사용한다.
-/// 파일에서 불러온 값은 규격표 화면에서 사용자가 확인한 뒤 프로젝트에 명시적으로 저장한다.
+/// 배치 설정은 프로젝트에서 읽고, 규격표는 활성 문서의 카탈로그에서 읽는다.
 /// </summary>
 public sealed class BendSettingsProvider
 {
     private readonly IBendSettingsRepo _project;
+    private readonly IPipeCatalogSource? _catalog;
 
-    public BendSettingsProvider(IBendSettingsRepo project) => _project = project;
+    public BendSettingsProvider(IBendSettingsRepo project, IPipeCatalogSource? catalog = null)
+    { _project = project; _catalog = catalog; }
 
     public BendSettingsResolution Load()
     {
-        // 강관 행이 없는 저장본(강관 카탈로그 도입 전 프로젝트)은 기본 강관 행을 병합한다. [기본값 복원]을 강요하면
-        // 사용자가 손본 주철관 값이 날아가기 때문이다(docs/211 § E-1). Default는 이미 포함하므로 그대로 돌아온다.
-        if (_project.Load() is { } project) return new(project.WithSteelDefaults(), BendSettingsSource.Project);
-        return new(BendSettings.Default.WithSteelDefaults(), BendSettingsSource.BuiltInDefault);
+        var project = _project.Load();
+        if (_catalog is null)
+            return project is not null
+                ? new(project, BendSettingsSource.Project)
+                : new(BendSettings.Default, BendSettingsSource.BuiltInDefault);
+        var tables = _catalog.LoadProjectTables();
+        var modes = project ?? BendSettings.Default;
+        return new(modes with
+        {
+            StraightPipes = tables.StraightPipes,
+            Fittings = tables.Fittings,
+            JointDeflections = tables.JointDeflections
+        }, tables.Source == "Project" ? BendSettingsSource.Project : BendSettingsSource.BuiltInDefault);
     }
 }

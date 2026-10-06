@@ -39,8 +39,8 @@ public static class PipeAlignmentParameters
     public const string BranchSpec = "DH_분기규격";
 
     /// <summary>현장 절단 개소(Integer). 수량산출 「강관 절단」·「주철관 절단」 행을 만든다.
-    /// <para>값은 <see cref="Piping.PipeCountRules"/>가 정한다(docs/266) — 계획관로 단관 1 · 곡관 0 · 이경관 1,
-    /// 밸브실 평단 단관 1 + 유입부 소켓 1곳당 1(<see cref="Piping.PipeJointConnectionPass"/>). 빈칸(미태깅)과 0(세어보니 없다)을 구분한다.</para>
+    /// <para>값은 수량 규칙이 정한다(docs/266) — 계획관로 단관 1 · 곡관 0 · 이경관 1,
+    /// 밸브실 평단 단관 1 + 유입부 소켓 1곳당 1. 빈칸(미태깅)과 0(세어보니 없다)을 구분한다.</para>
     /// <para>밸브류에는 적지 않는다 &mdash; 자르는 대상이 아니다.</para></summary>
     public const string CutCount = "DH_절단수";
     public const string AllowableDeflection = "DH_허용굴곡각";
@@ -48,7 +48,7 @@ public static class PipeAlignmentParameters
     public const string IsAcceptable = "DH_허용여부";
     /// <summary>요소 한 개의 무게(kg)(docs/178 § A-2, 2026-09-16 사용자 확정).
     /// <para><b>곡관</b>: 곡관표의 한 개 무게(소켓 포함, KP/타이튼·A/B형별). <b>직관</b>: <see cref="UnitWeight"/> × <see cref="Length"/> + 소켓 무게
-    /// (<see cref="StraightPipeWeight"/>). 이경관은 핸드북 편락관 무게, 표에 없는 조합·강관은 비운다(docs/260 § G). 강관 직관은 kg/m × 연장(소켓 무게 0), 강관 곡관은 F 종류별 한 개 무게(docs/211).</para>
+    /// 이경관은 편락관 표의 무게를 쓴다. 표에 없는 조합은 비운다(docs/260 § G). 강관 직관은 kg/m × 연장(소켓 무게 0), 강관 곡관은 F 종류별 한 개 무게(docs/211).</para>
     /// <para>질량(kg) 형식이며 내부 단위로 변환해 기록한다(docs/264).</para></summary>
     public const string Weight = "DH_무게";
     /// <summary>직관부 단위중량(kg/m, 핸드북 M무게). 직관·단관에만 있고 곡관은 비워 둔다 — 곡관은 한 개 무게로 센다.
@@ -56,7 +56,7 @@ public static class PipeAlignmentParameters
     public const string UnitWeight = "DH_단위중량";
     /// <summary>접합 슬롯 수 합계. <c>DH_접합{n}_수</c>를 기록한 뒤 자동으로 쓴다.</summary>
     public const string JointTotalCount = "DH_접합수";
-    /// <summary>부재 하나의 접합 구성 — `1S1F`·`2S1F`(<see cref="Piping.PipeJointComposition"/>, 소켓 수 + 플랜지 수).
+    /// <summary>부재 하나의 접합 구성 — `1S1F`·`2S1F`(소켓 수 + 플랜지 수).
     /// <para>접합 종류가 늘어도 <b>값의 어휘만</b> 늘도록 한 칸에 담는다. 종류마다 개소 매개변수를 두면
     /// 종류가 늘 때마다 공유 매개변수와 바인딩이 함께 늘고, `1S1F`처럼 한 부재에 두 종류가 섞이면
     /// 어느 칸에도 온전히 적히지 않는다.</para></summary>
@@ -68,7 +68,7 @@ public static class PipeAlignmentParameters
     /// (`D2400x1650` 하나가 2400 접합 1개소 + 1650 접합 1개소다 — 산출서 `수량산출` 90~93행).</para>
     /// <para>계획관로와 밸브실 배관 이음쇠가 같은 이름·GUID를 쓴다.</para></summary>
     public const string JointSlotPrefix = "DH_접합";
-    /// <summary>슬롯 n의 `종류` 칸 — <see cref="JointKindFor"/>가 내는 문자열(`용접합`·`KP접합` …)을 담는다.
+    /// <summary>슬롯 n의 `종류` 칸 — 수량 규칙이 내는 문자열(`용접합`·`KP접합` …)을 담는다.
     /// 비어 있으면 그 슬롯은 <b>없는 것</b>이다(수량산출이 그렇게 읽는다).</summary>
     public static string JointSlotKind(int slot) => $"{JointSlotPrefix}{slot}_종류";
     /// <summary>슬롯 n의 `규격` 칸 — 산출서 규격 표기(`D2400`). <b>비우면 수량산출이 요소 관경(<see cref="NominalDiameter"/>)을 쓴다.</b>
@@ -149,15 +149,6 @@ public static class PipeAlignmentParameters
     /// <summary><b>관종 + 곡관 접합</b> → 접합 슬롯 `종류` 칸에 적을 문자열(docs/186 § 4-2).
     /// <para>수량산출의 <c>PipeWorkCatalog</c> 키와 <b>문자열이 같아야</b> 행이 선다.</para>
     /// <para>대응이 없으면(PE·PVC 융착·접착) null이다. 호출부는 값을 지어내지 말고 <b>슬롯을 비우고</b> 경고를 남긴다.</para></summary>
-    public static string? JointKindFor(PipeMaterial? material, BendConnection connection, bool useRestraintGland = false)
-        => connection == BendConnection.Flanged ? "플랜지접합" : material switch
-        {
-            PipeMaterial.Steel => "용접합",
-            PipeMaterial.DuctileIron when useRestraintGland => "이탈방지압륜접합",
-            PipeMaterial.DuctileIron => "KP접합",
-            _ => null
-        };
-
     public static string DiameterText(double diameterMm) => $"DN{diameterMm:0.##}";
     /// <summary><see cref="BranchSpec"/>에 적을 표기 — `D150`, 구경이 여럿이면 `D600xD300`.
     /// <para><c>DN</c>이 아니라 <c>D</c>인 이유: 이 값은 호칭지름이 아니라 <b>산출서 규격 칸</b>이고,
