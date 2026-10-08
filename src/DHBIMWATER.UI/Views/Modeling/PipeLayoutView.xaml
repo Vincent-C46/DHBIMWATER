@@ -161,8 +161,8 @@
                          (전 항목이 (0,0)에 겹친다). 위 Edges 템플릿과 같이 루트를 Canvas로 감싸 절대 위치를 살린다. -->
                     <ItemsControl ItemsSource="{Binding InlineFittings}" IsHitTestVisible="{Binding IsSelectionMode}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas/></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Canvas>
                         <!-- docs/228 § B — 바이패스 세트 개략 그림(A 사각형 · B 원 · 바이패스 밸브 다이아몬드). 본관 밸브는 아래 기존 다이아몬드다. -->
-                        <Path Data="{Binding BypassLine, Mode=OneWay}" Stroke="#283593" StrokeThickness="2.5" IsHitTestVisible="False"/>
-                        <Path Data="{Binding BypassMarkers, Mode=OneWay}" Fill="#283593" Stroke="White" StrokeThickness="1" IsHitTestVisible="False"/>
+                        <Path Data="{Binding BypassLine, Mode=OneWay}" Stroke="{Binding BypassStroke, Mode=OneWay}" StrokeThickness="2.5" MouseLeftButtonDown="OnFittingMouseLeftButtonDown"/>
+                        <Path Data="{Binding BypassMarkers, Mode=OneWay}" Fill="{Binding BypassFill, Mode=OneWay}" Stroke="White" StrokeThickness="1" MouseLeftButtonDown="OnFittingMouseLeftButtonDown"/>
                         <StackPanel Canvas.Left="{Binding X, Mode=OneWay}" Canvas.Top="{Binding Y, Mode=OneWay}" Width="120" Margin="-60,-7,0,0">
                             <Grid Width="14" Height="14" HorizontalAlignment="Center" ToolTip="{Binding FamilyTypeName, Mode=OneWay}" MouseLeftButtonDown="OnFittingMouseLeftButtonDown">
                                 <Polygon Points="7,0 14,7 7,14 0,7" Stroke="White" StrokeThickness="1"><Polygon.Style><Style TargetType="Polygon"><Setter Property="Fill" Value="{Binding Fill, Mode=OneWay}"/><Style.Triggers><!-- 부속 ItemsControl은 선택 모드에서만 hit test가 켜지므로 모드 조건이 따로 필요 없다. --><MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Grid}}" Value="True"/><Condition Binding="{Binding IsSelected, Mode=OneWay}" Value="False"/></MultiDataTrigger.Conditions><Setter Property="Fill" Value="#F8C471"/></MultiDataTrigger></Style.Triggers></Style></Polygon.Style></Polygon>

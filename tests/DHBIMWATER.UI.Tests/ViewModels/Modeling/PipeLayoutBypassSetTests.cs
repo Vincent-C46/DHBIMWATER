@@ -1,4 +1,5 @@
 ﻿using DHBIMWATER.Application.Interfaces;
+using System.Windows;
 using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Piping;
 using DHBIMWATER.UI.ViewModels.Modeling;
@@ -43,6 +44,63 @@ public sealed class PipeLayoutBypassSetTests
         Assert.Equal(new BypassSetSpec(GateFamily, 0, 1), set.Bypass);
         Assert.NotNull(set.BypassLine);
         Assert.Contains("세트 1", vm.NetworkSummary);
+    }
+
+    [Fact]
+    public void SelectingBypassSet_AllowsDragDelete_AndUsesDistinctColor()
+    {
+        var vm = CreateMainPipeViewModel();
+        vm.IsPlacingBypassSet = true;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.Mode = PipeLayoutMode.Selection;
+        var fitting = Assert.Single(vm.BypassSetItems);
+
+        Assert.True(vm.TryBeginFittingDrag(new Point(fitting.X, fitting.Y), fitting.Id));
+        Assert.Contains(fitting.Id, vm.SelectedFittingIds);
+        Assert.Equal("#00B8D4", vm.InlineFittings.Single().Fill);
+        vm.CommitDrag(new Point(fitting.X + 20, fitting.Y));
+        Assert.NotEqual(fitting.T, vm.BypassSetItems.Single().T);
+
+        vm.DeleteSelectedFittingCommand.Execute(null);
+
+        Assert.Empty(vm.BypassSetItems);
+    }
+
+    [Fact]
+    public void CrossingSelection_IntersectsBypassSetDrawingBounds()
+    {
+        var vm = CreateMainPipeViewModel();
+        vm.IsPlacingBypassSet = true;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.Mode = PipeLayoutMode.Selection;
+        var fitting = Assert.Single(vm.BypassSetItems);
+        var bounds = fitting.BypassMarkers!.Bounds;
+        var start = new Point(bounds.Right + 20, bounds.Top - 2);
+        var end = new Point(bounds.Right - 1, bounds.Bottom + 2);
+
+        vm.BeginSelectionBox(start);
+        vm.CommitSelectionBox(end);
+
+        Assert.Contains(fitting.Id, vm.SelectedFittingIds);
+    }
+
+    [Fact]
+    public void WindowSelection_ContainsBypassSetDrawingBounds()
+    {
+        var vm = CreateMainPipeViewModel();
+        vm.IsPlacingBypassSet = true;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.Mode = PipeLayoutMode.Selection;
+        var fitting = Assert.Single(vm.BypassSetItems);
+        var bounds = fitting.BypassMarkers!.Bounds;
+
+        vm.BeginSelectionBox(new Point(bounds.Left - 5, bounds.Top - 5));
+        vm.CommitSelectionBox(new Point(bounds.Right + 5, bounds.Bottom + 5));
+
+        Assert.Contains(fitting.Id, vm.SelectedFittingIds);
     }
 
     [Fact]
@@ -445,6 +503,68 @@ public sealed class PipeLayoutBypassSetTests
         vm.HandleCanvasClick(vm.Transform.ToScreen(start));
         vm.HandleCanvasClick(vm.Transform.ToScreen(end));
         return vm;
+    }
+
+    [Fact]
+    public void GrabbingBypassMarker_DragsByOffset_WithoutCenterJump()
+    {
+        var vm = CreateMainPipeViewModel();
+        vm.IsPlacingBypassSet = true;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.Mode = PipeLayoutMode.Selection;
+        var fitting = Assert.Single(vm.BypassSetItems);
+        var marker = fitting.BypassMarkers!.Bounds;
+        var grab = new Point(marker.Left + 2, marker.Top + 2);   // 세트 중심에서 먼 표식(A·B)을 잡는다.
+
+        Assert.True(vm.TryBeginFittingDrag(grab, fitting.Id));
+        vm.CommitDrag(new Point(grab.X + 20, grab.Y));
+
+        // 잡은 자리가 아니라 이동량만큼만 움직인다 — 중심이 커서 밑으로 튀면 T가 크게 어긋난다.
+        var expectedShift = 20 / vm.Transform.PixelsPerMillimeter / 4000;
+        Assert.Equal(fitting.T + expectedShift, vm.BypassSetItems.Single().T, 3);
+    }
+
+    [Fact]
+    public void SnappingBypassSetToTee_PlacesItOnMainEdge_NotBranch()
+    {
+        var vm = CreateMainPipeViewModel();
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 0)));      // 본관 중간 → T 접점
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 2000)));   // 분기
+        vm.SnapEndpoint = true;
+        vm.SnapIntersection = true;
+        vm.IsPlacingBypassSet = true;
+
+        // 커서가 분기 엣지에 더 가깝다(5mm) — 종전에는 동률·근접 판정으로 분기 엣지가 뽑혔다.
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2005, 20)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2005, 20)));
+
+        var set = Assert.Single(vm.BypassSetItems);
+        var edge = vm.Edges.Single(x => x.Id == set.EdgeId);
+        Assert.Equal(edge.Y1, edge.Y2, 6);   // 본관(수평) 엣지다.
+        Assert.True(set.T < 1e-6 || set.T > 1 - 1e-6);   // T 절점(엣지 끝)에 놓였다.
+    }
+
+    [Fact]
+    public void FailedBypassSet_WhenSelected_IsDistinctFromUnselectedFailure()
+    {
+        var vm = CreateMainPipeViewModel();
+        vm.IsPlacingBypassSet = true;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        var id = Assert.Single(vm.BypassSetItems).Id;
+        vm.ApplyModelCreationResult(false, "실패", [
+            new PipeConnectionFailure(new Point2D(2000, 0), 0, BypassSet.TypeKey, "DH_게이트 밸브", 0, "테스트") { FittingId = id }]);
+        var unselected = vm.BypassSetItems.Single();
+        vm.Mode = PipeLayoutMode.Selection;
+
+        vm.SelectFitting(id);
+        var selected = vm.BypassSetItems.Single();
+
+        Assert.True(unselected.IsError);
+        Assert.True(selected.IsError);
+        Assert.NotEqual(unselected.BypassStroke, selected.BypassStroke);
+        Assert.NotEqual(unselected.Fill, selected.Fill);
     }
 
     private static PipeLayoutViewModel CreateMainPipeViewModel(double diameterMm = 1650)

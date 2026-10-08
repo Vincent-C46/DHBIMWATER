@@ -150,6 +150,9 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         // 바이패스 세트 Id → 2)에서 실측한 세트 치수. 3)이 같은 값으로 부재를 놓는다(docs/228 § C).
         var bypassLayouts = new Dictionary<Guid, BypassLayout>();
         var bypassLayoutCache = new Dictionary<BypassLayoutKey, BypassLayout>();
+        // 중심이 본관 T 절점에 놓여 두 엣지에 걸치는 세트(docs/273 § C). 반대편 엣지의 A 구간을 그 엣지를 처리하기 전에 알아야 하므로 루프 전에 계획한다.
+        var teeCenteredSets = PlanTeeCenteredSets(document, symbols, network, families, skipPlan, legAnchors,
+            unusableValves, skipped, droppedFittings, bypassLayouts, bypassLayoutCache, warnings);
         var straightCount = 0;
         var shortCount = 0;
         for (var edgeIndex = 0; edgeIndex < network.Edges.Count; edgeIndex++)
@@ -177,20 +180,34 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             // 세트 A를 먼저 잰다 — 본관 밸브·이음관이 A 주관 커넥터에 밀착하려면 A 자리를 알아야 한다(docs/257 § B-1).
             // 겹침 판정(InlineSpanFilter)은 구간을 정렬해서 보므로 이 순서가 결과를 바꾸지 않는다.
             occupied.AddRange(BypassSetSpans(document, symbols, edge, network, families, skipPlan, startAnchor, direction,
-                unusableValves, skipped, inlineAxisCenters, droppedFittings, bypassLayouts, bypassLayoutCache, warnings));
+                unusableValves, skipped, inlineAxisCenters, droppedFittings, bypassLayouts, bypassLayoutCache, warnings, teeCenteredSets));
+            // tee 중심 세트의 A는 두 A 사이 판정(BypassTeePair)에 넣지 않는다 — A가 엣지마다 하나뿐이고, 밸브는 T 절점 앵커와
+            // A 구간 경계(InlineJointSnap)에 밀착한다(docs/273 § C-3b). 이 엣지에 놓이는 A 구간(소속·반대편)은 밀착 후보로만 넘긴다.
             var teePairs = network.InlineFittings
-                .Where(x => x.EdgeId == edge.Id && x.IsBypassSet && !droppedFittings.Contains(x.Id)
+                .Where(x => x.EdgeId == edge.Id && x.IsBypassSet && !droppedFittings.Contains(x.Id) && !teeCenteredSets.ContainsKey(x.Id)
                             && bypassLayouts.ContainsKey(x.Id) && inlineAxisCenters.ContainsKey(x.Id))
                 .Select(x => new BypassTeePair(
                     bypassLayouts[x.Id].TeeSpan(inlineAxisCenters[x.Id], -1),
                     bypassLayouts[x.Id].TeeSpan(inlineAxisCenters[x.Id], 1)))
                 .ToList();
+            var teeCenteredHere = teeCenteredSets.Where(x => x.Value.OwnerEdgeId == edge.Id || x.Value.OtherEdgeId == edge.Id)
+                .Select(x => (Id: x.Key, Span: x.Value.OwnerEdgeId == edge.Id ? x.Value.OwnerSpan : x.Value.OtherSpan))
+                .ToList();
+            // 반대편 엣지에는 소속 엣지가 예약하지 않은 A 구간을 여기서 넣는다(소속 엣지 것은 BypassSetSpans가 이미 넣었다).
+            occupied.AddRange(teeCenteredHere.Where(x => teeCenteredSets[x.Id].OwnerEdgeId != edge.Id));
             occupied.AddRange(InlineFittingSpans(document, symbols, edge, network, families, spanCache, startAnchor, direction,
                 lengthMm, startAnchored, endAnchored, teePairs,
-                unusableValves, skipped, inlineAxisCenters, droppedFittings, reservedWidths));
+                unusableValves, skipped, inlineAxisCenters, droppedFittings, reservedWidths,
+                teeCenteredHere.Select(x => x.Span).ToList()));
 
             // 위치 오류(배관 밖·겹침·짧은 틈)는 그 부속만 건너뛴다(docs/251 § B). 종전에는 아래 PL-301로 전체가 롤백됐다.
             var filtered = InlineSpanFilter.Filter(lengthMm, occupied.Select(x => new InlineSpanCandidate(x.Id, x.Span, SpanPriority(network, x.Id))));
+            // tee 중심 세트는 두 엣지에 걸쳐 있어 한쪽 필터에서만 빼면 A가 하나만 남는다. 사전 계획이 개별 위치 오류를 이미 걸렀으므로
+            // 여기서 빠졌다면 다른 세트와 겹친 경우뿐이다 — 반쪽 세트를 만들지 않고 이유와 함께 중단한다(docs/273 § C-4).
+            var droppedTeeSet = filtered.Dropped.FirstOrDefault(x => teeCenteredSets.ContainsKey(x.Key));
+            if (droppedTeeSet.Key != Guid.Empty)
+                throw new DhbimwaterException(ErrorCodes.PL_NodeFittingUnplaceable,
+                    $"T형관 중심 바이패스 세트를 놓을 수 없습니다: {droppedTeeSet.Value}{Environment.NewLine}위치: {FormatEdge(edge)}");
             foreach (var (droppedId, reason) in filtered.Dropped)
                 SkipMisplacedFitting(network, droppedId, reason, skipped, droppedFittings);
 
@@ -266,7 +283,8 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             {
                 if (bypassLayouts.TryGetValue(fitting.Id, out var layout) && edgeAxes.TryGetValue(edge.Id, out var setAxis))
                     PlaceBypassSet(document, symbols, network, families, edge, fitting, setAxis, inlineAxisCenters[fitting.Id], layout,
-                        segment, hostLevel, placedInstances, materialParts, openPoints, skipped, warnings, elevationFixes, Track);
+                        segment, hostLevel, placedInstances, materialParts, openPoints, skipped, warnings, elevationFixes, Track,
+                        teeCenteredSets.TryGetValue(fitting.Id, out var teeSet) ? teeSet.GapOpenPoints : null);
                 continue;
             }
 
@@ -951,8 +969,9 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         var (role, name) = fitting.IsBypassSet ? (BypassSet.TypeKey, BypassValveFamilyOf(fitting.Bypass!.BypassValveFamilyTypeName))
             : fitting.IsJoint ? ("이음관", fitting.FamilyTypeName)
             : ("배관부속", fitting.FamilyTypeName);
-        skipped.Add(CreateFailure(ToXyz(fitting.Position, fitting.Elevation, network.ReferencePoint), role, name, 0,
-            $"{reason} 이 부속만 빼고 그 자리는 관으로 채웠습니다.", network));
+        var failure = CreateFailure(ToXyz(fitting.Position, fitting.Elevation, network.ReferencePoint), role, name, 0,
+            $"{reason} 이 부속만 빼고 그 자리는 관으로 채웠습니다.", network);
+        skipped.Add(fitting.IsBypassSet ? failure with { FittingId = fitting.Id } : failure);
         droppedFittings.Add(fittingId);
     }
 
@@ -968,11 +987,13 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         Dictionary<(ElementId SymbolId, double DiameterMm), InlineSpan> spanCache, XYZ startAnchor, XYZ direction,
         double edgeLengthMm, bool startAnchored, bool endAnchored, IReadOnlyList<BypassTeePair> teePairs,
         IDictionary<string, string> unusableValves, ICollection<PipeConnectionFailure> skipped,
-        IDictionary<Guid, double> axisCenters, ISet<Guid> droppedFittings, IDictionary<Guid, double> reservedWidths)
+        IDictionary<Guid, double> axisCenters, ISet<Guid> droppedFittings, IDictionary<Guid, double> reservedWidths,
+        IReadOnlyList<OccupiedSpan> extraTeeSpans)
     {
         var axis = new EdgeAxis(startAnchor, direction);
         // 이 엣지 세트의 A 구간 전부. 밸브·이음관이 A 주관 커넥터에 밀착하는 후보다(docs/257 § B-2).
-        var teeSpans = teePairs.SelectMany(x => new[] { x.First, x.Second }).ToList();
+        // extraTeeSpans = T형관 중심 세트의 A 구간(docs/273 § C) — 두 A 사이 판정 없이 밀착 후보로만 쓴다.
+        var teeSpans = teePairs.SelectMany(x => new[] { x.First, x.Second }).Concat(extraTeeSpans).ToList();
         var spans = new List<(Guid Id, OccupiedSpan Span)>();
         // 밸브 본체가 차지한 구간. 이음관은 이 경계에 그대로 이어 붙는다(docs/167 § B).
         var valveSpans = new Dictionary<Guid, OccupiedSpan>();

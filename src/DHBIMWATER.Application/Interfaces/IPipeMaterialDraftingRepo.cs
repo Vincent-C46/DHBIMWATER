@@ -15,12 +15,12 @@ public interface IPipeMaterialDraftingRepo
     IReadOnlySet<string> GetExistingViewNames();
 
     /// <summary>드래프팅뷰 1개를 만들고 그 안에 6열 배관재료표를 선·문자로 그린다.</summary>
-    void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows);
+    void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true);
 
     /// <summary>이미 있는 드래프팅뷰의 내용을 <b>전부 지우고</b> 표를 다시 그린다(docs/173).
     /// <para>사용자가 그 뷰에 덧붙인 치수·주석·상세항목도 함께 사라진다 —
     /// 호출 전에 사용자 확인을 받는 것은 호출자 책임이다(<c>JunctionDetailCommand</c>).</para>
     /// <returns><paramref name="viewName"/>을 쓰는 드래프팅뷰를 찾아 다시 그렸으면 true.
     /// 그 이름을 다른 종류의 뷰(일람표·평면도 등)가 쓰고 있으면 <b>아무것도 지우지 않고</b> false.</returns></summary>
-    bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows);
+    bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true);
 }

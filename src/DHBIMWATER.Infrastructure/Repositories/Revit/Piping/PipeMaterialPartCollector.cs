@@ -1,4 +1,5 @@
 using Autodesk.Revit.DB;
+using System.IO;
 using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
@@ -42,13 +43,22 @@ internal static class PipeMaterialPartCollector
     public static IReadOnlyList<PipeMaterialPart> Read(Document document, IReadOnlyCollection<ElementId>? exclude = null)
         => AddinInstances(document)
             .Where(x => exclude is not { Count: > 0 } || !exclude.Contains(x.Id))
-            .Select(x => new PipeMaterialPart(
-                Get(x, ValvePipingParameters.JunctionId)?.AsString() ?? string.Empty,
-                Get(x, ValvePipingParameters.ItemNumber)?.AsInteger() ?? 0,
-                Get(x, ValvePipingParameters.ItemName)?.AsString() ?? string.Empty,
-                Get(x, ValvePipingParameters.ItemSpec)?.AsString() ?? string.Empty,
-                // 비고는 드래프팅뷰 표에도 그려야 하므로 원자료부터 싣고 나른다(docs/141 § B-7).
-                Get(x, ValvePipingParameters.Remark)?.AsString() ?? string.Empty))
+            .Select(x =>
+            {
+                var imageId = x.Symbol?.get_Parameter(BuiltInParameter.ALL_MODEL_TYPE_IMAGE)?.AsElementId();
+                var imageType = imageId is not null && imageId != ElementId.InvalidElementId
+                    ? document.GetElement(imageId) as ImageType : null;
+                var imagePath = imageType?.Path;
+                if (imageType?.PathType == PathType.Relative && !string.IsNullOrWhiteSpace(document.PathName))
+                    imagePath = Path.GetFullPath(imagePath!, Path.GetDirectoryName(document.PathName)!);
+                return new PipeMaterialPart(
+                    Get(x, ValvePipingParameters.JunctionId)?.AsString() ?? string.Empty,
+                    Get(x, ValvePipingParameters.ItemNumber)?.AsInteger() ?? 0,
+                    Get(x, ValvePipingParameters.ItemName)?.AsString() ?? string.Empty,
+                    Get(x, ValvePipingParameters.ItemSpec)?.AsString() ?? string.Empty,
+                    Get(x, ValvePipingParameters.Remark)?.AsString() ?? string.Empty,
+                    x.Symbol?.Id.Value ?? 0, imagePath);
+            })
             .ToList();
 
     /// <summary>이름 조회는 요소 파라미터 집합을 선형 탐색한다. GUID 조회가 빠르고 동명 외부 파라미터와도 섞이지 않는다(docs/208 § D-2).

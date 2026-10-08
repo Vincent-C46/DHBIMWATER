@@ -57,13 +57,12 @@ internal sealed class PipeQuantityRulesAdapter : IPipeQuantityRules
         IReadOnlyList<RuleDtos.PipeJointEndInput> ends, bool isValveRoom, double toleranceMm = 1.0)
     {
         var result = PipeQuantityRulesInterop.RunConnectionPass(members.Select(x => new PipeJointMemberDto(
-                x.Id, x.IsValve, x.PartName, x.Composition, x.DiameterMm, x.FlangedWhenNoComposition)).ToArray(),
+                x.Id, x.IsValve, x.PartName, x.Composition, x.DiameterMm, x.FlangedWhenNoComposition, x.MaterialCode)).ToArray(),
             ends.Select(x => new PipeJointEndDto(x.MemberId, x.Index, x.XMm, x.YMm, x.ZMm,
                 x.DiameterMm, x.PartnerMemberId, x.PartnerIndex)).ToArray(), isValveRoom, toleranceMm);
         return new RuleDtos.PipeJointPassResult(
             result.Members.ToDictionary(x => x.MemberId,
                 x => (IReadOnlyList<RuleDtos.PipeJointSlotValue>)x.FlangeSlots.Select(Slot).ToArray()),
-            result.Members.Where(x => x.CutCount.HasValue).ToDictionary(x => x.MemberId, x => x.CutCount!.Value),
             result.UnpairedFlangeCount, result.UnresolvedEndCount, result.AmbiguousEndCount,
             result.Warnings);
     }

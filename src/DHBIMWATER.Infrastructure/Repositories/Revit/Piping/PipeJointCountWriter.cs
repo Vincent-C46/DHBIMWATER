@@ -40,7 +40,7 @@ internal sealed class JointCountDiagnostics
 /// 모델 연결(플랜지 ↔ 플랜지 1건 = 1개소)로 세어 귀속 부재 슬롯에 적는다(docs/266 § 1). 소켓은 종전대로 부재당 단부 수다. `DH_접합구성`(`1S2F`)은 그대로 기록한다.</para>
 /// <para><b>docs/266 개정(2026-10-02)</b> — 개수 규칙의 결과를 여기서 쓴다.
 /// 플랜지 개소는 DHBIMWATER 연결 패스(<see cref="PipeJointConnectionRecorder"/>)가 연결을 세어 귀속 부재 슬롯에 적는다
-/// (수량산출 애드인은 읽기만 한다). 부설은 직관 0 · 나머지 1, 절단은 평단 단관 1 + 유입부 소켓(연결 패스) — 옛 「관·이형관 절단 1」 기본값은 없앴다.
+/// (수량산출 애드인은 읽기만 한다). 부설은 직관 0 · 나머지 1, 절단은 부재유형이 정한다(단관 1, 그 밖 0 — 수량 규칙 v4, docs/274).
 /// 밸브부관은 개수에서 이형관으로 본다(R-7) — 밸브 판정은 카테고리만 본다(<see cref="IsValveForCount"/>).</para>
 /// </summary>
 internal static class PipeJointCountWriter
@@ -93,7 +93,7 @@ internal static class PipeJointCountWriter
     /// <summary>한 부재의 개소 수를 기록한다. 값은 수량 규칙이 정한다(docs/266 § 2-1).
     /// <para>밸브류는 `DH_접합및부설수 = 1`만 쓴다. 그 밖은 부설·절단·소켓 슬롯을 쓴다 — 슬롯을 다시 쓰면 플랜지 슬롯도 지워지므로
     /// 호출부는 이 뒤에 연결 패스(<see cref="PipeJointConnectionRecorder.Apply"/>)를 돌려야 플랜지가 다시 붙는다.</para>
-    /// <para>절단은 부재 자체 몫(평단 단관)만 쓴다. 밸브실 문서의 유입부 몫은 연결 패스가 더해 다시 쓴다.</para></summary>
+    /// <para>절단은 수량 규칙이 부재유형으로 정한 값을 그대로 쓴다. 밸브실 유입부 몫은 없다(수량 규칙 v4, docs/274).</para></summary>
     /// <param name="composition"><see cref="ResolveComposition"/>가 정한 접합 구성(`2S1F`). 호출부가 부재명 접두를 만들 때
     /// 이미 구했으므로 여기서 다시 구하지 않는다 — 두 번 구하면 부재명과 접합구성이 어긋날 수 있다.</param>
     public static void Write(FamilyInstance instance, PipeMaterial? material, BendConnection connection,

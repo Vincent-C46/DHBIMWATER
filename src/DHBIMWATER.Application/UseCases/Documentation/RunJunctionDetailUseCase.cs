@@ -1,0 +1,71 @@
+using DHBIMWATER.Application.DTOs.Documentation;
+using DHBIMWATER.Application.Interfaces;
+using DHBIMWATER.Application.Interfaces.Piping;
+using DHBIMWATER.Shared.Errors;
+
+namespace DHBIMWATER.Application.UseCases.Documentation;
+
+public sealed class RunJunctionDetailUseCase
+{
+    private readonly CreatePipeMaterialScheduleUseCase _schedule;
+    private readonly CreatePipeMaterialDraftingUseCase _drafting;
+    private readonly CreateJunctionDetailViewUseCase _plan;
+    private readonly BackfillPipeMaterialParametersUseCase _backfill;
+    private readonly IPipeCatalogSource _catalog;
+
+    public RunJunctionDetailUseCase(CreatePipeMaterialScheduleUseCase schedule,
+        CreatePipeMaterialDraftingUseCase drafting, CreateJunctionDetailViewUseCase plan,
+        BackfillPipeMaterialParametersUseCase backfill, IPipeCatalogSource catalog)
+    {
+        _schedule = schedule;
+        _drafting = drafting;
+        _plan = plan;
+        _backfill = backfill;
+        _catalog = catalog;
+    }
+
+    public JunctionDetailRunResult Execute(JunctionDetailOptions options)
+    {
+        PipeMaterialBackfillResult? backfill = null;
+        PipeMaterialScheduleResult? schedule = null;
+        PipeMaterialScheduleResult? drafting = null;
+        JunctionDetailResult? plan = null;
+        var warnings = new List<string>();
+
+        if (options.Backfill)
+        {
+            try
+            {
+                if (_catalog.TryEnsureAvailable(out var error))
+                {
+                    if (!string.IsNullOrWhiteSpace(error)) warnings.Add(error);
+                    backfill = _backfill.Execute();
+                }
+                else if (!string.IsNullOrWhiteSpace(error)) warnings.Add(error);
+            }
+            catch (DhbimwaterException ex) when (ex.Code == ErrorCodes.NoActiveDocument) { throw; }
+            catch (Exception ex) { warnings.Add($"값 재기록 실패: {ex.Message}"); }
+        }
+
+        if (options.CreateSchedule)
+            try { schedule = _schedule.Execute(); }
+            catch (DhbimwaterException ex) when (ex.Code == ErrorCodes.NoActiveDocument) { throw; }
+            catch (Exception ex) { warnings.Add($"일람표 생성 실패: {ex.Message}"); }
+
+        if (options.CreateDrafting)
+            try { drafting = _drafting.Execute(options.RedrawExistingDrafting, options.UseTypeImage); }
+            catch (DhbimwaterException ex) when (ex.Code == ErrorCodes.NoActiveDocument) { throw; }
+            catch (Exception ex) { warnings.Add($"도면 생성 실패: {ex.Message}"); }
+
+        if (options.CreatePlan)
+        {
+            var viewOptions = new JunctionDetailViewOptions(options.ExpandVertical, options.StepPaperMm,
+                options.ViewScale, options.PlaceTags, options.TagTypeId);
+            try { plan = _plan.Execute(viewOptions); }
+            catch (DhbimwaterException ex) when (ex.Code == ErrorCodes.NoActiveDocument) { throw; }
+            catch (Exception ex) { warnings.Add($"평면 상세도 생성 실패: {ex.Message}"); }
+        }
+
+        return new JunctionDetailRunResult(backfill, schedule, drafting, plan, warnings);
+    }
+}

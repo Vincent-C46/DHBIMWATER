@@ -8,7 +8,7 @@ using PipeJointSlotValue = DHBIMWATER.Application.DTOs.Piping.PipeJointSlotValue
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
 
 /// <summary>
-/// 문서 전체 연결 패스를 돌려 플랜지 슬롯 · 유입부 절단을 기록한다(docs/266 § 1). 값은 수량 규칙이 정하고
+/// 문서 전체 연결 패스를 돌려 플랜지 슬롯을 기록한다(docs/266 § 1, 절단은 부재별 기록이 쓴다 — docs/274). 값은 수량 규칙이 정하고
 /// 여기서는 쓰기만 한다. 신규 배치(PipeLayout) · 재기록 · 계획관로 배치가 같은 함수를 부른다.
 /// <para>부재별 기록(<see cref="PipeJointCountWriter.Write"/>)이 소켓 슬롯을 다시 쓰면 플랜지 슬롯이 지워지므로, 그 뒤에 불러야 한다.
 /// 기존 슬롯 중 플랜지가 아닌 것(소켓)은 그대로 두고 플랜지 슬롯만 갈아 끼운다. 값이 같은 부재는 건드리지 않는다.</para>
@@ -37,15 +37,6 @@ internal static class PipeJointConnectionRecorder
                 .ToList();
             if (SameSlots(existing, merged)) continue;
             writer.JointSlots(element, merged.Select(x => (x.Kind, x.Spec, x.Count)).ToList());
-            changed.Add(id);
-        }
-
-        foreach (var (id, cut) in result.CutCounts)
-        {
-            if (!snapshot.Elements.TryGetValue(id, out var element)) continue;
-            var parameter = element.LookupParameter(PipeAlignmentParameters.CutCount);
-            if (parameter is { StorageType: StorageType.Integer, HasValue: true } && parameter.AsInteger() == cut) continue;
-            writer.Integer(element, PipeAlignmentParameters.CutCount, cut);
             changed.Add(id);
         }
 

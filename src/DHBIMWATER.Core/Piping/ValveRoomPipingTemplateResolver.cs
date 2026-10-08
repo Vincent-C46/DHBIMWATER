@@ -13,7 +13,6 @@ public static class ValveRoomPipingTemplateResolver
     public static ResolvedPipingTemplate Resolve(ValveRoomPipingTemplate template, ValveRoomOutline outline, bool fromFarEdge, double defaultDiameterMm)
     {
         if (outline.IsEmpty) throw new DhbimwaterException(ErrorCodes.PL_PresetNeedsOutline, "외곽이 없으면 프리셋을 적용할 수 없습니다.");
-        if (template.Valves.Count > 0) throw new DhbimwaterException(ErrorCodes.PL_PresetValveUnsupported, "밸브 프리셋은 아직 지원하지 않습니다(docs/172 § 0-5).");   // 코드 연결(docs/240 § B)
 
         // 1) 포트: 비율(하단/좌측 기준) → 이격 mm. fromFarEdge면 반대 모서리 기준값으로 환산해 접점이 같은 자리에 오게 한다.
         var ports = template.Ports.Select(p =>
@@ -30,7 +29,22 @@ public static class ValveRoomPipingTemplateResolver
         var segments = template.Segments.Select(s => new ResolvedSegment(
             ToPoint(s.Start), ToPoint(s.End),
             s.DiameterRatio is { } r ? defaultDiameterMm * r : defaultDiameterMm)).ToList();
-        return new ResolvedPipingTemplate(ports, segments);
+
+        // 3) 부속: 선 번호 → 해석된 선의 양 끝. 범위 밖 번호는 카탈로그 오류다.
+        ResolvedSegment SegmentAt(int index) => index >= 0 && index < segments.Count ? segments[index]
+            : throw new DhbimwaterException(ErrorCodes.PL_PresetPortMissing, $"프리셋이 참조한 선 번호 {index}가 없습니다.");
+        var fittings = new List<ResolvedFitting>();
+        foreach (var v in template.Valves)
+        {
+            var seg = SegmentAt(v.SegmentIndex);
+            fittings.Add(new ResolvedFitting(seg.Start, seg.End, v.T, false, 0));
+        }
+        foreach (var b in template.BypassSets ?? [])
+        {
+            var seg = SegmentAt(b.SegmentIndex);
+            fittings.Add(new ResolvedFitting(seg.Start, seg.End, b.T, true, b.Side));
+        }
+        return new ResolvedPipingTemplate(ports, segments, fittings);
 
         Point2D ToPoint(TemplatePoint p) => p.Kind switch
         {

@@ -148,5 +148,22 @@ public sealed class BypassSetTests
         return network;
     }
 
+    [Fact]
+    public void ResolveTeeMainEdges_ReturnsOnlyStraightMainEdges_NotBranch()
+    {
+        var network = new PipeNetwork();
+        network.AddSegment(P(0, 0), P(4000, 0), 1650);
+        network.AddSegment(P(2000, 0), P(2000, 2000), 300);   // 본관 중간에 분기 → T 절점
+
+        var tee = network.Nodes.Single(x => x.NodeKind == NodeKind.Tee);
+        var main = network.ResolveTeeMainEdges(tee.Id);
+
+        Assert.NotNull(main);
+        var mainEdges = network.Edges.Where(x => x.Id == main!.Value.First || x.Id == main.Value.Second).ToList();
+        Assert.Equal(2, mainEdges.Count);
+        Assert.All(mainEdges, x => Assert.Equal(1650, x.DiameterMm));   // 분기(300)는 본관이 아니다.
+        Assert.Null(network.ResolveTeeMainEdges(network.Nodes.First(x => x.NodeKind != NodeKind.Tee).Id));
+    }
+
     private static Point2D P(double x, double y) => new(x, y);
 }

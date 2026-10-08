@@ -30,6 +30,9 @@ public static class ServiceCollectionExtensions
         services.AddTransient<MigratePipeTablesUseCase>();
         services.AddTransient<CreatePipeMaterialScheduleUseCase>();
         services.AddTransient<CreatePipeMaterialDraftingUseCase>();
+        services.AddTransient<CreateJunctionDetailViewUseCase>();
+        services.AddTransient<RunJunctionDetailUseCase>();
+        services.AddTransient<BuildJunctionDetailPreviewUseCase>();
         services.AddTransient<BackfillPipeMaterialParametersUseCase>();
 
         return services;

@@ -141,6 +141,19 @@ public class CreatePipeMaterialDraftingUseCaseTests
         Assert.Equal(2, Assert.Single(fromRedraw.Rows).Count);   // 같은 부재 2개는 한 행 수량 2
     }
 
+    [Fact]
+    public void Execute_PassesImageOptionToCreateAndRedraw()
+    {
+        var parts = new[] { new PipeMaterialPart("V-1", 1, "직관", "D160x6.00m") };
+        var created = new FakeDraftingRepo(parts);
+        UseCase(created).Execute(includeTypeImage: false);
+        Assert.False(Assert.Single(created.Calls).IncludeTypeImage);
+
+        var redrawn = new FakeDraftingRepo(parts, existing: [ViewA]);
+        UseCase(redrawn).Execute(updateExisting: true, includeTypeImage: false);
+        Assert.False(Assert.Single(redrawn.Calls).IncludeTypeImage);
+    }
+
     private sealed class FakeDraftingRepo : IPipeMaterialDraftingRepo
     {
         private readonly IReadOnlyList<PipeMaterialPart> _parts;
@@ -157,23 +170,23 @@ public class CreatePipeMaterialDraftingUseCaseTests
 
         public List<string> CreatedViews { get; } = [];
         public List<string> RedrawnViews { get; } = [];
-        public List<(string ViewName, string Title, IReadOnlyList<PipeMaterialRow> Rows)> Calls { get; } = [];
+        public List<(string ViewName, string Title, IReadOnlyList<PipeMaterialRow> Rows, bool IncludeTypeImage)> Calls { get; } = [];
 
         public IReadOnlyList<PipeMaterialPart> GetParts() => _parts;
 
         public IReadOnlySet<string> GetExistingViewNames() => _existing;
 
-        public void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows)
+        public void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true)
         {
             CreatedViews.Add(viewName);
-            Calls.Add((viewName, title, rows));
+            Calls.Add((viewName, title, rows, includeTypeImage));
         }
 
-        public bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows)
+        public bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true)
         {
             if (!_redrawResult) return false;
             RedrawnViews.Add(viewName);
-            Calls.Add((viewName, title, rows));
+            Calls.Add((viewName, title, rows, includeTypeImage));
             return true;
         }
     }

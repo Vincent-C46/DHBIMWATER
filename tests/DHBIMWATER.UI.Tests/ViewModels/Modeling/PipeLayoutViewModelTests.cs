@@ -821,6 +821,24 @@ public sealed class PipeLayoutViewModelTests
     }
 
     [Fact]
+    public void Segment_length_parameter_prefers_exact_straight_length_name()
+    {
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(
+            segmentParameterNames: ["볼트내밈길이", "직관_길이"]));
+
+        Assert.Equal("직관_길이", vm.LengthParameterName);
+    }
+
+    [Fact]
+    public void Segment_length_parameter_keeps_existing_first_length_fallback()
+    {
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(
+            segmentParameterNames: ["볼트내밈길이", "관길이"]));
+
+        Assert.Equal("볼트내밈길이", vm.LengthParameterName);
+    }
+
+    [Fact]
     public void Bend_family_default_prefers_DH_prefix_over_plain_socket_bend()
     {
         // docs/145 § 1 — 키워드를 나눠 호출하던 때는 'DH' 없는 소켓곡관이 'DH_곡관'을 이겼다.
@@ -1415,6 +1433,27 @@ public sealed class PipeLayoutViewModelTests
 
         var highlighted = Assert.Single(vm.Edges.Where(edge => edge.IsError));
         Assert.Equal(1000, vm.Transform.ToModel(new Point(highlighted.LengthX, highlighted.LengthY)).Y, 6);
+    }
+
+    [Fact]
+    public void ModelCreationFailure_BypassSetHighlightsOnlySet()
+    {
+        var vm = CreateDrawingViewModel();
+        DisableOsnap(vm);
+        Draw(vm, new Point2D(0, 0), new Point2D(4000, 0));
+        vm.IsPlacingBypassSet = true;
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        var fittingId = Assert.Single(vm.BypassSetItems).Id;
+
+        vm.ApplyModelCreationResult(false, "연결 실패", [
+            new PipeConnectionFailure(new Point2D(2000, 0), 600, BypassSet.TypeKey, "DH_게이트 밸브", 0, "테스트")
+            { FittingId = fittingId }]);
+
+        Assert.All(vm.Edges, edge => Assert.False(edge.IsError));
+        var fitting = Assert.Single(vm.BypassSetItems);
+        Assert.True(fitting.IsError);
+        Assert.Equal("#E74C3C", fitting.Fill);
     }
 
     // ── 선별 관경 · 선택 편집 · 드래그 이동 (docs/152 § E-7) ─────────────────────

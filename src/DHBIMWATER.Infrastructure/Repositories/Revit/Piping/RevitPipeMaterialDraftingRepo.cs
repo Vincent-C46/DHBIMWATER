@@ -21,7 +21,7 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
         ("번호", 14, true),
         ("명칭", 40, false),
         ("규격", 42, false),
-        ("형상", 30, true),   // docs/133: 이번에는 칸만 그리고 심볼은 넣지 않는다.
+        ("형상", 30, true),
         ("수량", 14, true),
         ("비고", 30, false),  // 직관·단관은 관 재료 코드가 자동으로 들어온다(docs/141 § B-7). 나머지는 빈 칸.
     ];
@@ -44,17 +44,17 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
             .Select(x => x.Name)
             .ToHashSet(StringComparer.Ordinal);
 
-    public void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows)
+    public void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true)
     {
         var document = Document();
         // 격점 하나의 실패가 나머지 격점까지 되돌리지 않도록 그 격점의 변경만 묶는다(docs/208 § C-2).
         using var sub = new SubTransaction(document);
         sub.Start();
-        try { DrawTable(document, CreateView(document, viewName), title, rows); sub.Commit(); }
+        try { DrawTable(document, CreateView(document, viewName), title, rows, includeTypeImage); sub.Commit(); }
         catch { sub.RollBack(); throw; }
     }
 
-    public bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows)
+    public bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true)
     {
         var document = Document();
 
@@ -81,7 +81,7 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
         {
             ClearView(document, view);
             if (view.Scale != 1) view.Scale = 1;
-            DrawTable(document, view, title, rows);
+            DrawTable(document, view, title, rows, includeTypeImage);
             sub.Commit();
         }
         catch { sub.RollBack(); throw; }
@@ -107,14 +107,14 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
     /// 두 경로가 갈라지면 같은 격점의 새 표와 다시 그린 표가 서로 달라진다.
     /// <para>머리행 1줄 + 자료행 n줄. 좌표 원점은 표 좌상단이고, 아래로 갈수록 Y가 작아진다.</para></summary>
     private static void DrawTable(Document document, ViewDrafting view, string title,
-        IReadOnlyList<PipeMaterialRow> rows)
+        IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true)
     {
         var lineCount = rows.Count + 1;
         var totalWidthMm = Columns.Sum(x => x.WidthMm);
         var totalHeightMm = lineCount * RowHeightMm;
 
         DrawGrid(document, view, totalWidthMm, totalHeightMm, lineCount);
-        DrawTexts(document, view, title, rows);
+        DrawTexts(document, view, title, rows, includeTypeImage);
     }
 
     private Document Document()
@@ -156,7 +156,7 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
     }
 
     private static void DrawTexts(Document document, ViewDrafting view, string title,
-        IReadOnlyList<PipeMaterialRow> rows)
+        IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage)
     {
         var textTypeId = document.GetDefaultElementTypeId(ElementTypeGroup.TextNoteType);
         if (textTypeId == ElementId.InvalidElementId)
@@ -170,7 +170,7 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
         for (var col = 0; col < Columns.Length; col++)
             PlaceCellText(document, view, textTypeId, Columns[col].Heading, col, row: 0, centered: true);
 
-        // 자료행. 형상은 값을 쓰지 않으므로 칸만 남는다(docs/133 § 0).
+        // 자료행. 형상 칸은 유형 이미지를 놓는다.
         // 비고는 모델의 DH_비고 값을 그대로 그린다 — 일람표와 같은 값이어야 한다(docs/141 § B-7).
         for (var i = 0; i < rows.Count; i++)
         {
@@ -186,7 +186,30 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
             };
             for (var col = 0; col < Columns.Length; col++)
                 PlaceCellText(document, view, textTypeId, values[col], col, i + 1, Columns[col].Centered);
+            if (includeTypeImage) PlaceShapeImage(document, view, row, i + 1);
         }
+    }
+
+    private static void PlaceShapeImage(Document document, ViewDrafting view, PipeMaterialRow row, int tableRow)
+    {
+        if (row.SymbolTypeId <= 0 || document.GetElement(new ElementId(row.SymbolTypeId)) is not FamilySymbol symbol)
+            return;
+        var imageTypeId = symbol.get_Parameter(BuiltInParameter.ALL_MODEL_TYPE_IMAGE)?.AsElementId();
+        if (imageTypeId is null || imageTypeId == ElementId.InvalidElementId || document.GetElement(imageTypeId) is not ImageType)
+            return;
+
+        const int shapeColumn = 3;
+        var xMm = Columns.Take(shapeColumn).Sum(x => x.WidthMm) + Columns[shapeColumn].WidthMm / 2;
+        var yMm = -(tableRow * RowHeightMm + RowHeightMm / 2);
+        var center = new XYZ(UC.MmToFt(xMm), UC.MmToFt(yMm), 0);
+        var image = ImageInstance.Create(document, view, imageTypeId,
+            new ImagePlacementOptions(center, BoxPlacement.Center));
+        var maxWidth = UC.MmToFt(Columns[shapeColumn].WidthMm - 2);
+        var maxHeight = UC.MmToFt(RowHeightMm - 2);
+        if (image.Width <= 0 || image.Height <= 0) return;
+        var factor = Math.Min(maxWidth / image.Width, maxHeight / image.Height);
+        image.LockProportions = true;
+        image.Width *= factor;
     }
 
     /// <summary>칸(<paramref name="col"/>, <paramref name="row"/>) 안에 문자를 놓는다. row 0이 머리행이다.</summary>

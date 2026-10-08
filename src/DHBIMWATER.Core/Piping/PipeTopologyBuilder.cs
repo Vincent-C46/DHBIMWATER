@@ -185,7 +185,12 @@ public sealed class PipeTopologyBuilder
         var minSpacingT = Math.Min(0.45, 100 / length);
         var others = edge.InlineFittings.Where(x => x.Id != fittingId).ToList();
         // 최소 간격은 같은 부류끼리만 본다(docs/230 § B) — 세트와 그 안쪽 일반 밸브는 서로 밀어내지 않는다.
-        var resolved = FindAvailableFittingT(others.Where(x => x.IsBypassSet == target.IsBypassSet).ToList(), Math.Clamp(t, 0, 1), minSpacingT);
+        var peers = others.Where(x => x.IsBypassSet == target.IsBypassSet).ToList();
+        var desired = Math.Clamp(t, 0, 1);
+        // 세트 중심은 본관 T 절점(엣지 끝)에 놓을 수 있다 — 끝에서 최소 간격만큼 안쪽으로 밀면 세트가 T에서 본관 축 방향으로 비껴난다(docs/273 § C).
+        var resolved = target.IsBypassSet && CanCenterOnTee(edge, desired) && peers.All(x => Math.Abs(x.T - desired) >= minSpacingT)
+            ? desired
+            : FindAvailableFittingT(peers, desired, minSpacingT);
         edge.ReplaceFittings(others.Append(target with { T = resolved })
             .OrderBy(x => x.T)
             .Select((x, i) => x with { Order = i }));
@@ -278,8 +283,21 @@ public sealed class PipeTopologyBuilder
         // 최소 간격은 같은 부류끼리만 본다 — 바이패스 세트 안쪽(A–A 사이)에 일반 밸브를 놓을 수 있어야 한다(docs/230 § B).
         var isBypassSet = bypass is not null && string.Equals(typeKey, BypassSet.TypeKey, StringComparison.Ordinal);
         var peers = edge.InlineFittings.Where(x => x.IsBypassSet == isBypassSet).ToList();
-        var t = preservePosition ? Math.Clamp(desiredT, 0, 1) : FindAvailableFittingT(peers, desiredT, minSpacingT);
+        var clamped = Math.Clamp(desiredT, 0, 1);
+        // 바이패스 세트는 본관 T 절점(엣지 끝)에 중심을 둘 수 있다 — 끝에서 최소 간격만큼 밀지 않는다(docs/273 § C).
+        var onTee = isBypassSet && CanCenterOnTee(edge, clamped) && peers.All(x => Math.Abs(x.T - clamped) >= minSpacingT);
+        var t = preservePosition || onTee ? clamped : FindAvailableFittingT(peers, desiredT, minSpacingT);
         edge.AddFitting(new InlineFitting(typeKey, familyTypeName, t, edge.InlineFittings.Count) { Bypass = bypass });
+    }
+
+    /// <summary><paramref name="t"/>가 엣지 끝(0 또는 1)이고 그 끝 절점이 이 엣지를 본관으로 둔 직선 T인가.</summary>
+    private bool CanCenterOnTee(PipeEdge edge, double t)
+    {
+        Guid nodeId;
+        if (t <= 1e-9) nodeId = edge.StartNodeId;
+        else if (t >= 1 - 1e-9) nodeId = edge.EndNodeId;
+        else return false;
+        return _network.ResolveTeeMainEdges(nodeId) is { } main && (main.First == edge.Id || main.Second == edge.Id);
     }
 
     private static double FindAvailableFittingT(IReadOnlyList<InlineFitting> fittings, double desiredT, double minSpacingT)

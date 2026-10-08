@@ -4,6 +4,8 @@ using DHBIMWATER.UI.ViewModels.Utilities;
 using DHBIMWATER.UI.Views.GuideLine;
 using DHBIMWATER.UI.Views.Modeling;
 using DHBIMWATER.UI.Views.Utilities;
+using DHBIMWATER.UI.ViewModels.Documentation;
+using DHBIMWATER.UI.Views.Documentation;
 using DHBIMWATER.Infrastructure.Services.Wpf;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -27,6 +29,7 @@ public static class ServiceCollectionExtensions
 
         // Utilities
         services.AddTransient<ExParamsView>();
+        services.AddTransient<JunctionDetailView>();
         #endregion
 
         #region ViewModel ���
@@ -46,6 +49,7 @@ public static class ServiceCollectionExtensions
 
         // Utilities
         services.AddTransient<ExParamsViewModel>();
+        services.AddTransient<JunctionDetailViewModel>();
         #endregion
 
         return services;

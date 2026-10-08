@@ -7,7 +7,8 @@ namespace DHBIMWATER.Revit.Interop;
 
 internal sealed class PipeCatalogAdapter : IPipeCatalogSource
 {
-    private const int ExpectedContractVersion = 2;
+    private const int ExpectedCatalogContractVersion = 3;
+    private const int ExpectedRulesContractVersion = 4;
     private readonly Func<Document?> _document;
     private string _installWarning = string.Empty;
 
@@ -20,10 +21,9 @@ internal sealed class PipeCatalogAdapter : IPipeCatalogSource
             InteropInitializer.EnsureInitialized();
             var catalogVersion = PipeCatalogInterop.ContractVersion;
             var rulesVersion = PipeQuantityRulesInterop.ContractVersion;
-            if (catalogVersion != ExpectedContractVersion || rulesVersion != ExpectedContractVersion)
+            if (catalogVersion != ExpectedCatalogContractVersion || rulesVersion != ExpectedRulesContractVersion)
             {
-                var actual = catalogVersion == ExpectedContractVersion ? rulesVersion : catalogVersion;
-                error = $"규격표 dll이 맞지 않아 실행할 수 없습니다(계약 v{actual} ≠ v2). DHBIMWATER를 다시 설치하세요.";
+                error = $"규격표 dll이 맞지 않아 실행할 수 없습니다(규격표 계약 v{catalogVersion}/v{ExpectedCatalogContractVersion}, 수량 규칙 계약 v{rulesVersion}/v{ExpectedRulesContractVersion}). DHBIMWATER를 다시 설치하세요.";
                 return false;
             }
             if (!PipeCatalog.IsInstalled)
@@ -53,7 +53,7 @@ internal sealed class PipeCatalogAdapter : IPipeCatalogSource
 
     public bool ShowEditor(PipeMaterial? material)
         => PipeCatalogInterop.ShowEditor(RequiredDocument(), material is null ? null :
-            Enum.Parse<PipeMaterialCode>(material.Value.ToString()));
+            Enum.Parse<PipeMaterialCode>(material.Value.ToString()), BrandCode.DHBIMWATER);
 
     public PipeTableMigrationResult MigrateLegacyTables(BendSettings legacy)
     {

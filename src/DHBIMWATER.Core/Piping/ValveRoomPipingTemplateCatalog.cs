@@ -8,8 +8,25 @@ public static class ValveRoomPipingTemplateCatalog
     [
         Straight("이토밸브실"),
         Straight("공기밸브실"),
-        // 자리표시자(docs/172 § 0-4 A7) — 타이밸브실 배관 구성 미확정.
-        Straight("타이밸브실"),
+        // 샘플(2026-10-08 Claude 제안) — 본관 IN→OUT 중간 T 2개에서 위로 올라가 우회하는 연결(타이) 루프.
+        // 선5(우회 상단) 중앙에 밸브 1개, 선2(본관) 중앙에 바이패스 세트 1개(아래쪽=진행 방향 오른쪽). 패밀리는 사용자가 고른다.
+        new("타이밸브실", "타이밸브실 샘플(본관+우회 루프)",
+            Ports:
+            [
+                new(PortFlow.In, OutlineSide.Left, 0.5, "IN"),
+                new(PortFlow.Out, OutlineSide.Right, 0.5, "OUT"),
+            ],
+            Segments:
+            [
+                new(TemplatePoint.Port("IN"), TemplatePoint.Relative(0.30, 0.5)),            // 1) 입구 → T1
+                new(TemplatePoint.Relative(0.30, 0.5), TemplatePoint.Relative(0.70, 0.5)),   // 2) 본관 T1 → T2
+                new(TemplatePoint.Relative(0.70, 0.5), TemplatePoint.Port("OUT")),           // 3) T2 → 출구
+                new(TemplatePoint.Relative(0.30, 0.5), TemplatePoint.Relative(0.30, 0.8)),   // 4) T1 → 위로(곡관)
+                new(TemplatePoint.Relative(0.30, 0.8), TemplatePoint.Relative(0.70, 0.8)),   // 5) 우회 상단
+                new(TemplatePoint.Relative(0.70, 0.8), TemplatePoint.Relative(0.70, 0.5)),   // 6) 아래로(곡관) → T2
+            ],
+            Valves: [new(4, 0.5, ValveRole.Sluice)],
+            BypassSets: [new(1, 0.5, -1)]),
         // IN 2개는 제수밸브실이다(2026-09-15 사용자 수정 — 종전 이토밸브실에 두었던 것을 옮김). 배관 구성은 미확정 자리표시자.
         new("제수밸브실", "제수밸브실 기본(직관)",
             Ports:

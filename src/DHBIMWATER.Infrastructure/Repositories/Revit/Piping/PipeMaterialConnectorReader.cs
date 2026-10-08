@@ -20,6 +20,18 @@ internal static class PipeMaterialConnectorReader
             .Where(x => x.Domain == Domain.DomainPiping && x.ConnectorType == ConnectorType.End)
             .ToList() ?? [];
 
+    public static (long? Id, int? Index) Partner(Connector connector, long ownerId,
+        IReadOnlyDictionary<(long Element, int Connector), int> connectorIndex)
+    {
+        if (!connector.IsConnected) return (null, null);
+        foreach (Connector other in connector.AllRefs)
+        {
+            if (other.Owner is not FamilyInstance owner || owner.Id.Value == ownerId) continue;
+            if (connectorIndex.TryGetValue((owner.Id.Value, other.Id), out var index)) return (owner.Id.Value, index);
+        }
+        return (null, null);
+    }
+
     /// <summary>커넥터 직경(mm). 원형이 아니면 null — 규격 문자열을 만들 수 없다.</summary>
     public static double? DiameterMm(Connector connector)
     {

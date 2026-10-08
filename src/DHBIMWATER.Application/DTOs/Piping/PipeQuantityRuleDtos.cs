@@ -12,12 +12,12 @@ public sealed record PlannedSegmentCounts(string PartName, int LayingCount, int 
 public sealed record PlannedMemberCounts(int LayingCount, int CutCount,
     IReadOnlyList<PipeJointSlotValue> SocketSlots, bool MaterialUnknown);
 public sealed record PipeJointMemberInput(long Id, bool IsValve, string? PartName, string? Composition,
-    double DiameterMm, bool FlangedWhenNoComposition = false);
+    double DiameterMm, bool FlangedWhenNoComposition = false, string? MaterialCode = null);
 public sealed record PipeJointEndInput(long MemberId, int Index, double XMm, double YMm, double ZMm,
     double DiameterMm, long? PartnerMemberId = null, int? PartnerIndex = null);
 public sealed record PipeJointPassResult(
     IReadOnlyDictionary<long, IReadOnlyList<PipeJointSlotValue>> FlangeSlots,
-    IReadOnlyDictionary<long, int> CutCounts, int UnpairedFlangeCount, int UnresolvedEndCount,
+    int UnpairedFlangeCount, int UnresolvedEndCount,
     int AmbiguousEndCount, IReadOnlyList<string> Warnings);
 public readonly record struct PipeJointEnds(int Socket, int Flange)
 {

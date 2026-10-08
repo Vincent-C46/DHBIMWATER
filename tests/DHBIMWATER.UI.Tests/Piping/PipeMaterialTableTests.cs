@@ -43,4 +43,16 @@ public class PipeMaterialTableTests
         Assert.Equal(1, rows[1].Count);
         Assert.All(rows, x => Assert.Equal(string.Empty, x.Remark));
     }
+
+    [Fact]
+    public void Build_KeepsFirstSymbolTypeWithoutSplittingRows()
+    {
+        var rows = PipeMaterialTable.Build([
+            new("V-3", 1, "직관", "D160x6.00m", "DCIP", 101),
+            new("V-3", 1, "직관", "D160x6.00m", "DCIP", 202)], "V-3");
+
+        var row = Assert.Single(rows);
+        Assert.Equal(2, row.Count);
+        Assert.Equal(101, row.SymbolTypeId);
+    }
 }

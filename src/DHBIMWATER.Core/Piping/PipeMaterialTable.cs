@@ -1,10 +1,10 @@
 namespace DHBIMWATER.Core.Piping;
 
 /// <summary>배관재료표 원자료 한 건. 배치된 인스턴스 1개에서 읽은 값 그대로다(docs/131 § B).</summary>
-public sealed record PipeMaterialPart(string JunctionId, int ItemNumber, string Name, string Spec, string Remark = "");
+public sealed record PipeMaterialPart(string JunctionId, int ItemNumber, string Name, string Spec, string Remark = "", long SymbolTypeId = 0, string? TypeImagePath = null);
 
 /// <summary>배관재료표 한 행. 같은 (번호·명칭·규격·비고)를 묶어 수량을 센 결과다.</summary>
-public sealed record PipeMaterialRow(int ItemNumber, string Name, string Spec, int Count, string Remark = "");
+public sealed record PipeMaterialRow(int ItemNumber, string Name, string Spec, int Count, string Remark = "", long SymbolTypeId = 0, string? TypeImagePath = null);
 
 /// <summary>
 /// 배관재료표 행 집계(docs/133). 일람표는 Revit이 알아서 묶어 주지만,
@@ -25,7 +25,7 @@ public static class PipeMaterialTable
                 ? string.IsNullOrWhiteSpace(x.JunctionId)
                 : string.Equals(x.JunctionId, junctionId, StringComparison.Ordinal))
             .GroupBy(x => (x.ItemNumber, x.Name, x.Spec, x.Remark))
-            .Select(g => new PipeMaterialRow(g.Key.ItemNumber, g.Key.Name, g.Key.Spec, g.Count(), g.Key.Remark))
+            .Select(g => new PipeMaterialRow(g.Key.ItemNumber, g.Key.Name, g.Key.Spec, g.Count(), g.Key.Remark, g.First().SymbolTypeId, g.First().TypeImagePath))
             // 번호가 1차 정렬이다. 번호가 같은데 명칭·규격이 다른 경우는 채번이 어긋난 것이지만,
             // 표를 못 그리게 막을 이유는 없으므로 명칭·규격·비고로 안정 정렬만 해 둔다.
             .OrderBy(x => x.ItemNumber)

@@ -35,6 +35,9 @@ internal sealed record PipeDragState(
     public double Dy { get; set; }
     /// <summary>부속 드래그의 미리보기 파라미터.</summary>
     public double T { get; set; }
+    /// <summary>잡은 자리와 부속 중심의 T 차이(부속 T − 잡은 자리 정사영 T). 바이패스 세트는 중심에서 먼 표식도 잡히므로,
+    /// 이것을 더하지 않으면 드래그 시작 순간 중심이 커서 밑으로 튄다(docs/273).</summary>
+    public double GrabOffsetT { get; set; }
     /// <summary>클릭이 아니라 이동으로 확정됐는가.</summary>
     public bool Exceeded { get; set; }
 }
@@ -1377,7 +1380,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         if (target is null) { HideFittingPreview(); return; }
         if (snapPoint is not null)
         {
-            var snapEdge = target.Value.Edge;
+            // T 절점에 잡히면 본관 엣지에 올린다 — 동거리 동률에서 분기 엣지가 뽑히면 세트 축이 분기 방향이 된다(docs/273 § C-1).
+            var snapEdge = _isPlacingBypassSet ? PreferTeeMainEdge(snapPoint, cursor, target.Value.Edge) : target.Value.Edge;
             var edgeStart = _network.Nodes.First(x => x.Id == snapEdge.StartNodeId).Position;
             var edgeEnd = _network.Nodes.First(x => x.Id == snapEdge.EndNodeId).Position;
             var snapT = Math.Clamp(Segment2D.ParameterOnSegment(snapPoint, edgeStart, edgeEnd), 0, 1);
@@ -1429,6 +1433,23 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         if (!IsFittingPreviewVisible) return;
         IsFittingPreviewVisible = false;
         _fittingPreviewEdgeId = null;
+    }
+
+    /// <summary>스냅 점이 본관 직선 T 절점이면 본관 두 엣지 중 커서에 가까운 쪽을 돌려준다. 그 외에는 <paramref name="picked"/> 그대로.</summary>
+    private PipeEdge PreferTeeMainEdge(
+        DHBIMWATER.Core.Geometry.Point2D snapPoint, DHBIMWATER.Core.Geometry.Point2D cursor, PipeEdge picked)
+    {
+        var node = _network.Nodes.FirstOrDefault(x => x.NodeKind == NodeKind.Tee && x.Position.DistanceTo(snapPoint) <= 0.01);
+        if (node is null || _network.ResolveTeeMainEdges(node.Id) is not { } main) return picked;
+        if (picked.Id == main.First || picked.Id == main.Second) return picked;
+        double Distance(Guid id)
+        {
+            var edge = _network.Edges.First(x => x.Id == id);
+            return DistanceToSegment(cursor, _network.Nodes.First(x => x.Id == edge.StartNodeId).Position,
+                _network.Nodes.First(x => x.Id == edge.EndNodeId).Position);
+        }
+        var chosen = Distance(main.First) <= Distance(main.Second) ? main.First : main.Second;
+        return _network.Edges.First(x => x.Id == chosen);
     }
 
     private (PipeEdge Edge, double T, DHBIMWATER.Core.Geometry.Point2D Point, DHBIMWATER.Core.Geometry.Point2D StartPosition)? FindNearestEdgePoint(DHBIMWATER.Core.Geometry.Point2D cursor)
@@ -1881,6 +1902,19 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             if (segment.Start.DistanceTo(segment.End) <= PipeTopologyBuilder.SnapTolerance) { dropped++; continue; }
             _network.AddSegment(segment.Start, segment.End, segment.DiameterMm);
         }
+        // 프리셋 부속(밸브·바이패스 세트) — 소속 선을 양 끝 좌표로 다시 찾는다. 패밀리는 비워 두고 사용자가 고른다(바이패스 밸브만 현재 선택값).
+        var placedFittings = 0;
+        foreach (var fitting in resolved.Fittings ?? [])
+        {
+            var edge = FindEdgeBetween(fitting.SegmentStart, fitting.SegmentEnd);
+            if (edge is null) continue;
+            if (fitting.IsBypassSet)
+                _network.AddInlineFitting(edge.Id, BypassSet.TypeKey, string.Empty, fitting.T, preservePosition: true,
+                    bypass: new BypassSetSpec(BypassValveFamilyName ?? string.Empty, 0, fitting.Side));
+            else
+                _network.AddInlineFitting(edge.Id, InlineFittingTypeKey, string.Empty, fitting.T, preservePosition: true);
+            placedFittings++;
+        }
         // 프리셋이 정한 이격은 사용자 편집값으로 취급한다 — 이후 외곽 재피킹이 중앙값으로 덮지 않게(docs/172 § 0-4 A5).
         RestorePorts(resolved.Ports, userEdited: true);
         RecordUndoIfChanged(before);
@@ -1893,7 +1927,23 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         RefreshOutline();
         RefreshGraph();
         Status = $"{template.Name} 적용 — 배관 {_network.Edges.Count}개 · 포트 {Ports.Count}개"
+            + (placedFittings > 0 ? $" · 부속 {placedFittings}개" : string.Empty)
             + (dropped > 0 ? $" · 짧은 선 {dropped}개 제외" : string.Empty);
+    }
+
+    /// <summary>양 끝점이 주어진 두 좌표와 같은 선(방향 무관). 없으면 null.</summary>
+    private PipeEdge? FindEdgeBetween(DHBIMWATER.Core.Geometry.Point2D a, DHBIMWATER.Core.Geometry.Point2D b)
+    {
+        const double tolerance = 1.0;
+        var positions = _network.Nodes.ToDictionary(x => x.Id, x => x.Position);
+        foreach (var edge in _network.Edges)
+        {
+            var s = positions[edge.StartNodeId];
+            var e = positions[edge.EndNodeId];
+            if ((s.DistanceTo(a) <= tolerance && e.DistanceTo(b) <= tolerance)
+                || (s.DistanceTo(b) <= tolerance && e.DistanceTo(a) <= tolerance)) return edge;
+        }
+        return null;
     }
 
     // ── 프리셋 텍스트 내보내기(임시 도구, 2026-09-18 요청) ──────────────────────
@@ -2632,7 +2682,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         if (!SelectedFittingIds.Contains(fittingId)) SelectFitting(fittingId);
         var fitting = edge.InlineFittings.First(x => x.Id == fittingId);
         _drag = new PipeDragState(PipeDragKind.Fitting, screenPoint, Transform.ToModel(screenPoint), [], null, null, fittingId, edge.Id)
-        { T = fitting.T };
+        { T = fitting.T, GrabOffsetT = fitting.T - ProjectOntoEdge(edge.Id, Transform.ToModel(screenPoint)) };
         OnPropertyChanged(nameof(InteractionModeText));
         return true;
     }
@@ -2683,7 +2733,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
                 drag.Dy = RoundToGrid(model.Y - drag.StartModel.Y);
                 break;
             case PipeDragKind.Fitting:
-                drag.T = ProjectOntoEdge(drag.FittingEdgeId!.Value, model);
+                drag.T = Math.Clamp(ProjectOntoEdge(drag.FittingEdgeId!.Value, model) + drag.GrabOffsetT, 0, 1);
                 break;
         }
         RefreshGraph();
@@ -2869,7 +2919,13 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             if (selected) SelectedEdgeIds.Add(edge.Id);
         }
         foreach (var fitting in InlineFittings)
-            if (box.Contains(fitting.X, fitting.Y)) SelectedFittingIds.Add(fitting.Id);
+        {
+            var bounds = FittingBounds(fitting);
+            var selected = bounds is null
+                ? box.Contains(fitting.X, fitting.Y)
+                : IsCrossingSelection ? box.IntersectsWith(bounds.Value) : box.Contains(bounds.Value);
+            if (selected) SelectedFittingIds.Add(fitting.Id);
+        }
 
         SelectedEdge = Edges.FirstOrDefault(x => SelectedEdgeIds.Contains(x.Id));
         SelectedFitting = InlineFittings.FirstOrDefault(x => SelectedFittingIds.Contains(x.Id));
@@ -2898,6 +2954,16 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             || SegmentsIntersect(start, end, topRight, bottomRight)
             || SegmentsIntersect(start, end, bottomRight, bottomLeft)
             || SegmentsIntersect(start, end, bottomLeft, topLeft);
+    }
+
+    private static Rect? FittingBounds(InlineFittingItem fitting)
+    {
+        if (!fitting.IsBypassSet) return null;
+        var bounds = Rect.Empty;
+        if (fitting.BypassLine is { } line) bounds.Union(line.Bounds);
+        if (fitting.BypassMarkers is { } markers) bounds.Union(markers.Bounds);
+        bounds.Union(new Rect(fitting.X - 7, fitting.Y - 7, 14, 14));
+        return bounds;
     }
 
     private static bool SegmentsIntersect(Point a, Point b, Point c, Point d)
@@ -3168,7 +3234,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         // 사용자가 고른 값이 새 패밀리에도 있으면 그대로 둔다.
         if (!(_lengthParameterPinned && _lengthParameterName is not null && names.Contains(_lengthParameterName)))
         {
-            _lengthParameterName = names.FirstOrDefault(x => x.Contains("길이", StringComparison.Ordinal))
+            _lengthParameterName = names.FirstOrDefault(x => string.Equals(x, "직관_길이", StringComparison.Ordinal))
+                ?? names.FirstOrDefault(x => x.Contains("길이", StringComparison.Ordinal))
                 ?? names.FirstOrDefault(x => x.Contains("Length", StringComparison.OrdinalIgnoreCase))
                 ?? names.FirstOrDefault(x => string.Equals(x, "L", StringComparison.OrdinalIgnoreCase));
             _lengthParameterPinned = false;
@@ -4217,6 +4284,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         _errorEdgeIds.Clear();
         foreach (var failure in _failures)
         {
+            if (failure.FittingId is not null) continue;
             var nearestNode = _network.Nodes
                 .OrderBy(node => node.Position.DistanceTo(failure.CanvasPoint))
                 .FirstOrDefault();
@@ -4278,7 +4346,11 @@ public sealed class PipeLayoutViewModel : ViewModelBase
                     ? drag.T : fitting.T;
                 var item = new InlineFittingItem(fitting.Id, edge.Id, fitting.TypeKey, fitting.FamilyTypeName, t, fitting.Order,
                     display.X1 + (display.X2 - display.X1) * t, display.Y1 + (display.Y2 - display.Y1) * t,
-                    SelectedFittingIds.Contains(fitting.Id)) { Bypass = fitting.IsBypassSet ? fitting.Bypass : null };
+                    SelectedFittingIds.Contains(fitting.Id))
+                {
+                    Bypass = fitting.IsBypassSet ? fitting.Bypass : null,
+                    IsError = _failures.Any(x => x.FittingId == fitting.Id),
+                };
                 if (item.IsBypassSet)
                 {
                     var start = _network.Nodes.First(x => x.Id == edge.StartNodeId).Position;
@@ -4486,6 +4558,7 @@ public sealed record InlineFittingItem(Guid Id, Guid EdgeId, string TypeKey, str
     public bool IsJoint => string.Equals(TypeKey, InlineJoint.TypeKey, StringComparison.Ordinal);
     /// <summary>바이패스 세트 입력(docs/228). 세트가 아니면 null.</summary>
     public BypassSetSpec? Bypass { get; init; }
+    public bool IsError { get; init; }
     public bool IsBypassSet => Bypass is not null;
     /// <summary>밸브 2개 세트인가 — 목록의 [순서 바꾸기] 표시 조건(docs/255 § D-4).</summary>
     public bool HasTwoBypassValves => Bypass?.HasTwoValves == true;
@@ -4508,8 +4581,13 @@ public sealed record InlineFittingItem(Guid Id, Guid EdgeId, string TypeKey, str
         var name = familyTypeName.StartsWith("DH_", StringComparison.Ordinal) ? familyTypeName[3..] : familyTypeName;
         return name;
     }
-    public string Fill => IsBypassSet ? (IsSelected ? "#1A237E" : "#283593")
+    public string Fill => IsBypassSet ? BypassColor
         : IsJoint ? (IsSelected ? "#558B2F" : "#7CB342") : (IsSelected ? "#AD1457" : "#D81B60");
+    public string BypassStroke => BypassColor;
+    public string BypassFill => BypassColor;
+    /// <summary>세트 색. 실패 세트는 빨강이고, 실패한 세트를 선택하면 진한 빨강으로 바뀐다 —
+    /// 선택 여부가 실패 색에 묻히지 않게 한다.</summary>
+    private string BypassColor => IsError ? (IsSelected ? "#B71C1C" : "#E74C3C") : IsSelected ? "#00B8D4" : "#283593";
     /// <summary>캔버스 라벨. 바이패스 세트는 본관 밸브가 없어 패밀리명이 비므로 이름을 따로 단다(docs/230 § C).</summary>
     public string DisplayName => IsBypassSet ? BypassSet.TypeKey : FamilyTypeName;
     /// <summary>목록 배지. 이음관·바이패스 세트만 표시한다.</summary>

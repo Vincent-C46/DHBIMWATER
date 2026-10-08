@@ -90,7 +90,27 @@ public static class PipeNetworkReconstructor
             var edgeIndex = edges.FindIndex(x => IsOnEdge(x, set.CenterA) && IsOnEdge(x, set.CenterA2));
             if (edgeIndex < 0)
             {
-                warnings.Add($"바이패스 세트(ElementId {set.Bypass.ElementIds[0]})를 올릴 본관 선을 찾지 못했습니다. 재생성 시 세트 부재가 삭제됩니다.");
+                // docs/276 — A–A 사이 절점 부속 때문에 엣지가 갈라졌는지 실패 경고에 담는다.
+                var bypassEdge = new ImportedEdge(set.CenterA, set.CenterA2, 0);
+                var intermediateNodes = nodePositions
+                    .Where(x => x.Value.DistanceTo(set.CenterA) > ConnectionToleranceMm
+                                && x.Value.DistanceTo(set.CenterA2) > ConnectionToleranceMm
+                                && IsOnEdge(bypassEdge, x.Value))
+                    .Select(x => (Part: valid[x.Key], Position: x.Value))
+                    .OrderBy(x => x.Part.ElementId)
+                    .Take(5)
+                    .ToList();
+                if (intermediateNodes.Count == 0)
+                {
+                    warnings.Add($"바이패스 세트(ElementId {set.Bypass.ElementIds[0]})를 올릴 본관 선을 찾지 못했습니다. 재생성 시 세트 부재가 삭제됩니다.");
+                    continue;
+                }
+
+                var nodeDescriptions = intermediateNodes
+                    .Select(x => (Kind: NodeFittingName(x.Part.Role), x.Part.ElementId))
+                    .GroupBy(x => x.Kind)
+                    .Select(group => $"{group.Key} ElementId {string.Join(", ", group.Select(x => x.ElementId))}");
+                warnings.Add($"바이패스 세트(ElementId {set.Bypass.ElementIds[0]})의 밸브부관 A 사이에 {string.Join(", ", nodeDescriptions)}가 있어 본관 선이 둘로 나뉘어 세트를 올리지 못했습니다. 재생성 시 세트 부재가 삭제됩니다. T형관을 빼고 가져온 뒤 재생성 후 다시 놓으세요.");
                 continue;
             }
             fittings.Add(new ImportedFitting(edgeIndex, string.Empty, ParameterOn(edges[edgeIndex], Midpoint(set.CenterA, set.CenterA2)))
@@ -722,6 +742,14 @@ public static class PipeNetworkReconstructor
         if (t < -GeometryTolerance || t > 1 + GeometryTolerance) return false;
         return new Point2D(edge.Start.X + dx * t, edge.Start.Y + dy * t).DistanceTo(point) <= ConnectionToleranceMm;
     }
+
+    private static string NodeFittingName(PipePartRole role) => role switch
+    {
+        PipePartRole.Tee => "T형관",
+        PipePartRole.Cross => "십자관",
+        PipePartRole.Bend => "곡관",
+        _ => "절점 부속"
+    };
 
     /// <summary>(부재, 커넥터)에서 출발해 관·이음관·2포트 밸브 체인을 따라간다. 체인 부재 목록과, 체인이 아닌 부재에 닿은 접점(없으면 null)을 돌려준다.</summary>
     private static (List<int> Chain, (int Part, int Conn)? End) WalkChain(

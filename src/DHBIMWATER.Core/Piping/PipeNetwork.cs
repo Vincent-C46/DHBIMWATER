@@ -84,6 +84,19 @@ public sealed class PipeNetwork
     }
     public void RemoveInlineFitting(Guid edgeId, Guid fittingId) => new PipeTopologyBuilder(this).RemoveInlineFitting(edgeId, fittingId);
 
+    /// <summary>T 절점의 본관 엣지 둘(docs/273 § C-1). 본관 직선 T가 아니거나 T 절점이 아니면 null — 분기 엣지는 포함하지 않는다.
+    /// 모델 생성 경계와 같은 판정(<see cref="PipeTeeResolver"/>)을 쓴다.</summary>
+    public (Guid First, Guid Second)? ResolveTeeMainEdges(Guid nodeId)
+    {
+        var node = FindNode(nodeId);
+        if (node is null || node.NodeKind != NodeKind.Tee) return null;
+        var edges = _edges.Where(x => x.StartNodeId == nodeId || x.EndNodeId == nodeId)
+            .Select(x => new PipeEdgeDefinition(x.Id, FindNode(x.StartNodeId)!.Position, FindNode(x.EndNodeId)!.Position, Elevation, x.DiameterMm))
+            .ToList();
+        var order = PipeTeeResolver.Resolve(new PipeNodeDefinition(node.Id, node.Position, node.NodeKind), edges);
+        return order is null ? null : (order.MainEdge1Id, order.MainEdge2Id);
+    }
+
     /// <summary>이미 그려진 엣지의 관경을 바꾼다. 토폴로지는 건드리지 않는다(docs/152 § A-4).</summary>
     public void SetEdgeDiameter(Guid edgeId, double diameterMm)
     {

@@ -31,7 +31,7 @@ internal static class PipeJointEndReader
         return new Snapshot(members, ends, elements, IsValveRoom(document));
     }
 
-    /// <summary>밸브실 문서인지 — 프로젝트 정보 `밸브실유형`이 채워져 있으면 그렇다(docs/266 § 1-3). 짝 없는 플랜지 · 유입부 절단 판정이 갈린다.</summary>
+    /// <summary>밸브실 문서인지 — 프로젝트 정보 `밸브실유형`이 채워져 있으면 그렇다(docs/266 § 1-3). 짝 없는 플랜지 판정이 갈린다.</summary>
     private static bool IsValveRoom(Document document)
         => !string.IsNullOrWhiteSpace(document.ProjectInformation?.LookupParameter(ValveRoomProjectInfoParameters.RoomType)?.AsString());
 
@@ -62,13 +62,15 @@ internal static class PipeJointEndReader
                 instance.LookupParameter(ValvePipingParameters.JointComposition)?.AsString(),
                 diameters.Max() ?? 0d,
                 // 밸브부관은 접합구성을 적지 않는 플랜지 이형관이다(R-7, docs/227).
-                PipeValveBend.IsValveBendFamily(instance.Symbol?.Family?.Name)));
+                PipeValveBend.IsValveBendFamily(instance.Symbol?.Family?.Name),
+                // 주철 단독 플랜지 부품은 연결 패스가 세지 않는다 — 관종을 넘겨야 이중 계수되지 않는다(docs/274 § C).
+                MaterialCodeOf(instance.LookupParameter(ValvePipingParameters.Material)?.AsString())));
             elements[id] = instance;
 
             for (var i = 0; i < connectors.Count; i++)
             {
                 var connector = connectors[i];
-                var (partnerId, partnerIndex) = Partner(connector, id, connectorIndex);
+                var (partnerId, partnerIndex) = PipeMaterialConnectorReader.Partner(connector, id, connectorIndex);
                 var origin = connector.Origin;
                 ends.Add(new PipeJointEndInput(id, i, UC.FtToMm(origin.X), UC.FtToMm(origin.Y), UC.FtToMm(origin.Z),
                     diameters[i] ?? 0d, partnerId, partnerIndex));
@@ -76,19 +78,12 @@ internal static class PipeJointEndReader
         }
     }
 
-    private static (long? Id, int? Index) Partner(Connector connector, long ownerId, Dictionary<(long, int), int> connectorIndex)
-    {
-        if (!connector.IsConnected) return (null, null);
-        foreach (Connector other in connector.AllRefs)
-        {
-            if (other.Owner is not FamilyInstance owner || owner.Id.Value == ownerId) continue;
-            if (connectorIndex.TryGetValue((owner.Id.Value, other.Id), out var index)) return (owner.Id.Value, index);
-        }
-        return (null, null);
-    }
+    /// <summary>모델 관종 값을 수량 규칙이 읽는 코드로 바꾼다. 해석되지 않으면 원문을 그대로 넘긴다(<c>RevitPipeMaterialBackfillRepo</c>와 같은 방식).</summary>
+    private static string? MaterialCodeOf(string? raw)
+        => PipeAlignmentParameters.MaterialFromModelValue(raw) is { } material ? PipeAlignmentParameters.Code(material) : raw;
 
     /// <summary>계획관로 가변 패밀리 — 직관 배치점 [0]·[1], 곡관 [0]·[4](P1·P5)가 단부다(docs/266 § 1-1). 커넥터가 없으니 위치 일치로만 짝을 찾는다.
-    /// <para>플랜지 구성인 부재만 넣는다 — 계획관로 문서는 유입부 절단이 없어 소켓 부재는 결과가 언제나 비고,
+    /// <para>플랜지 구성인 부재만 넣는다 — 계획관로 문서는 소켓 부재의 연결 패스 결과가 언제나 비고,
     /// 선형 전체(수천 개)를 넣으면 한 번의 배치마다 모든 점을 다시 읽게 된다.</para></summary>
     private static void ReadAdaptivePipes(Document document, IPipeQuantityRules rules, List<PipeJointMemberInput> members, List<PipeJointEndInput> ends,
         Dictionary<long, Element> elements)
@@ -110,7 +105,7 @@ internal static class PipeJointEndReader
             var id = instance.Id.Value;
             var diameter = DiameterFromText(instance.LookupParameter(PipeAlignmentParameters.NominalDiameter)?.AsString());
             members.Add(new PipeJointMemberInput(id, false, instance.LookupParameter(PipeAlignmentParameters.Part)?.AsString(),
-                composition, diameter));
+                composition, diameter, MaterialCode: MaterialCodeOf(instance.LookupParameter(PipeAlignmentParameters.Material)?.AsString())));
             elements[id] = instance;
             for (var i = 0; i < endPoints.Length; i++)
             {

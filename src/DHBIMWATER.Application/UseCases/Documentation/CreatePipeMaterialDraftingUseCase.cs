@@ -43,7 +43,7 @@ public sealed class CreatePipeMaterialDraftingUseCase
 
     /// <param name="updateExisting">true면 이름이 같은 도면 뷰의 내용을 전부 지우고 다시 그린다(docs/173).
     /// false면 종전대로 건너뛴다. 이 판단은 사용자 확인을 받은 호출자가 내린다.</param>
-    public PipeMaterialScheduleResult Execute(bool updateExisting = false)
+    public PipeMaterialScheduleResult Execute(bool updateExisting = false, bool includeTypeImage = true)
     {
         // 읽기는 트랜잭션 밖에서 먼저 한다. 만들 것이 없으면 트랜잭션을 아예 열지 않는다.
         var parts = _repo.GetParts();
@@ -77,12 +77,12 @@ public sealed class CreatePipeMaterialDraftingUseCase
                             // 사용자가 갱신을 승인하지 않았으면 손대지 않는다(종전 동작).
                             if (!updateExisting) { skipped.Add(viewName); continue; }
                             // 그 이름을 다른 종류의 뷰가 쓰고 있으면 지우지 않고 건너뛴다(docs/173 § B).
-                            if (!_repo.RedrawTableView(viewName, title, rows)) { skipped.Add(viewName); continue; }
+                            if (!_repo.RedrawTableView(viewName, title, rows, includeTypeImage)) { skipped.Add(viewName); continue; }
                             updated.Add(viewName);
                             continue;
                         }
 
-                        _repo.CreateTableView(viewName, title, rows);
+                        _repo.CreateTableView(viewName, title, rows, includeTypeImage);
                         created.Add(viewName);
                         existing.Add(viewName);
                     }

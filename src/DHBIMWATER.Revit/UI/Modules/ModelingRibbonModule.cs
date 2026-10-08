@@ -20,8 +20,8 @@ namespace DHBIMWATER.Revit.UI.Modules
 
             PushButtonData junctionDetailBtn = new PushButtonData("JunctionDetailCommand", "격점상세\n재료표", Assembly.GetExecutingAssembly().Location, RevitCommandType<JunctionDetailCommand>.FullName)
             {
-                ToolTip = "밸브실 배관으로 만든 부재를 격점별로 모아 배관재료표를 만듭니다. 창 없이 바로 실행됩니다.",
-                LongDescription = "격점번호(DH_격점번호)별로 일람표와 드래프팅뷰 도면을 각각 1개씩 만듭니다. 열은 번호·명칭·규격·형상·수량·비고로 고정이며, 같은 이름의 뷰가 이미 있으면 건너뜁니다."
+                ToolTip = "격점별 배관재료표와 평면 상세도 작성 옵션을 설정하고 실행합니다.",
+                LongDescription = "작성 항목, 심볼 오프셋 간격과 축척, 번호 태그, 형상 이미지, 기존 도면 뷰 처리 방법을 설정합니다."
             };
 
             PushButtonData coordinateLinkBtn = new PushButtonData("CoordinateLinkCommand", "기준점\n통합 링크", Assembly.GetExecutingAssembly().Location, RevitCommandType<CoordinateLinkCommand>.FullName);

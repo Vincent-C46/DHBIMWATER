@@ -140,14 +140,30 @@ public sealed class ValveRoomPipingTemplateResolverTests
     }
 
     [Fact]
-    public void Resolve_TemplateWithValves_IsNotSupportedYet()
+    public void Resolve_TemplateWithValveAndBypass_ReturnsFittingsOnTheirSegments()
     {
         var template = new ValveRoomPipingTemplate("테스트", "테스트",
             [new(PortFlow.In, OutlineSide.Left, 0.5, "IN"), new(PortFlow.Out, OutlineSide.Right, 0.5, "OUT")],
             [new(TemplatePoint.Port("IN"), TemplatePoint.Port("OUT"))],
-            [new(0, 0.5, ValveRole.Sluice)]);
+            [new(0, 0.5, ValveRole.Sluice)],
+            [new(0, 0.25, -1)]);
 
-        Assert.Equal("PL-111", Assert.Throws<DHBIMWATER.Shared.Errors.DhbimwaterException>(() => ValveRoomPipingTemplateResolver.Resolve(template, Outline(), false, Diameter)).Code);   // docs/240 § B
+        var resolved = ValveRoomPipingTemplateResolver.Resolve(template, Outline(), false, Diameter);
+
+        Assert.Equal(2, resolved.Fittings!.Count);
+        Assert.All(resolved.Fittings, f => Assert.Equal(resolved.Segments[0].Start, f.SegmentStart));
+        Assert.Single(resolved.Fittings, f => f.IsBypassSet && f.Side == -1 && f.T == 0.25);
+    }
+
+    [Fact]
+    public void Resolve_FittingOnMissingSegment_Throws()
+    {
+        var template = new ValveRoomPipingTemplate("테스트", "테스트",
+            [new(PortFlow.In, OutlineSide.Left, 0.5, "IN"), new(PortFlow.Out, OutlineSide.Right, 0.5, "OUT")],
+            [new(TemplatePoint.Port("IN"), TemplatePoint.Port("OUT"))],
+            [new(5, 0.5, ValveRole.Sluice)]);
+
+        Assert.Throws<DHBIMWATER.Shared.Errors.DhbimwaterException>(() => ValveRoomPipingTemplateResolver.Resolve(template, Outline(), false, Diameter));
     }
 
     [Fact]
@@ -176,7 +192,8 @@ public sealed class ValveRoomPipingTemplateResolverTests
                 if (point.Kind == TemplatePointKind.Port) Assert.Contains(point.PortLabel, labels);
                 else { Assert.InRange(point.RatioX, 0, 1); Assert.InRange(point.RatioY, 0, 1); }
             }
-            Assert.Empty(template.Valves);   // 1차는 직관만(docs/172 § 0-3 Q1)
+            foreach (var v in template.Valves) Assert.InRange(v.SegmentIndex, 0, template.Segments.Count - 1);
+            foreach (var b in template.BypassSets ?? []) Assert.InRange(b.SegmentIndex, 0, template.Segments.Count - 1);
             Assert.NotNull(ValveRoomPipingTemplateCatalog.Default(template.Zone));
         }
     }

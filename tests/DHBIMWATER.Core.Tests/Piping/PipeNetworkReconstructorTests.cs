@@ -359,6 +359,55 @@ public sealed class PipeNetworkReconstructorTests
         Assert.Contains(import.Warnings, x => x.Contains("밸브실 유형"));
     }
 
+    [Fact]
+    public void Build_BypassSetWithTeeBetweenA_WarnsWithTeeIdAndDoesNotRestoreSet()
+    {
+        var import = PipeNetworkReconstructor.Build(
+        [
+            .. BypassParts(),
+            Segment(41, P(-2000, 0), P(-200, 0), 1650),
+            Segment(42, P(2200, 0), P(4000, 0), 1650),
+            Segment(51, P(200, 0), P(800, 0), 1650),
+            Tee(52, P(1000, 0), diameterMm: 1650),
+            Segment(53, P(1200, 0), P(1800, 0), 1650)
+        ]);
+
+        Assert.Contains(import.Warnings, x => x.Contains("T형관") && x.Contains("ElementId 52")
+                                               && x.Contains("재생성 시 세트 부재가 삭제됩니다."));
+        Assert.DoesNotContain(import.Fittings, x => x.Bypass is not null);
+    }
+
+    [Fact]
+    public void Build_BypassSetWithoutTee_RestoresSetWithoutWarning()
+    {
+        var import = PipeNetworkReconstructor.Build(
+        [
+            .. BypassParts(),
+            Segment(31, P(200, 0), P(900, 0), 1650),
+            Accessory(32, P(900, 0), P(1100, 0), 1650),
+            Segment(33, P(1100, 0), P(1800, 0), 1650),
+            Segment(41, P(-2000, 0), P(-200, 0), 1650),
+            Segment(42, P(2200, 0), P(4000, 0), 1650)
+        ]);
+
+        Assert.DoesNotContain(import.Warnings, x => x.Contains("바이패스 세트(ElementId"));
+        Assert.NotNull(Assert.Single(import.Fittings, x => x.Bypass is not null).Bypass);
+    }
+
+    [Fact]
+    public void Build_BypassSetWithoutTeeAndContinuousMainLine_KeepsOriginalWarning()
+    {
+        var import = PipeNetworkReconstructor.Build(
+        [
+            .. BypassParts(),
+            Segment(55, P(200, 0), P(1000, 0), 1650)
+        ]);
+
+        Assert.Contains(import.Warnings, x => x ==
+            "바이패스 세트(ElementId 1)를 올릴 본관 선을 찾지 못했습니다. 재생성 시 세트 부재가 삭제됩니다.");
+        Assert.DoesNotContain(import.Fittings, x => x.Bypass is not null);
+    }
+
     // ── 헬퍼 ────────────────────────────────────────────────────────────────────
 
     private static Point2D P(double x, double y) => new(x, y);
@@ -411,6 +460,32 @@ public sealed class PipeNetworkReconstructorTests
             new PickedConnector(Offset(corner, P(1, 0), legMm), 0, P(1, 0), diameterMm, []),
             new PickedConnector(Offset(corner, P(0, 1), legMm), 0, P(0, 1), diameterMm, []),
             new PickedConnector(Offset(corner, P(0, -1), legMm), 0, P(0, -1), diameterMm, [])
+        ]);
+
+    private static IEnumerable<PickedPipePart> BypassParts()
+    {
+        yield return ValveTee(1, P(0, 0));
+        yield return ValveTee(2, P(2000, 0));
+        yield return ValveBend(3, P(200, 700), P(0, 300));
+        yield return ValveBend(4, P(1800, 700), P(2000, 300));
+        yield return Segment(21, P(200, 700), P(900, 700), 300);
+        yield return Accessory(22, P(900, 700), P(1100, 700), 300);
+        yield return Segment(23, P(1100, 700), P(1800, 700), 300);
+    }
+
+    private static PickedPipePart ValveTee(long id, Point2D center)
+        => new(id, PipePartRole.ValveTee, "DH_밸브부관A : 1650A", center, 0,
+        [
+            new PickedConnector(P(center.X - 200, 0), 0, P(-1, 0), 1650, []),
+            new PickedConnector(P(center.X + 200, 0), 0, P(1, 0), 1650, []),
+            new PickedConnector(P(center.X, 300), 0, P(0, 1), 300, [])
+        ]);
+
+    private static PickedPipePart ValveBend(long id, Point2D valveSide, Point2D teeSide)
+        => new(id, PipePartRole.ValveBend, "DH_밸브부관B : 300A", valveSide, 0,
+        [
+            new PickedConnector(valveSide, 0, P(1, 0), 300, []),
+            new PickedConnector(teeSide, 0, P(0, -1), 300, [])
         ]);
 
     private static Point2D Mid(Point2D a, Point2D b) => new((a.X + b.X) / 2, (a.Y + b.Y) / 2);

@@ -62,51 +62,189 @@ internal sealed partial class RevitPipeSegmentCommandRepo
 
     // ── § C-2 예약 ─────────────────────────────────────────────────────────────
 
+    /// <summary>세트 하나의 건너뛰기 사유를 정하고 치수를 잰다(캐시 사용). 건너뛰면 실패를 기록하고 <paramref name="droppedFittings"/>에 넣은 뒤 null.
+    /// 엣지 위 예약(<see cref="BypassSetSpans"/>)과 tee 중심 세트 사전 계획(<see cref="PlanTeeCenteredSets"/>)이 같이 쓴다.</summary>
+    private static BypassLayout? ResolveBypassLayout(
+        Document document, FamilySymbolCache symbols, PipeEdgeDefinition edge, PipeNetworkDefinition network,
+        PipeSegmentFamilySelection families, SkipPlan skipPlan, IDictionary<string, string> unusableValves,
+        ICollection<PipeConnectionFailure> skipped, ISet<Guid> droppedFittings,
+        IDictionary<BypassLayoutKey, BypassLayout> cache, FittingPlacementDefinition fitting)
+    {
+        var spec = fitting.Bypass!;
+        var canvasPoint = ToXyz(fitting.Position, fitting.Elevation, network.ReferencePoint);
+        // 새 세트는 패밀리명만, 되가져온 세트는 "패밀리 : 유형"을 든다 — 유형은 생성 때 다시 고르므로 패밀리로 모은다(docs/244 § A-5).
+        var valveFamily = BypassValveFamilyOf(spec.BypassValveFamilyTypeName);
+        // 밸브 2개 세트의 V2(docs/255). 1개 세트면 null.
+        var secondFamily = spec.HasTwoValves ? BypassValveFamilyOf(spec.SecondValveFamilyTypeName) : null;
+        // 지관 관경은 핸드북 규격표가 정한다(docs/256). 표에 없는 주관·관종이면 세트를 만들지 않는다.
+        var branchMm = ValveBypassSpecTable.BranchDiameterMm(network.Material, network.SteelFittingClass, edge.DiameterMm);
+        var reason = skipPlan.BypassSetReason
+            ?? (branchMm is null ? BypassSpecMissingReason(network, edge.DiameterMm) : null)
+            ?? (string.IsNullOrWhiteSpace(valveFamily) ? "바이패스 밸브가 선택되지 않았습니다." : null)
+            ?? (unusableValves.TryGetValue(valveFamily, out var bypassReason) ? bypassReason : null)
+            ?? (secondFamily is not null && unusableValves.TryGetValue(secondFamily, out var secondReason) ? secondReason : null)
+            ?? (secondFamily is not null && !BypassSet.IsValidSpoolLength(spec.SpoolLengthMm)
+                ? FormattableString.Invariant($"바이패스 밸브 사이 단관 {spec.SpoolLengthMm:0.#}mm는 쓸 수 없습니다(0 = 직결, 또는 {PipeSegmentPlan.MinSegmentMm:0}mm 이상).")
+                : null);
+        if (reason is not null)
+        {
+            skipped.Add(CreateFailure(canvasPoint, BypassSet.TypeKey, valveFamily, 0, reason, network) with { FittingId = fitting.Id });
+            droppedFittings.Add(fitting.Id);
+            return null;
+        }
+        try
+        {
+            var key = new BypassLayoutKey(valveFamily, edge.DiameterMm, branchMm!.Value,
+                secondFamily, secondFamily is null ? 0 : spec.SpoolLengthMm);
+            if (!cache.TryGetValue(key, out var layout))
+                cache[key] = layout = MeasureBypassLayout(document, symbols, families, key);
+            return layout;
+        }
+        catch (Exception ex)
+        {
+            skipped.Add(CreateFailure(canvasPoint, BypassSet.TypeKey, valveFamily, 0,
+                $"세트 치수를 잴 수 없습니다: {ex.Message}", network) with { FittingId = fitting.Id });
+            droppedFittings.Add(fitting.Id);
+            return null;
+        }
+    }
+
+    // ── tee 중심 세트(docs/273 § C) ──────────────────────────────────────────────
+
+    /// <summary>중심이 T 절점에 놓여 두 본관 엣지에 걸치는 세트. 세트는 한 엣지(<paramref name="OwnerEdgeId"/>) 소속이지만
+    /// 밸브부관 A 하나는 반대편 본관 엣지(<paramref name="OtherEdgeId"/>)에 놓인다. 구간은 각 엣지 배치 축(mm) 기준이다.</summary>
+    /// <param name="GapOpenPoints">A와 T 절점 부속 사이 틈이 관 최소 조각보다 짧아 단관을 넣지 않은 자리의 커넥터 점(연결 실패로 보고하지 않는다).</param>
+    private sealed record TeeCenteredSet(
+        Guid OwnerEdgeId, Guid OtherEdgeId, OccupiedSpan OwnerSpan, OccupiedSpan OtherSpan, IReadOnlyList<XYZ> GapOpenPoints);
+
+    private readonly record struct EdgeFrame(EdgeAxis Axis, double LengthMm);
+
+    /// <summary>엣지의 배치 축과 길이 — <c>CreateNetwork</c> 엣지 루프가 정하는 값과 같은 식이다(절점 부속 앵커 우선).</summary>
+    private static EdgeFrame? FrameOf(
+        PipeNetworkDefinition network, PipeEdgeDefinition edge, IReadOnlyDictionary<(Guid NodeId, Guid EdgeId), NodeLegAnchor> legAnchors)
+    {
+        var startXyz = ToXyz(edge.Start, edge.Elevation, network.ReferencePoint);
+        var endXyz = ToXyz(edge.End, edge.Elevation, network.ReferencePoint);
+        var startAnchor = legAnchors.TryGetValue((NodeIdAt(network, edge.Start), edge.Id), out var startLeg) ? startLeg.ConnectorOrigin : startXyz;
+        var endAnchor = legAnchors.TryGetValue((NodeIdAt(network, edge.End), edge.Id), out var endLeg) ? endLeg.ConnectorOrigin : endXyz;
+        var lengthMm = UC.FtToMm(startAnchor.DistanceTo(endAnchor));
+        if (lengthMm <= 0) return null;
+        return new EdgeFrame(new EdgeAxis(startAnchor, Direction(new XYZ(endAnchor.X - startAnchor.X, endAnchor.Y - startAnchor.Y, 0))), lengthMm);
+    }
+
+    /// <summary>A 구간과 T 절점 부속 커넥터 사이 틈이 0보다 크고 관 최소 조각보다 짧으면 구간을 엣지 끝까지 늘려 그 틈을 비워 둔다
+    /// (docs/230 § E와 같은 규칙 — 세트를 통째로 건너뛰지 않는다). <paramref name="nodeAtStart"/> = T 절점이 이 엣지의 시작 쪽.</summary>
+    private static OccupiedSpan CloseTinyNodeGap(OccupiedSpan span, double lengthMm, bool nodeAtStart, out double closedGapMm)
+    {
+        closedGapMm = 0;
+        var gap = nodeAtStart ? span.StartMm : lengthMm - span.EndMm;
+        if (gap <= 1e-6 || gap >= PipeSegmentPlan.MinSegmentMm) return span;
+        closedGapMm = gap;
+        return nodeAtStart ? new OccupiedSpan(0, span.EndMm) : new OccupiedSpan(span.StartMm, lengthMm);
+    }
+
+    /// <summary>중심이 본관 직선 T 절점에 놓인 세트를 찾아 두 엣지의 A 구간을 미리 정한다. 엣지 루프가 시작되기 전에 부른다 —
+    /// 반대편 엣지의 구간·실패 여부를 그 엣지를 처리하기 전에 알아야 반쪽 세트가 남지 않는다(docs/273 § C-3·C-4).
+    /// <para>구간이 엣지 밖으로 나가거나 T 몸통과 겹치면 세트 전체를 건너뛰기로 기록한다.</para></summary>
+    private static Dictionary<Guid, TeeCenteredSet> PlanTeeCenteredSets(
+        Document document, FamilySymbolCache symbols, PipeNetworkDefinition network, PipeSegmentFamilySelection families, SkipPlan skipPlan,
+        IReadOnlyDictionary<(Guid NodeId, Guid EdgeId), NodeLegAnchor> legAnchors,
+        IDictionary<string, string> unusableValves, ICollection<PipeConnectionFailure> skipped, ISet<Guid> droppedFittings,
+        IDictionary<Guid, BypassLayout> layouts, IDictionary<BypassLayoutKey, BypassLayout> cache, ICollection<string> warnings)
+    {
+        var result = new Dictionary<Guid, TeeCenteredSet>();
+        const double nodeToleranceMm = 1.0;
+        foreach (var fitting in network.InlineFittings.Where(x => x.IsBypassSet && x.EdgeId is not null))
+        {
+            var owner = network.Edges.FirstOrDefault(x => x.Id == fitting.EdgeId);
+            if (owner is null) continue;
+            var atEnd = owner.End.DistanceTo(fitting.Position) <= nodeToleranceMm;
+            var atStart = !atEnd && owner.Start.DistanceTo(fitting.Position) <= nodeToleranceMm;
+            if (!atEnd && !atStart) continue;
+            var nodePosition = atEnd ? owner.End : owner.Start;
+            var node = network.Nodes.FirstOrDefault(x => x.NodeKind == NodeKind.Tee && x.Position.DistanceTo(nodePosition) <= 0.01);
+            if (node is null || PipeTeeResolver.Resolve(node, network.Edges) is not { } order) continue;
+            if (owner.Id != order.MainEdge1Id && owner.Id != order.MainEdge2Id) continue;
+            var other = network.Edges.First(x => x.Id == (owner.Id == order.MainEdge1Id ? order.MainEdge2Id : order.MainEdge1Id));
+            if (FrameOf(network, owner, legAnchors) is not { } ownerFrame || FrameOf(network, other, legAnchors) is not { } otherFrame) continue;
+
+            var layout = ResolveBypassLayout(document, symbols, owner, network, families, skipPlan, unusableValves, skipped, droppedFittings, cache, fitting);
+            if (layout is null) continue;
+            layouts[fitting.Id] = layout;
+
+            var canvasPoint = ToXyz(fitting.Position, fitting.Elevation, network.ReferencePoint);
+            var center = AxisDistanceMm(canvasPoint, ownerFrame.Axis);
+            // T 절점이 엣지 끝이면 소속 엣지 쪽 A는 시작 방향(−1)이고 반대편 A는 +1이다. 시작이면 반대다.
+            var ownerSign = atEnd ? -1 : 1;
+            var ownerRaw = layout.TeeSpan(center, ownerSign);
+            var otherCenter = AxisDistanceMm(ownerFrame.Axis.PointAt(center - ownerSign * layout.TeeCenterOffsetMm), otherFrame.Axis);
+            var otherRaw = new OccupiedSpan(otherCenter - layout.TeeMainHalfMm, otherCenter + layout.TeeMainHalfMm);
+
+            var otherNodeAtStart = other.Start.DistanceTo(nodePosition) <= 0.01;
+            var ownerSpan = CloseTinyNodeGap(ownerRaw, ownerFrame.LengthMm, !atEnd, out var ownerGap);
+            var otherSpan = CloseTinyNodeGap(otherRaw, otherFrame.LengthMm, otherNodeAtStart, out var otherGap);
+
+            var dropReason = DropReasonOf(fitting.Id, ownerSpan, ownerFrame.LengthMm) ?? DropReasonOf(fitting.Id, otherSpan, otherFrame.LengthMm);
+            if (dropReason is not null)
+            {
+                skipped.Add(CreateFailure(canvasPoint, BypassSet.TypeKey, BypassValveFamilyOf(fitting.Bypass!.BypassValveFamilyTypeName),
+                    0, $"T형관 중심 세트의 밸브부관 A를 놓을 수 없습니다. {dropReason}", network) with { FittingId = fitting.Id });
+                droppedFittings.Add(fitting.Id);
+                layouts.Remove(fitting.Id);
+                continue;
+            }
+
+            var gapPoints = new List<XYZ>();
+            foreach (var (gap, frame, atNodeStart) in new[] { (ownerGap, ownerFrame, !atEnd), (otherGap, otherFrame, otherNodeAtStart) })
+            {
+                if (gap <= 0) continue;
+                gapPoints.Add(frame.Axis.PointAt(atNodeStart ? 0 : frame.LengthMm));
+                if (gap > ConnectionToleranceMm)
+                    warnings.Add(FormattableString.Invariant(
+                        $"바이패스 세트: 밸브부관 A와 T형관 사이 틈이 {gap:N1}mm라 관을 넣지 않았습니다(관 최소 {PipeSegmentPlan.MinSegmentMm:N0}mm). ") +
+                        "두 부재는 연결되지 않은 채로 남습니다.");
+            }
+            result[fitting.Id] = new TeeCenteredSet(owner.Id, other.Id, ownerSpan, otherSpan, gapPoints);
+        }
+        return result;
+
+        static string? DropReasonOf(Guid id, OccupiedSpan span, double lengthMm)
+            => InlineSpanFilter.Filter(lengthMm, [new InlineSpanCandidate(id, span, InlineSpanFilter.BypassSetPriority)])
+                .Dropped.TryGetValue(id, out var reason) ? reason : null;
+    }
+
     /// <summary>엣지 위 바이패스 세트의 본관 점유 구간을 예약한다. 실측에 실패한 세트는 건너뛰기로 기록하고 예약하지 않는다 —
-    /// 그러면 본관 직관이 그 자리를 연속으로 채운다(밸브 실측 실패와 같은 규칙, docs/145 § 4-5).</summary>
+    /// 그러면 본관 직관이 그 자리를 연속으로 채운다(밸브 실측 실패와 같은 규칙, docs/145 § 4-5).
+    /// <para><paramref name="teeCentered"/>에 든 세트는 소속 엣지 쪽 A 하나만 예약한다 — 반대편 A는 그 엣지가 따로 받는다(docs/273 § C-3).</para></summary>
     private static List<(Guid Id, OccupiedSpan Span)> BypassSetSpans(
         Document document, FamilySymbolCache symbols, PipeEdgeDefinition edge, PipeNetworkDefinition network,
         PipeSegmentFamilySelection families, SkipPlan skipPlan, XYZ startAnchor, XYZ direction,
         IDictionary<string, string> unusableValves, ICollection<PipeConnectionFailure> skipped,
         IDictionary<Guid, double> axisCenters, ISet<Guid> droppedFittings,
-        IDictionary<Guid, BypassLayout> layouts, IDictionary<BypassLayoutKey, BypassLayout> cache, ICollection<string> warnings)
+        IDictionary<Guid, BypassLayout> layouts, IDictionary<BypassLayoutKey, BypassLayout> cache, ICollection<string> warnings,
+        IReadOnlyDictionary<Guid, TeeCenteredSet> teeCentered)
     {
         var axis = new EdgeAxis(startAnchor, direction);
         // 구간마다 세트 Id를 단다 — 위치 오류면 세트 통째로 건너뛴다(docs/251 § B).
         var spans = new List<(Guid Id, OccupiedSpan Span)>();
-        foreach (var fitting in network.InlineFittings.Where(x => x.EdgeId == edge.Id && x.IsBypassSet))
+        foreach (var fitting in network.InlineFittings.Where(x => x.EdgeId == edge.Id && x.IsBypassSet && !droppedFittings.Contains(x.Id)))
         {
-            var spec = fitting.Bypass!;
             var canvasPoint = ToXyz(fitting.Position, fitting.Elevation, network.ReferencePoint);
-            // 새 세트는 패밀리명만, 되가져온 세트는 "패밀리 : 유형"을 든다 — 유형은 생성 때 다시 고르므로 패밀리로 모은다(docs/244 § A-5).
-            var valveFamily = BypassValveFamilyOf(spec.BypassValveFamilyTypeName);
-            // 밸브 2개 세트의 V2(docs/255). 1개 세트면 null.
-            var secondFamily = spec.HasTwoValves ? BypassValveFamilyOf(spec.SecondValveFamilyTypeName) : null;
-            // 지관 관경은 핸드북 규격표가 정한다(docs/256). 표에 없는 주관·관종이면 세트를 만들지 않는다.
-            var branchMm = ValveBypassSpecTable.BranchDiameterMm(network.Material, network.SteelFittingClass, edge.DiameterMm);
-            var reason = skipPlan.BypassSetReason
-                ?? (branchMm is null ? BypassSpecMissingReason(network, edge.DiameterMm) : null)
-                ?? (string.IsNullOrWhiteSpace(valveFamily) ? "바이패스 밸브가 선택되지 않았습니다." : null)
-                ?? (unusableValves.TryGetValue(valveFamily, out var bypassReason) ? bypassReason : null)
-                ?? (secondFamily is not null && unusableValves.TryGetValue(secondFamily, out var secondReason) ? secondReason : null)
-                ?? (secondFamily is not null && !BypassSet.IsValidSpoolLength(spec.SpoolLengthMm)
-                    ? FormattableString.Invariant($"바이패스 밸브 사이 단관 {spec.SpoolLengthMm:0.#}mm는 쓸 수 없습니다(0 = 직결, 또는 {PipeSegmentPlan.MinSegmentMm:0}mm 이상).")
-                    : null);
-            if (reason is not null)
-            {
-                skipped.Add(CreateFailure(canvasPoint, BypassSet.TypeKey, valveFamily, 0, reason, network));
-                droppedFittings.Add(fitting.Id);
-                continue;
-            }
+            var valveFamily = BypassValveFamilyOf(fitting.Bypass!.BypassValveFamilyTypeName);
+            var layout = layouts.TryGetValue(fitting.Id, out var known)
+                ? known
+                : ResolveBypassLayout(document, symbols, edge, network, families, skipPlan, unusableValves, skipped, droppedFittings, cache, fitting);
+            if (layout is null) continue;
             try
             {
-                var key = new BypassLayoutKey(valveFamily, edge.DiameterMm, branchMm!.Value,
-                    secondFamily, secondFamily is null ? 0 : spec.SpoolLengthMm);
-                if (!cache.TryGetValue(key, out var layout))
-                    cache[key] = layout = MeasureBypassLayout(document, symbols, families, key);
                 var center = AxisDistanceMm(canvasPoint, axis);
                 axisCenters[fitting.Id] = center;
                 layouts[fitting.Id] = layout;
+                if (teeCentered.TryGetValue(fitting.Id, out var teeSet))
+                {
+                    spans.Add((fitting.Id, teeSet.OwnerSpan));
+                    continue;
+                }
                 // A 두 구간만 예약한다 — 그 사이는 관 분할이 관·일반 밸브로 채운다(docs/230 § A).
                 spans.Add((fitting.Id, layout.TeeSpan(center, -1)));
                 spans.Add((fitting.Id, layout.TeeSpan(center, 1)));
@@ -124,7 +262,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo
             catch (Exception ex)
             {
                 skipped.Add(CreateFailure(canvasPoint, BypassSet.TypeKey, valveFamily, 0,
-                    $"세트 치수를 잴 수 없습니다: {ex.Message}", network));
+                    $"세트 치수를 잴 수 없습니다: {ex.Message}", network) with { FittingId = fitting.Id });
                 droppedFittings.Add(fitting.Id);
             }
         }
@@ -436,7 +574,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo
         FamilySymbol segment, Level? hostLevel,
         ICollection<PlacedPart> placedInstances, ICollection<MaterialPart> materialParts, ICollection<XYZ> openPoints,
         ICollection<PipeConnectionFailure> skipped, List<string> warnings, ICollection<double> elevationFixes,
-        Action<Guid, Element?> track)
+        Action<Guid, Element?> track, IReadOnlyList<XYZ>? gapOpenPoints = null)
     {
         var spec = fitting.Bypass!;
         var mainMm = edge.DiameterMm;
@@ -575,15 +713,18 @@ internal sealed partial class RevitPipeSegmentCommandRepo
                 openPoints.Add(axis.PointAt(span.StartMm));
                 openPoints.Add(axis.PointAt(span.EndMm));
             }
+            // tee 중심 세트: A와 T형관 사이에 단관을 넣지 않은 자리도 열어 둔다(docs/273 § C-3b).
+            if (gapOpenPoints is not null) foreach (var point in gapOpenPoints) openPoints.Add(point);
             var failedName = $"{bypassValveSymbol.FamilyName} : {bypassValveSymbol.Name}";
             if (layout.SecondValveSymbol is { } failedSecond) failedName += $" / {failedSecond.FamilyName} : {failedSecond.Name}";
-            skipped.Add(CreateFailure(center, BypassSet.TypeKey, failedName, 0, ex.Message, network));
+            skipped.Add(CreateFailure(center, BypassSet.TypeKey, failedName, 0, ex.Message, network) with { FittingId = fitting.Id });
             return;
         }
 
         foreach (var part in parts) placedInstances.Add(part);
         foreach (var material in materials) materialParts.Add(material);
         foreach (var point in opens) openPoints.Add(point);
+        if (gapOpenPoints is not null) foreach (var point in gapOpenPoints) openPoints.Add(point);
         // 세트 부재 전부를 캔버스 세트 하나에 매단다 — [Revit에서 보기]가 세트를 통째로 고른다(docs/179 § D).
         foreach (var instance in created) track(fitting.Id, instance);
     }
