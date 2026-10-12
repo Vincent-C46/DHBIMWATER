@@ -125,6 +125,13 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     private string _fittingDimLabel = "0";
     private string _status = "캔버스 클릭 → 배관 시작점";
     private double _elevation;
+    private PipeElevationMode _elevationMode = PipeElevationMode.Relative;
+    private LevelInfo? _elevationLevel;
+    private double _elevationOffsetMm;
+    private string _elevationLevelHint = string.Empty;
+    private bool _savedElevationLevelRestored;
+    private bool _savedElevationLevelIdSpecified;
+    private bool _savedElevationLevelMissing;
     private double _referenceX, _referenceY;
     private string _junctionId = string.Empty;
     /// <summary>격점번호를 사용자가 직접 손댔는가(docs/177 § B). 서면 유형을 바꿔도 자동값으로 덮지 않는다.
@@ -139,7 +146,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     /// <summary>이 배치의 기본 접합 방식(docs/170 § E). 기본값이 플랜지인 이유는
     /// 원장에서 밸브실이 실당 용접 1개소를 빼면 전량 플랜지이기 때문이다(docs/168 § 5-3).</summary>
     private BendConnection _jointConnection = BendConnection.Flanged;
-    private double _diameterMm = 100;
+    // 기본 관경 300. 덕타일 밸브부관 규격의 최소 관경이다(docs/281 § A).
+    private double _diameterMm = 300;
     private List<string> _accessoryFamilyTypeNames = [];
     private string? _selectedValveFamilyName;
     private string? _segmentFamilyTypeName, _lengthParameterName, _diameterParameterName;
@@ -257,6 +265,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     {
         _typeRepo = typeRepo;
         _settingsRepo = settingsRepo;
+        Levels = new ObservableCollection<LevelInfo>(_typeRepo.GetLevels());
         FamilyTypeNames = [];
         ValveFamilyNames = [];
         SegmentFamilyTypeNames = [];
@@ -584,7 +593,47 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     public bool HasImportedSource => _importedSourceIds.Count > 0;
     /// <summary>생성 시 지우고 다시 만들 부재(가져온 원본 또는 직전 생성분)가 있는가 — 하단 안내 문구(docs/235 § C).</summary>
     public bool HasReplaceTarget => _importedSourceIds.Count > 0 || _createdElementIds.Count > 0;
-    public double Elevation { get => _elevation; set { if (SetProperty(ref _elevation, value)) { _network.Elevation = value; OnPropertyChanged(nameof(ElevationM)); NotifyValidationChanged(); } } }
+    public PipeElevationMode ElevationMode
+    {
+        get => _elevationMode;
+        set
+        {
+            if (!SetProperty(ref _elevationMode, value)) return;
+            OnPropertyChanged(nameof(IsRelativeElevation));
+            OnPropertyChanged(nameof(IsAbsoluteElevation));
+            if (value == PipeElevationMode.Relative) RecalculateElevationOffsetFromCurrent();
+            NotifyValidationChanged();
+        }
+    }
+    public bool IsRelativeElevation { get => ElevationMode == PipeElevationMode.Relative; set { if (value) ElevationMode = PipeElevationMode.Relative; } }
+    public bool IsAbsoluteElevation { get => ElevationMode == PipeElevationMode.Absolute; set { if (value) ElevationMode = PipeElevationMode.Absolute; } }
+    public ObservableCollection<LevelInfo> Levels { get; }
+    public LevelInfo? ElevationLevel
+    {
+        get => _elevationLevel;
+        set
+        {
+            if (!SetProperty(ref _elevationLevel, value)) return;
+            if (ElevationMode == PipeElevationMode.Relative && value is not null) SetElevationSilently(value.ElevationMm + ElevationOffsetMm);
+            NotifyValidationChanged();
+        }
+    }
+    public double ElevationOffsetMm
+    {
+        get => _elevationOffsetMm;
+        set
+        {
+            if (!SetProperty(ref _elevationOffsetMm, value)) return;
+            // m 칸도 같이 알림. 빠지면 코드로 넣은 값이 Offset 칸에 안 뜸.
+            OnPropertyChanged(nameof(ElevationOffsetM));
+            if (ElevationMode == PipeElevationMode.Relative && ElevationLevel is not null) SetElevationSilently(ElevationLevel.ElevationMm + value);
+            NotifyValidationChanged();
+        }
+    }
+    public double ElevationOffsetM { get => ElevationOffsetMm / 1000d; set => ElevationOffsetMm = value * 1000d; }
+    public string ElevationLevelHint { get => _elevationLevelHint; private set { if (SetProperty(ref _elevationLevelHint, value)) OnPropertyChanged(nameof(IsElevationLevelHintVisible)); } }
+    public bool IsElevationLevelHintVisible => !string.IsNullOrWhiteSpace(ElevationLevelHint);
+    public double Elevation { get => _elevation; set { if (SetProperty(ref _elevation, value)) { _network.Elevation = value; OnPropertyChanged(nameof(ElevationM)); if (ElevationMode == PipeElevationMode.Relative && ElevationLevel is not null) SetOffsetFromCurrentElevation(); NotifyValidationChanged(); } } }
     /// <summary>관 중심 높이(EL) 입력 칸 — m 단위(docs/251 § C). 내부·저장·Revit 배치는 <see cref="Elevation"/>(mm) 그대로다.</summary>
     public double ElevationM { get => Elevation / 1000d; set => Elevation = value * 1000d; }
     /// <summary>격점상세도 배관재료표에 쓰는 격점 식별자(docs/131 § B-1). 필수 입력이 아니다.
@@ -936,7 +985,10 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         ValveTeeHorizontalBranchParameterName: ValveTeeHorizontalBranchParameterName ?? "",
         ValveTeeVerticalBranchParameterName: ValveTeeVerticalBranchParameterName ?? "",
         SteelFittingClass: _steelFittingClass,
-        PipeKind: _pipeKind);
+        PipeKind: _pipeKind,
+        ElevationMode: ElevationMode,
+        ElevationLevelId: ElevationLevel?.Id,
+        ElevationOffsetMm: ElevationOffsetMm);
 
     /// <summary>저장값(또는 외부에서 만든 설정)을 적용한다. <b>비어 있지 않은 칸만</b> 덮고 그 칸은 핀 고정한다 —
     /// 빈 칸은 이름 추정 결과를 그대로 둔다(docs/175 D6). 콤보 목록에 없는 패밀리명은 그대로 넣어 사용자가 알아채게 한다.</summary>
@@ -1009,6 +1061,20 @@ public sealed class PipeLayoutViewModel : ViewModelBase
                 AttachPort(new PipePortItem(stored.Port) { UserEdited = stored.UserEdited });
             UpdatePortRemovability();
         }
+        // 높이 3항목도 "값 있는 칸만 덮기" 규약 따름. null(옛 저장본)이면 현재 값 유지 — 기본 모드는 이미 Relative.
+        if (settings.ElevationMode is { } savedMode) ElevationMode = savedMode;
+        if (settings.ElevationOffsetMm is { } savedOffset) ElevationOffsetMm = savedOffset;
+        _savedElevationLevelIdSpecified = settings.ElevationLevelId is not null;
+        _savedElevationLevelRestored = settings.ElevationLevelId is { } savedLevelId
+            && Levels.Any(level => level.Id == savedLevelId);
+        // Id 저장됐는데 문서에 없으면 비움 → 사용자 재선택. Id 없으면 현재 선택 유지.
+        if (_savedElevationLevelIdSpecified)
+            ElevationLevel = _savedElevationLevelRestored
+                ? Levels.First(level => level.Id == settings.ElevationLevelId)
+                : null;
+        _savedElevationLevelMissing = settings.ElevationLevelId is not null && !_savedElevationLevelRestored;
+        if (_savedElevationLevelMissing) Status = "저장된 기준 레벨 없음 — 다시 선택";
+        if (ElevationMode == PipeElevationMode.Relative && ElevationLevel is not null) SetElevationSilently(ElevationLevel.ElevationMm + ElevationOffsetMm);
         NotifyFamilySettingsChanged();
     }
 
@@ -1701,6 +1767,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             return;
         }
         _outline = outline;
+        ApplyAutomaticElevationLevel(outline);
 
         // 실내 중심이 원점(0,0)에 오도록 기준점을 자동 설정한다. 모델 생성 시 이 값이 다시 더해져 원위치된다.
         var centroid = outline.Centroid;
@@ -1726,7 +1793,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         var columnSuffix = columnCount > 0 ? $" · 기둥 {columnCount}본" : string.Empty;
         Status = $"외곽 반영 — 벽체 {outline.Walls.Count}장{columnSuffix}"
             + $" · 내부 {outline.WidthMm / 1000:N2} × {outline.HeightMm / 1000:N2} m"
-            + ZoneStatusSuffix(outline);
+            + ZoneStatusSuffix(outline)
+            + ElevationLevelStatusSuffix(outline);
     }
 
     /// <summary>프로젝트 저장본에서 복원한 외곽을 반영한다(docs/204 § D-3).
@@ -1735,13 +1803,16 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     {
         if (outline is null || outline.IsEmpty)
         {
+            ElevationLevelHint = string.Empty;
             Status = missingCount > 0
                 ? $"외곽 복원 실패 — 저장 부재 {missingCount}개 없음 · [기존 객체 가져오기]로 재지정"
                 : "저장된 외곽 없음";
+            if (_savedElevationLevelMissing) Status += " · 저장된 기준 레벨 없음 — 다시 선택";
             return;
         }
 
         _outline = outline;
+        if (!_savedElevationLevelIdSpecified) ApplyAutomaticElevationLevel(outline);
         if (!string.IsNullOrWhiteSpace(outline.Zone)) ValveRoomZone = outline.Zone;
         Transform.PanOrigin = new Point(_canvasWidth / 2, _canvasHeight / 2);
         ZoomToFit(outline);
@@ -1752,7 +1823,50 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         var missingSuffix = missingCount > 0 ? $" (삭제 {missingCount}개 제외)" : string.Empty;
         Status = $"외곽 복원 — 벽체 {outline.Walls.Count}장{columnSuffix}{missingSuffix}"
             + $" · 내부 {outline.WidthMm / 1000:N2} × {outline.HeightMm / 1000:N2} m"
-            + ZoneStatusSuffix(outline);
+            + ZoneStatusSuffix(outline)
+            + ElevationLevelStatusSuffix(outline)
+            + (_savedElevationLevelMissing ? " · 저장된 기준 레벨 없음 — 다시 선택" : string.Empty);
+    }
+
+    private void ApplyAutomaticElevationLevel(ValveRoomOutline outline)
+    {
+        var id = PipeElevationReference.PickBaseLevelId(outline.Walls.Select(wall => wall.BaseLevelId), Levels, out _);
+        if (id is { } levelId && Levels.FirstOrDefault(level => level.Id == levelId) is { } level)
+            ElevationLevel = level;
+    }
+
+    private string ElevationLevelStatusSuffix(ValveRoomOutline outline)
+    {
+        if (outline.IsEmpty) { ElevationLevelHint = string.Empty; return string.Empty; }
+        var id = PipeElevationReference.PickBaseLevelId(outline.Walls.Select(wall => wall.BaseLevelId), Levels, out var mixed);
+        if (id is not { } levelId || Levels.FirstOrDefault(level => level.Id == levelId) is not { } level)
+        {
+            ElevationLevelHint = string.Empty;
+            return string.Empty;
+        }
+        ElevationLevelHint = $"벽 하단 레벨: {level.Name}" + (mixed ? " (혼재 — 확인 필요)" : string.Empty);
+        // 콤보 실제 선택만 표시. 비었는데 벽 레벨명 쓰면 선택된 걸로 오해함.
+        var selected = ElevationLevel is { } current ? $" · 기준 레벨 {current.Name}" : " · 기준 레벨 미선택";
+        return selected + (mixed ? " · 하단 레벨 혼재 — 확인 필요" : string.Empty);
+    }
+
+    private void SetElevationSilently(double value)
+    {
+        _elevation = value;
+        _network.Elevation = value;
+        OnPropertyChanged(nameof(Elevation));
+        OnPropertyChanged(nameof(ElevationM));
+    }
+
+    private void SetOffsetFromCurrentElevation()
+    {
+        var offset = _elevation - ElevationLevel!.ElevationMm;
+        if (SetProperty(ref _elevationOffsetMm, offset)) OnPropertyChanged(nameof(ElevationOffsetM));
+    }
+
+    private void RecalculateElevationOffsetFromCurrent()
+    {
+        if (ElevationLevel is not null) SetOffsetFromCurrentElevation();
     }
 
     /// <summary>외곽 피킹 결과 문구 뒤에 붙일 밸브실 유형 안내(docs/161 § F-2).</summary>
@@ -1902,17 +2016,30 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             if (segment.Start.DistanceTo(segment.End) <= PipeTopologyBuilder.SnapTolerance) { dropped++; continue; }
             _network.AddSegment(segment.Start, segment.End, segment.DiameterMm);
         }
-        // 프리셋 부속(밸브·바이패스 세트) — 소속 선을 양 끝 좌표로 다시 찾는다. 패밀리는 비워 두고 사용자가 고른다(바이패스 밸브만 현재 선택값).
+        // 프리셋 부속(밸브·바이패스 세트) — 소속 선을 양 끝 좌표로 다시 찾는다.
         var placedFittings = 0;
+        var placedBypassSets = 0;
+        var unassignedValves = 0;
+        var gateFamilyName = ValveFamilyNames.FirstOrDefault(x => x.Name.Contains("게이트", StringComparison.Ordinal))?.Name;
         foreach (var fitting in resolved.Fittings ?? [])
         {
             var edge = FindEdgeBetween(fitting.SegmentStart, fitting.SegmentEnd);
             if (edge is null) continue;
             if (fitting.IsBypassSet)
+            {
                 _network.AddInlineFitting(edge.Id, BypassSet.TypeKey, string.Empty, fitting.T, preservePosition: true,
                     bypass: new BypassSetSpec(BypassValveFamilyName ?? string.Empty, 0, fitting.Side));
+                placedBypassSets++;
+            }
             else
-                _network.AddInlineFitting(edge.Id, InlineFittingTypeKey, string.Empty, fitting.T, preservePosition: true);
+            {
+                var familyTypeName = _accessoryFamilyTypeNames.FirstOrDefault(x =>
+                    GetFamilyName(x) == gateFamilyName
+                    && NominalDiameterParser.Parse(x) is { } diameter
+                    && Math.Abs(diameter - edge.DiameterMm) <= 0.5) ?? string.Empty;
+                _network.AddInlineFitting(edge.Id, InlineFittingTypeKey, familyTypeName, fitting.T, preservePosition: true);
+                if (familyTypeName.Length == 0) unassignedValves++;
+            }
             placedFittings++;
         }
         // 프리셋이 정한 이격은 사용자 편집값으로 취급한다 — 이후 외곽 재피킹이 중앙값으로 덮지 않게(docs/172 § 0-4 A5).
@@ -1928,7 +2055,11 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         RefreshGraph();
         Status = $"{template.Name} 적용 — 배관 {_network.Edges.Count}개 · 포트 {Ports.Count}개"
             + (placedFittings > 0 ? $" · 부속 {placedFittings}개" : string.Empty)
-            + (dropped > 0 ? $" · 짧은 선 {dropped}개 제외" : string.Empty);
+            + (dropped > 0 ? $" · 짧은 선 {dropped}개 제외" : string.Empty)
+            + (unassignedValves > 0 ? $" · 게이트 밸브 유형을 찾지 못해 밸브 {unassignedValves}개는 패밀리 미지정" : string.Empty)
+            + (placedBypassSets > 0 && HandbookBypassDiameterMm(_diameterMm) is null
+                ? $" · 바이패스 세트는 {ValveBypassSpecTable.RangeText(_pipeMaterial, _steelFittingClass)} 본관에서만 생성됩니다(현재 DN{_diameterMm:0}) — 기본 관경을 바꾼 뒤 다시 적용하세요."
+                : string.Empty);
     }
 
     /// <summary>양 끝점이 주어진 두 좌표와 같은 선(방향 무관). 없으면 null.</summary>
@@ -2056,6 +2187,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     {
         // 밸브실 유형(ValveRoomZone)은 지우지 않는다 — 외곽을 다시 잡아도 사용자가 고른 유형은 남는 편이 낫다(docs/161 § F-3).
         _outline = ValveRoomOutline.Empty;
+        ElevationLevelHint = string.Empty;
         _savedOutlineElementIds = [];
         // 다음 피킹 때 다시 자동값이 들어오도록 초기화. 포트 목록 자체는 지우지 않는다(유형을 지우지 않는 것과 같은 이유, docs/172 § C-6).
         foreach (var port in Ports) port.UserEdited = false;
@@ -2201,6 +2333,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
 
         _network.Elevation = import.ElevationMm;
         _elevation = import.ElevationMm; OnPropertyChanged(nameof(Elevation)); OnPropertyChanged(nameof(ElevationM));
+        if (ElevationMode == PipeElevationMode.Relative && ElevationLevel is not null) SetOffsetFromCurrentElevation();
         var keptFamilies = ApplyImportedSettings(import);
 
         _importedSourceIds = import.SourceElementIds;
@@ -3742,6 +3875,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         _elevation = _network.Elevation;
         OnPropertyChanged(nameof(Elevation));
         OnPropertyChanged(nameof(ElevationM));
+        RecalculateElevationOffsetFromCurrent();
         OnPropertyChanged(nameof(HasImportedSource));
         OnPropertyChanged(nameof(HasReplaceTarget));
         // 되돌린 이격이 다음 외곽 피킹에서 중앙값으로 덮이면 안 되므로 사용자 편집값으로 복원한다(docs/172 § C-10).
@@ -3812,6 +3946,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         var invalidDiameterCount = _network.Edges.Count(x => !double.IsFinite(x.DiameterMm) || x.DiameterMm <= 0);
         if (invalidDiameterCount > 0) errors.Add($"관경 0 이하 배관 {invalidDiameterCount}개");
         if (!double.IsFinite(Elevation) || !double.IsFinite(ReferenceX) || !double.IsFinite(ReferenceY)) errors.Add("좌표·Elev 숫자 확인 필요");
+        if (ElevationMode == PipeElevationMode.Relative && ElevationLevel is null) errors.Add("기준 레벨 선택 필요");
+        if (!double.IsFinite(ElevationOffsetMm)) errors.Add("좌표·Elev 숫자 확인 필요");
         if (Ports.Any(x => x.OffsetMm < 0)) errors.Add("IN/OUT 이격 ≥ 0 필요");
         if (!_canvasOutline.IsEmpty)
         {

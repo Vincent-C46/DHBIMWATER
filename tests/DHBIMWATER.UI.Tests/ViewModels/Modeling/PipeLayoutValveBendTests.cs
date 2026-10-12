@@ -253,7 +253,7 @@ public sealed class PipeLayoutValveBendTests
         vm.HandleCanvasClick(vm.Transform.ToScreen(end));
     }
 
-    private static PipeLayoutViewModel CreateViewModel() => new(new StubRepo());
+    private static PipeLayoutViewModel CreateViewModel() => PipeLayoutTestDefaults.UseAbsoluteElevation(new(new StubRepo()));
 
     private sealed class StubRepo : IElementTypeQueryRepo
     {

@@ -312,7 +312,8 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
                 ToPoint2D(outerEnd),
                 UC.FtToMm(wall.Width),
                 // 밸브실 빌더가 구조부재에 찍어 둔 유형명이다(CreateValveRoomUseCase.cs:122). 없으면 빈 문자열(docs/161 § B).
-                wall.LookupParameter("DH_Zone")?.AsString() ?? string.Empty);
+                wall.LookupParameter("DH_Zone")?.AsString() ?? string.Empty,
+                wall.get_Parameter(BuiltInParameter.WALL_BASE_CONSTRAINT)?.AsElementId()?.Value ?? 0);
         }
 
         private static XYZ MidPoint(Wall wall)

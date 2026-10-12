@@ -34,16 +34,15 @@ public sealed class JunctionVerticalChainTests
     }
 
     [Fact]
-    public void Resolve_BrokenConnection_StopsAndWarnsOnce()
+    public void Resolve_OpenTerminal_IncludesSlotAndWarnsOnlyForOrphan()
     {
         var result = JunctionVerticalChain.Resolve("J1", [
             new JunctionNode(1, [new(1, 0, 0, null), new(0, 0, 1, 2)]),
-            new JunctionNode(2, [new(0, 0, -1, 1), new(0, 0, 1, null)]),
-            new JunctionNode(3, [new(0, 0, -1, null)])]);
+            new JunctionNode(2, [new(0, 0, -1, 1), new(0, 0, 1, null)])]);
 
         Assert.Equal([new VerticalSlot(2, 1)], result.Slots);
-        Assert.Single(result.Warnings);
-        Assert.Contains("1번째 부재 뒤", result.Warnings[0]);
+        Assert.Empty(result.Orphans);
+        Assert.Empty(result.Warnings);
     }
 
     [Fact]
@@ -65,5 +64,7 @@ public sealed class JunctionVerticalChainTests
     {
         var result = JunctionVerticalChain.Resolve("J1", [new JunctionNode(2, [new(0, 0, 1, null)])]);
         Assert.Empty(result.Slots);
+        Assert.Equal([2L], result.Orphans);
+        Assert.Single(result.Warnings);
     }
 }

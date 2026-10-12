@@ -181,6 +181,7 @@ public sealed class PipeLayoutViewModelTests
     public void DiameterMm_ReplacesSelectedValveFamily_WithMatchingFamilyInSameSeries()
     {
         var vm = CreateViewModel(["게이트밸브 200A : 표준", "게이트밸브 300A : 표준", "다른밸브 300A : 표준"]);
+        vm.DiameterMm = 100;
         vm.SelectedValveFamilyName = "게이트밸브 200A";
         vm.SelectedFamilyTypeName = "게이트밸브 200A : 표준";
 
@@ -1480,9 +1481,9 @@ public sealed class PipeLayoutViewModelTests
         vm.Mode = PipeLayoutMode.Selection;
         vm.SelectEdge(target.Id);
 
-        vm.DiameterMm = 300;
+        vm.DiameterMm = 500;
 
-        Assert.Equal(300, vm.Edges.Single(x => x.Id == target.Id).DiameterMm);
+        Assert.Equal(500, vm.Edges.Single(x => x.Id == target.Id).DiameterMm);
         Assert.Equal(100, vm.Edges.Single(x => x.Id != target.Id).DiameterMm);
     }
 
@@ -1490,16 +1491,17 @@ public sealed class PipeLayoutViewModelTests
     public void DiameterMm_WithSelection_DoesNotChangeDefaultForNextEdge()
     {
         var vm = TwoParallelEdges();
+        vm.DiameterMm = 300;
         vm.Mode = PipeLayoutMode.Selection;
         vm.SelectEdge(vm.Edges[0].Id);
-        vm.DiameterMm = 300;
+        vm.DiameterMm = 500;
 
         vm.Mode = PipeLayoutMode.Drawing;
 
-        // 선택이 풀리면 입력칸은 다시 기본 관경(100)을 가리키고, 새 선도 100으로 그려진다.
-        Assert.Equal(100, vm.DiameterMm);
+        // 선택이 풀리면 입력칸은 다시 기본 관경(300)을 가리키고, 새 선도 300으로 그려진다.
+        Assert.Equal(300, vm.DiameterMm);
         Draw(vm, new Point2D(0, 2000), new Point2D(1000, 2000));
-        Assert.Equal(100, EdgeAtModelY(vm, 2000).DiameterMm);
+        Assert.Equal(300, EdgeAtModelY(vm, 2000).DiameterMm);
     }
 
     [Fact]
@@ -1619,6 +1621,7 @@ public sealed class PipeLayoutViewModelTests
     {
         var vm = CreateDrawingViewModel();
         DisableOsnap(vm);
+        vm.DiameterMm = 100;
         Draw(vm, new Point2D(0, 0), new Point2D(1000, 0));
         Draw(vm, new Point2D(0, 1000), new Point2D(1000, 1000));
         return vm;
@@ -2147,7 +2150,8 @@ public sealed class PipeLayoutViewModelTests
     // ── docs/233 § B — 밸브 직경 후보 실수형 제한 · 유형 매개변수 관경 대조 ──────────
 
     private static PipeLayoutViewModel CreateTypeDiameterViewModel(double? nominalMm = 100)
-        => new(new StubElementTypeQueryRepo(
+    {
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(
             accessoryNames: ["밸브 : DN100"],
             parameterNamesByFamily: new Dictionary<string, IEnumerable<string>> { ["밸브 : DN100"] = ["DN", "주석 축척 사용"] },
             numericParameterNamesByFamily: new Dictionary<string, IEnumerable<string>> { ["밸브 : DN100"] = ["DN"] },
@@ -2155,6 +2159,9 @@ public sealed class PipeLayoutViewModelTests
             {
                 ["밸브 : DN100"] = nominalMm is { } mm ? [new PipeAccessoryTypeParameterDto("Nominal pipe size", mm)] : [],
             }));
+        vm.DiameterMm = 100;
+        return vm;
+    }
 
     [Fact]
     public void ValveDiameterParameterCandidates_UseNumericInstanceParametersOnly()
@@ -3009,6 +3016,7 @@ public sealed class PipeLayoutViewModelTests
     public void ValidationSummary_FlagsPortsOnSameWallCloserThanDiameter()
     {
         var vm = CreateDrawingViewModel();
+        vm.DiameterMm = 100;
         vm.ApplyOutline(CreateOutline(4000, 3000));
         vm.AddInPortCommand.Execute(null);
         var in2 = vm.Ports.Single(x => x.Label == "IN2");
@@ -3046,6 +3054,54 @@ public sealed class PipeLayoutViewModelTests
         vm.ValveRoomZone = "";
         Assert.False(vm.CanApplyTemplate);
         Assert.Contains("먼저 고르세요", vm.TemplateHint);
+    }
+
+    [Fact]
+    public void DiameterMm_NewViewModel_DefaultsTo300()
+    {
+        Assert.Equal(300, CreateViewModel().DiameterMm);
+    }
+
+    [Fact]
+    public void ApplyTemplate_TieValveRoom_UsesGateValveTypeMatchingEdgeDiameter()
+    {
+        var vm = CreateDrawingViewModel(["DH_게이트 밸브 : 100A", "DH_게이트 밸브 : 300A"]);
+        vm.ApplyOutline(CreateOutline(4000, 3000));
+        vm.ValveRoomZone = "타이밸브실";
+
+        vm.ApplyTemplateCommand.Execute(null);
+
+        Assert.Equal("DH_게이트 밸브 : 300A", Assert.Single(vm.InlineFittings, x => !x.IsBypassSet).FamilyTypeName);
+        Assert.Single(vm.BypassSetItems);
+        Assert.DoesNotContain("바이패스 세트는", vm.Status);
+    }
+
+    [Fact]
+    public void ApplyTemplate_TieValveRoom_MissingMatchingGateTypeReportsUnassignedValve()
+    {
+        var vm = CreateDrawingViewModel(["DH_게이트 밸브 : 100A"]);
+        vm.ApplyOutline(CreateOutline(4000, 3000));
+        vm.ValveRoomZone = "타이밸브실";
+
+        vm.ApplyTemplateCommand.Execute(null);
+
+        Assert.Equal(string.Empty, Assert.Single(vm.InlineFittings, x => !x.IsBypassSet).FamilyTypeName);
+        Assert.Contains("패밀리 미지정", vm.Status);
+    }
+
+    [Fact]
+    public void ApplyTemplate_TieValveRoom_OutsideBypassRangeWarnsButKeepsSet()
+    {
+        var vm = CreateDrawingViewModel(["DH_게이트 밸브 : 100A"]);
+        vm.ApplyOutline(CreateOutline(4000, 3000));
+        vm.ValveRoomZone = "타이밸브실";
+        vm.DiameterMm = 100;
+
+        vm.ApplyTemplateCommand.Execute(null);
+
+        Assert.Single(vm.BypassSetItems);
+        Assert.Contains("덕타일주철관 DN300~1200", vm.Status);
+        Assert.Contains("현재 DN100", vm.Status);
     }
 
     [Fact]
@@ -3298,7 +3354,153 @@ public sealed class PipeLayoutViewModelTests
         ]);
     }
 
-    private static PipeLayoutViewModel CreateViewModel(IEnumerable<string>? accessoryNames = null) => new(new StubElementTypeQueryRepo(accessoryNames: accessoryNames));
+    private static PipeLayoutViewModel CreateViewModel(IEnumerable<string>? accessoryNames = null)
+        => PipeLayoutTestDefaults.UseAbsoluteElevation(new(new StubElementTypeQueryRepo(accessoryNames: accessoryNames)));
+
+    [Fact]
+    public void ElevationMode_DefaultsToRelativeAndRequiresLevel()
+    {
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo());
+
+        Assert.Equal(PipeElevationMode.Relative, vm.ElevationMode);
+        Assert.Contains("기준 레벨 선택 필요", vm.ValidationSummary);
+    }
+
+    [Fact]
+    public void RelativeElevation_UsesLevelAndOffset_AndRetainsOffsetOnLevelChange()
+    {
+        var lower = new LevelInfo(1, "1층", 1200);
+        var upper = new LevelInfo(2, "2층", 4200);
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(levels: [lower, upper]));
+        vm.ElevationLevel = lower;
+        vm.ElevationOffsetM = 0.8;
+
+        Assert.Equal(2000, vm.Elevation);
+        vm.ElevationLevel = upper;
+        Assert.Equal(5000, vm.Elevation);
+        Assert.Equal(0.8, vm.ElevationOffsetM);
+    }
+
+    [Fact]
+    public void AbsoluteToRelative_PreservesElevationAndReversesOffset()
+    {
+        var level = new LevelInfo(1, "1층", 1200);
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(levels: [level]));
+        vm.IsAbsoluteElevation = true;
+        vm.ElevationM = 2;
+        vm.ElevationLevel = level;
+        vm.IsRelativeElevation = true;
+
+        Assert.Equal(2000, vm.Elevation);
+        Assert.Equal(0.8, vm.ElevationOffsetM);
+    }
+
+    [Fact]
+    public void ApplyOutline_AutoSelectsMostCommonBaseLevelAndReportsMixedLevels()
+    {
+        var levels = new[] { new LevelInfo(1, "1층", 0), new LevelInfo(2, "2층", 3000) };
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(levels: levels));
+        var baseOutline = CreateOutline(4000, 3000);
+        var walls = baseOutline.Walls.Select((wall, index) => wall with { BaseLevelId = index == 3 ? 2 : 1 }).ToList();
+
+        vm.ApplyOutline(new ValveRoomOutline(walls));
+
+        Assert.Equal(1, vm.ElevationLevel?.Id);
+        Assert.Contains("벽 하단 레벨: 1층", vm.ElevationLevelHint);
+        Assert.Contains("하단 레벨 혼재 — 확인 필요", vm.Status);
+    }
+
+    [Fact]
+    public void ApplyPickedPiping_ReversesRelativeOffset()
+    {
+        var level = new LevelInfo(1, "1층", 1000);
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(levels: [level]));
+        vm.ElevationLevel = level;
+        vm.ApplyPickedPiping(CreateImport([11]));
+
+        Assert.Equal(200, vm.ElevationOffsetMm);
+    }
+
+    [Fact]
+    public void ElevationSettings_RoundTripRestoresModeLevelAndOffset()
+    {
+        var level = new LevelInfo(9, "기준", 1500);
+        var source = new PipeLayoutViewModel(new StubElementTypeQueryRepo(levels: [level]));
+        source.ElevationLevel = level;
+        source.ElevationOffsetMm = 800;
+        var saved = source.ToFamilySettings();
+        var restored = new PipeLayoutViewModel(new StubElementTypeQueryRepo(levels: [level with { ElevationMm = 1700 }]));
+
+        restored.ApplyFamilySettings(saved);
+
+        Assert.Equal(PipeElevationMode.Relative, restored.ElevationMode);
+        Assert.Equal(9, restored.ElevationLevel?.Id);
+        Assert.Equal(800, restored.ElevationOffsetMm);
+        Assert.Equal(2500, restored.Elevation);
+    }
+
+    [Fact]
+    public void ApplyRestoredOutline_PreservesSavedLevel_AndStaleSavedIdStaysUnselected()
+    {
+        var levels = new[] { new LevelInfo(1, "1층", 0), new LevelInfo(2, "2층", 3000) };
+        var outline = CreateOutline(4000, 3000);
+        var walls = outline.Walls.Select(wall => wall with { BaseLevelId = 1 }).ToList();
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(levels: levels));
+        vm.ApplyFamilySettings(new PipeLayoutFamilySettings(ElevationMode: PipeElevationMode.Relative, ElevationLevelId: 2, ElevationOffsetMm: 400));
+        vm.ApplyRestoredOutline(new ValveRoomOutline(walls), 0);
+
+        Assert.Equal(2, vm.ElevationLevel?.Id);
+        Assert.Equal(3400, vm.Elevation);
+
+        var stale = new PipeLayoutViewModel(new StubElementTypeQueryRepo(levels: levels));
+        stale.ApplyFamilySettings(new PipeLayoutFamilySettings(ElevationMode: PipeElevationMode.Relative, ElevationLevelId: 99, ElevationOffsetMm: 400));
+        stale.ApplyRestoredOutline(new ValveRoomOutline(walls), 0);
+
+        Assert.Null(stale.ElevationLevel);
+        Assert.Contains("저장된 기준 레벨 없음 — 다시 선택", stale.Status);
+        // 콤보 비었으면 상태줄도 미선택. 벽 레벨명(1층)을 기준 레벨로 쓰면 안 됨.
+        Assert.Contains("기준 레벨 미선택", stale.Status);
+        Assert.DoesNotContain("기준 레벨 1층", stale.Status);
+    }
+
+    [Fact]
+    public void ElevationOffsetMm_RaisesMeterPropertyChanged()
+    {
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(levels: [new LevelInfo(1, "1층", 0)]));
+        var changed = new List<string?>();
+        vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        vm.ElevationOffsetMm = 1200;
+
+        Assert.Contains(nameof(PipeLayoutViewModel.ElevationOffsetM), changed);
+    }
+
+    [Fact]
+    public void ApplyFamilySettings_WithoutElevationFields_KeepsCurrentElevationState()
+    {
+        var levels = new[] { new LevelInfo(1, "1층", 0), new LevelInfo(2, "2층", 3000) };
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(levels: levels));
+        vm.ElevationLevel = levels[1];
+        vm.ElevationOffsetMm = 500;
+
+        vm.ApplyFamilySettings(new PipeLayoutFamilySettings());
+
+        Assert.Equal(PipeElevationMode.Relative, vm.ElevationMode);
+        Assert.Equal(2, vm.ElevationLevel?.Id);
+        Assert.Equal(500, vm.ElevationOffsetMm);
+        Assert.Equal(3500, vm.Elevation);
+    }
+
+    [Fact]
+    public void ElevationSettings_MissingSavedLevelRequestsReselection()
+    {
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(levels: []));
+
+        vm.ApplyFamilySettings(new PipeLayoutFamilySettings(ElevationMode: PipeElevationMode.Relative, ElevationLevelId: 9, ElevationOffsetMm: 800));
+
+        Assert.Null(vm.ElevationLevel);
+        Assert.Contains("저장된 기준 레벨 없음 — 다시 선택", vm.Status);
+    }
 
     private static PipeLayoutViewModel CreateParameterSelectionViewModel()
     {
@@ -3308,9 +3510,9 @@ public sealed class PipeLayoutViewModelTests
             ["밸브A : DN150"] = ["자동 DN", "사용자 DN"],
             ["밸브B : DN100"] = ["대체 DN"]
         };
-        return new PipeLayoutViewModel(new StubElementTypeQueryRepo(
+        return PipeLayoutTestDefaults.UseAbsoluteElevation(new PipeLayoutViewModel(new StubElementTypeQueryRepo(
             accessoryNames: ["밸브A : DN100", "밸브A : DN150", "밸브B : DN100"],
-            parameterNamesByFamily: parameterNames));
+            parameterNamesByFamily: parameterNames)));
     }
 
     private sealed class StubElementTypeQueryRepo : IElementTypeQueryRepo
@@ -3319,6 +3521,7 @@ public sealed class PipeLayoutViewModelTests
         private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _parameterNamesByFamily;
         private readonly IReadOnlyList<string> _accessoryNames;
         private readonly IReadOnlyList<string> _fittingNames;
+        private readonly IReadOnlyList<LevelInfo> _levels;
         private readonly IReadOnlyDictionary<string, IEnumerable<string>>? _numericParameterNamesByFamily;
         private readonly IReadOnlyDictionary<string, IReadOnlyList<DHBIMWATER.Application.DTOs.Revit.PipeAccessoryTypeParameterDto>>? _typeLengthParametersByType;
 
@@ -3328,8 +3531,10 @@ public sealed class PipeLayoutViewModelTests
             IEnumerable<string>? fittingNames = null,
             IReadOnlyDictionary<string, IEnumerable<string>>? parameterNamesByFamily = null,
             IReadOnlyDictionary<string, IEnumerable<string>>? numericParameterNamesByFamily = null,
-            IReadOnlyDictionary<string, IReadOnlyList<DHBIMWATER.Application.DTOs.Revit.PipeAccessoryTypeParameterDto>>? typeLengthParametersByType = null)
+            IReadOnlyDictionary<string, IReadOnlyList<DHBIMWATER.Application.DTOs.Revit.PipeAccessoryTypeParameterDto>>? typeLengthParametersByType = null,
+            IEnumerable<LevelInfo>? levels = null)
         {
+            _levels = levels?.ToList() ?? [];
             _numericParameterNamesByFamily = numericParameterNamesByFamily;
             _typeLengthParametersByType = typeLengthParametersByType;
             _segmentParameterNames = segmentParameterNames?.ToList() ?? ["길이", "DN"];
@@ -3356,6 +3561,7 @@ public sealed class PipeLayoutViewModelTests
         public IEnumerable<string> GetPipingSystemTypeNames() => ["급수"];
         public IEnumerable<string> GetPipeTypeNames() => ["배관"];
         public IEnumerable<string> GetLevelNames() => ["1층"];
+        public IReadOnlyList<LevelInfo> GetLevels() => _levels;
         public IEnumerable<string> GetPipeAccessoryTypeNames() => _accessoryNames;
         public IEnumerable<string> GetPipeFittingTypeNames() => _fittingNames;
         public IEnumerable<string> GetPipeAccessoryInstanceParameterNames(string familyTypeName)

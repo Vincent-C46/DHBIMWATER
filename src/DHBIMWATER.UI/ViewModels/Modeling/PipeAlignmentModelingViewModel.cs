@@ -284,6 +284,25 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         if (MaterialFamilyTypeName(_selectedMaterial, "직관") is { } straight) StraightFamilyTypeName = straight;
     }
 
+    /// <summary>
+    /// 지금 관종 아닌 쪽 곡관·직관 패밀리 문서 미리 읽음(2026-10-12 사용자 지시). 첫 관종 전환 EditFamily 지연 제거.
+    /// 창 Loaded 뒤 백그라운드 스레드에서 Revit 스레드로 넘김 — UI 안 막음. 결과는 FamilyParameterCache에 남음.
+    /// 실패(창 닫힘·타임아웃·편집 불가) 무시 — 전환 때 기존대로 다시 읽음.
+    /// </summary>
+    public void PrewarmOtherMaterialFamilies()
+    {
+        var other = _selectedMaterial == PipeMaterial.Steel ? PipeMaterial.DuctileIron : PipeMaterial.Steel;
+        var familyTypes = new[] { MaterialFamilyTypeName(other, "곡관"), MaterialFamilyTypeName(other, "직관") }
+            .OfType<string>().Distinct(StringComparer.Ordinal).ToList();
+        if (familyTypes.Count == 0) return;
+        _ = Task.Run(() =>
+        {
+            // 점 개수 조회 한 번이 파라미터명 캐시까지 채움(ReadFamilyDocument).
+            try { _revit.Run(() => { foreach (var familyType in familyTypes) _typeRepo.GetAdaptiveBendPointCount(familyType); }); }
+            catch { }
+        });
+    }
+
     /// <summary>배치 중 창 닫기를 막았을 때의 안내(docs/209 § A-5).</summary>
     public void NotifyCloseBlocked()
         => ProgressDetail = "배치가 끝나거나 [배치 취소]로 되돌린 뒤 닫을 수 있습니다.";

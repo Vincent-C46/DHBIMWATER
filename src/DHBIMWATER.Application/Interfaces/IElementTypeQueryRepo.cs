@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using DHBIMWATER.Core.Piping;
 
 namespace DHBIMWATER.Application.Interfaces
 {
@@ -41,6 +42,8 @@ namespace DHBIMWATER.Application.Interfaces
         IEnumerable<string> GetPipingSystemTypeNames();
         IEnumerable<string> GetPipeTypeNames();
         IEnumerable<string> GetLevelNames();
+        /// <summary>프로젝트 레벨(Id·이름·내부 원점 기준 높이 mm), 높이순.</summary>
+        IReadOnlyList<LevelInfo> GetLevels() => [];
         /// <summary>프로젝트에 로드된 배관부속(Pipe Accessory) 패밀리의 타입명 목록. "패밀리명 : 타입명" 형식으로 반환한다.</summary>
         IEnumerable<string> GetPipeAccessoryTypeNames();
         /// <summary>프로젝트에 로드된 배관 부속류(Pipe Fitting) 패밀리의 타입명 목록. "패밀리명 : 타입명" 형식으로 반환한다.

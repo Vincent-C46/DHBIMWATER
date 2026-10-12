@@ -9,6 +9,8 @@ public partial class PipeAlignmentModelingView : Window
     {
         InitializeComponent();
         Loaded += (_, _) => MaxHeight = SystemParameters.WorkArea.Height;
+        // 창 뜬 뒤 다른 관종 패밀리 미리 읽음 — 강관 첫 클릭 지연 제거(2026-10-12).
+        Loaded += (_, _) => viewModel.PrewarmOtherMaterialFamilies();
         DataContext = viewModel;
         viewModel.CloseAction = Close;
         viewModel.OwnerWindow = this;

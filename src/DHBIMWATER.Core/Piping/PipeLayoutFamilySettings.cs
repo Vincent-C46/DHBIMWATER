@@ -59,7 +59,13 @@ public sealed record PipeLayoutFamilySettings(
     /// <summary>강관 밸브부관 등급(docs/256). 바이패스 지관 규격표 조회에 쓴다. 옛 저장본에는 키가 없어 기본값 F12로 읽힌다.</summary>
     SteelFittingClass SteelFittingClass = SteelFittingClass.F12,
     /// <summary>관 등급(docs/260 § C). null이면 옛 저장본 — 창이 재료별 기본값을 쓴다. 빈 문자열은 강관 "DN별 기본 등급"이다.</summary>
-    string? PipeKind = null)
+    string? PipeKind = null,
+    /// <summary>관 중심 높이 지정 방식(docs/285). null이면 옛 저장본 — 기본값 Relative.</summary>
+    PipeElevationMode? ElevationMode = null,
+    /// <summary>상대값 기준 레벨 ElementId. 이름 변경에 견디도록 Id로 저장한다.</summary>
+    long? ElevationLevelId = null,
+    /// <summary>레벨로부터 Offset(mm).</summary>
+    double? ElevationOffsetMm = null)
 {
     public static PipeLayoutFamilySettings Empty { get; } = new();
 

@@ -14,7 +14,8 @@ public sealed record OutlineWall(
     Point2D OuterEnd,
     double ThicknessMm,
     /// <summary>이 벽의 <c>DH_Zone</c>(밸브실 유형). 밸브실 빌더가 찍어 둔 값이며, 없으면 빈 문자열이다(docs/161 § A).</summary>
-    string Zone = "");
+    string Zone = "",
+    long BaseLevelId = 0);
 
 /// <summary>
 /// 밸브실 안에 서 있는 기둥의 <b>수평 단면 하나</b>다(mm, 반시계). 솔리드의 수평 평면 면에서 뽑은 외곽 루프이며,

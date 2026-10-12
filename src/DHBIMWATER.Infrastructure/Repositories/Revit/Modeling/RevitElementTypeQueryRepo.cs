@@ -2,6 +2,7 @@
 using Autodesk.Revit.DB.Plumbing;
 using Autodesk.Revit.DB.Structure;
 using DHBIMWATER.Application.Interfaces;
+using DHBIMWATER.Core.Piping;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -282,6 +283,18 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             var doc = _docProvider(); if (doc is null) return Enumerable.Empty<string>();
             try { return new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().OrderBy(x => x.Elevation).Select(x => x.Name).ToList(); }
             catch { return Enumerable.Empty<string>(); }
+        }
+        public IReadOnlyList<LevelInfo> GetLevels()
+        {
+            var doc = _docProvider(); if (doc is null) return [];
+            try
+            {
+                return new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()
+                    .OrderBy(level => level.Elevation)
+                    .Select(level => new LevelInfo(level.Id.Value, level.Name, UC.FtToMm(level.Elevation)))
+                    .ToList();
+            }
+            catch { return []; }
         }
         public IEnumerable<string> GetPipeAccessoryTypeNames() => GetFamilySymbolNames(BuiltInCategory.OST_PipeAccessory);
         public IEnumerable<string> GetPipeFittingTypeNames() => GetFamilySymbolNames(BuiltInCategory.OST_PipeFitting);

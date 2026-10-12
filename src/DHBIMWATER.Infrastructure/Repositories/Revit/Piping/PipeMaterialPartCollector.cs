@@ -10,6 +10,9 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
 /// </summary>
 internal static class PipeMaterialPartCollector
 {
+    public static IEnumerable<FamilyInstance> AllPipingInstances(Document document)
+        => PipingInstances(document);
+
     /// <summary>DHBIMWATER가 만든 배관 밸브류·배관 이음쇠 인스턴스만 고른다.
     /// 관·곡관·T형은 배관 이음쇠로 배치되므로 한 카테고리만 훑으면 재료표에서 통째로 빠진다(docs/133).
     /// 사용자가 직접 놓은 부속이나 링크 요소까지 세면 재료표 수량이 틀어진다.</summary>

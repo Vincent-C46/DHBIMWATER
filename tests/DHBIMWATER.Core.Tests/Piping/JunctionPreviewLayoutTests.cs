@@ -25,4 +25,16 @@ public sealed class JunctionPreviewLayoutTests
         var unordered = JunctionPreviewLayout.Layout([Item(3, null)], 8, true);
         Assert.Equal(unordered[0].Y, JunctionPreviewLayout.Layout([Item(4, 4)], 8, false)[0].Y);
     }
+
+    [Theory]
+    [InlineData(JunctionExpandAxis.Y, true, 270, 306)]
+    [InlineData(JunctionExpandAxis.Y, false, 270, 434)]
+    [InlineData(JunctionExpandAxis.X, true, 334, 370)]
+    [InlineData(JunctionExpandAxis.X, false, 206, 370)]
+    public void Layout_UsesSelectedAxisAndSign(JunctionExpandAxis axis, bool positive, double x, double y)
+    {
+        var point = Assert.Single(JunctionPreviewLayout.Layout([Item(1, 1)], 8, true, axis, positive));
+        Assert.Equal(x, point.X);
+        Assert.Equal(y, point.Y);
+    }
 }

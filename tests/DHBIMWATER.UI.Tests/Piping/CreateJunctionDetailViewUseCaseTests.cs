@@ -47,18 +47,40 @@ public sealed class CreateJunctionDetailViewUseCaseTests
         Assert.Equal(2, result.Created.Count);
     }
 
+    [Fact]
+    public void Execute_NoTargets_ReportsWhyNoViewWasCreated()
+    {
+        var repo = new FakeRepo { Empty = true };
+        var result = new CreateJunctionDetailViewUseCase(new FakeTransaction(), repo).Execute();
+        Assert.Empty(result.Created);
+        Assert.Contains(result.Warnings, x => x.Contains("부재가 없어"));
+    }
+
+    [Fact]
+    public void Execute_HorizontalOnly_StillCreatesView()
+    {
+        var repo = new FakeRepo { HorizontalOnly = true };
+        var result = new CreateJunctionDetailViewUseCase(new FakeTransaction(), repo).Execute();
+        Assert.Equal(2, result.Created.Count);
+        Assert.Empty(repo.FirstSlots);
+    }
+
     private sealed class FakeRepo : IJunctionDetailRepo
     {
         public bool FailSecond { get; init; }
+        public bool Empty { get; init; }
+        public bool HorizontalOnly { get; init; }
         public int CreateCalls { get; private set; }
         public int ResetCalls { get; private set; }
         public IReadOnlyList<VerticalSlot> FirstSlots { get; private set; } = [];
         public JunctionDetailViewOptions? LastOptions { get; private set; }
 
-        public IReadOnlyList<JunctionDetailGroup> GetJunctions() =>
+        public IReadOnlyList<JunctionDetailGroup> GetJunctions() => Empty ? [] :
         [
-            new("J1", [new JunctionNode(1, [new(1, 0, 0, null), new(0, 0, 1, 2)]),
-                new JunctionNode(2, [new(0, 0, -1, 1)])]),
+            new("J1", HorizontalOnly
+                ? [new JunctionNode(1, [new(1, 0, 0, 2)]), new JunctionNode(2, [new(-1, 0, 0, 1)])]
+                : [new JunctionNode(1, [new(1, 0, 0, null), new(0, 0, 1, 2)]),
+                    new JunctionNode(2, [new(0, 0, -1, 1)])]),
             new("J2", [new JunctionNode(3, [new(1, 0, 0, null), new(0, 0, 1, 4)]),
                 new JunctionNode(4, [new(0, 0, -1, 3)])])
         ];

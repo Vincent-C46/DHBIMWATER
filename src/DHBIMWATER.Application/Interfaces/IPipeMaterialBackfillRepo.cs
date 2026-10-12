@@ -33,4 +33,9 @@ public interface IPipeMaterialBackfillRepo
     /// <summary>후보에 재료표 값을 기록한다. 트랜잭션은 UseCase가 연다(CLAUDE.md).</summary>
     /// <param name="catalog">무게(`DH_무게`) 조회용 직관·곡관 규격표(docs/260 § E).</param>
     PipeMaterialBackfillResult Backfill(DHBIMWATER.Core.Piping.BendSettings catalog);
+
+    /// <summary>값 빈 배관 부재(수동 배치 밸브 등)에 명칭·규격·번호·DH_Addin만 기록. 개수 재산정 없음.
+    /// 선택 무시, 문서 전체 대상. 격점번호 비면 문서 격점번호로 채움 (격점상세도 자동 실행용).
+    /// 트랜잭션은 UseCase가 연다.</summary>
+    PipeMaterialBackfillResult BackfillUntagged(DHBIMWATER.Core.Piping.BendSettings catalog) => new(0, 0, []);
 }

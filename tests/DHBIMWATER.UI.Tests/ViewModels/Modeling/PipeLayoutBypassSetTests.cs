@@ -585,7 +585,7 @@ public sealed class PipeLayoutBypassSetTests
         return vm;
     }
 
-    private static PipeLayoutViewModel CreateViewModel() => new(new StubRepo());
+    private static PipeLayoutViewModel CreateViewModel() => PipeLayoutTestDefaults.UseAbsoluteElevation(new(new StubRepo()));
 
     private sealed class StubRepo : IElementTypeQueryRepo
     {

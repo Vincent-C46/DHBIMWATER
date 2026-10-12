@@ -3,7 +3,8 @@ using DHBIMWATER.Application.DTOs.Documentation;
 
 namespace DHBIMWATER.Application.Interfaces;
 
-public sealed record JunctionDetailGroup(string JunctionId, IReadOnlyList<JunctionNode> Nodes);
+public sealed record JunctionDetailGroup(string JunctionId, IReadOnlyList<JunctionNode> Nodes,
+    IReadOnlyList<string>? Warnings = null);
 public sealed record JunctionDetailViewChange(bool Created, IReadOnlyList<string> Warnings);
 public sealed record JunctionDetailTagType(long Id, string Name);
 

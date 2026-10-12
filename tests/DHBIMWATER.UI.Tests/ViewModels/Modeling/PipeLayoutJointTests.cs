@@ -352,8 +352,8 @@ public sealed class PipeLayoutJointTests
 
     private static PipeLayoutViewModel CreateViewModelWithValve(IEnumerable<string>? fittingNames = null)
     {
-        var vm = new PipeLayoutViewModel(new StubTypeRepo(
-            fittingNames ?? ["직관 : DN100", "곡관90 : DN100", "T형 : DN100", JointFamily]));
+        var vm = PipeLayoutTestDefaults.UseAbsoluteElevation(new PipeLayoutViewModel(new StubTypeRepo(
+            fittingNames ?? ["직관 : DN100", "곡관90 : DN100", "T형 : DN100", JointFamily])));
         vm.HandleCanvasSizeChanged(1000, 1000);
         vm.SnapReferencePoint = false;
         vm.SnapEndpoint = false;

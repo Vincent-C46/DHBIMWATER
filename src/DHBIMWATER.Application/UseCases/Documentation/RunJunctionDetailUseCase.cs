@@ -32,14 +32,15 @@ public sealed class RunJunctionDetailUseCase
         JunctionDetailResult? plan = null;
         var warnings = new List<string>();
 
-        if (options.Backfill)
+        // 체크 = 문서 전체 재산정 포함 재기록. 미체크여도 값 빈 부재(수동 배치 밸브 등)는 자동 기록 — 재료표에 빠지지 않게.
+        if (options.Backfill || _backfill.ScanCandidates().CandidateCount > 0)
         {
             try
             {
                 if (_catalog.TryEnsureAvailable(out var error))
                 {
                     if (!string.IsNullOrWhiteSpace(error)) warnings.Add(error);
-                    backfill = _backfill.Execute();
+                    backfill = options.Backfill ? _backfill.Execute() : _backfill.ExecuteUntagged();
                 }
                 else if (!string.IsNullOrWhiteSpace(error)) warnings.Add(error);
             }
@@ -60,7 +61,7 @@ public sealed class RunJunctionDetailUseCase
         if (options.CreatePlan)
         {
             var viewOptions = new JunctionDetailViewOptions(options.ExpandVertical, options.StepPaperMm,
-                options.ViewScale, options.PlaceTags, options.TagTypeId);
+                options.ViewScale, options.PlaceTags, options.TagTypeId, options.ExpandAxis, options.ExpandPositive);
             try { plan = _plan.Execute(viewOptions); }
             catch (DhbimwaterException ex) when (ex.Code == ErrorCodes.NoActiveDocument) { throw; }
             catch (Exception ex) { warnings.Add($"평면 상세도 생성 실패: {ex.Message}"); }

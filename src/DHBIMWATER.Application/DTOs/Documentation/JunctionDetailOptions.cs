@@ -15,7 +15,9 @@ public sealed record JunctionDetailOptions(
     bool PlaceTags = true,
     long TagTypeId = 0,
     bool UseTypeImage = true,
-    bool RedrawExistingDrafting = false);
+    bool RedrawExistingDrafting = false,
+    JunctionExpandAxis ExpandAxis = JunctionExpandAxis.Y,
+    bool ExpandPositive = true);
 
 public sealed record JunctionDetailResult(IReadOnlyList<string> Created, IReadOnlyList<string> Updated,
     IReadOnlyList<string> Reset, IReadOnlyList<string> Skipped, IReadOnlyList<string> Warnings);
@@ -25,7 +27,9 @@ public sealed record JunctionDetailViewOptions(
     double StepPaperMm,
     int ViewScale,
     bool PlaceTags,
-    long TagTypeId);
+    long TagTypeId,
+    JunctionExpandAxis ExpandAxis = JunctionExpandAxis.Y,
+    bool ExpandPositive = true);
 
 public sealed record JunctionDetailRunResult(
     PipeMaterialBackfillResult? Backfill,
@@ -39,4 +43,5 @@ public sealed record JunctionDetailPreviewJunction(string JunctionId, string Roo
     IReadOnlyList<string> Warnings);
 
 public sealed record JunctionDetailPreview(IReadOnlyList<JunctionDetailPreviewJunction> Junctions,
-    IReadOnlyList<PipeMaterialRow> UnassignedRows, IReadOnlyList<JunctionDetailTagType> TagTypes);
+    IReadOnlyList<PipeMaterialRow> UnassignedRows, IReadOnlyList<JunctionDetailTagType> TagTypes,
+    int MaterialPartCount = 0, IReadOnlyList<JunctionSymbolShapeDiagnostic>? ShapeDiagnostics = null);

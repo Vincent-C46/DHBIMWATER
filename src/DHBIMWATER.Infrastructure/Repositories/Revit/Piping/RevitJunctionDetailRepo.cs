@@ -18,50 +18,57 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
     public IReadOnlyList<JunctionDetailGroup> GetJunctions()
     {
         var document = Document();
-        var instances = PipeMaterialPartCollector.AddinInstances(document).ToList();
+        var instances = PipeMaterialPartCollector.AllPipingInstances(document).ToList();
+        if (instances.Count == 0) return [];
+        var ids = instances.Select(JunctionId).Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToList();
+        var junctionId = ids.FirstOrDefault() ?? string.Empty;
+        IReadOnlyList<string> warnings = ids.Count > 1
+            ? [$"문서에 격점번호가 {ids.Count}종 있어 하나로 묶었습니다"] : [];
         var connectors = instances.ToDictionary(x => x.Id.Value, PipeMaterialConnectorReader.EndConnectors);
         var connectorIndex = new Dictionary<(long Element, int Connector), int>();
         foreach (var instance in instances)
         for (var i = 0; i < connectors[instance.Id.Value].Count; i++)
             connectorIndex[(instance.Id.Value, connectors[instance.Id.Value][i].Id)] = i;
 
-        return instances
-            .Select(x => (Instance: x, JunctionId: JunctionId(x)))
-            .Where(x => !string.IsNullOrWhiteSpace(x.JunctionId))
-            .GroupBy(x => x.JunctionId, StringComparer.Ordinal)
-            .Select(group => new JunctionDetailGroup(group.Key,
-                group.Select(x => new JunctionNode(x.Instance.Id.Value,
-                    connectors[x.Instance.Id.Value].Select(connector =>
+        return [new JunctionDetailGroup(junctionId,
+                instances.Select(x => new JunctionNode(x.Id.Value,
+                    connectors[x.Id.Value].Select(connector =>
                     {
                         var direction = connector.CoordinateSystem.BasisZ.Normalize();
-                        var partner = PipeMaterialConnectorReader.Partner(connector, x.Instance.Id.Value, connectorIndex);
+                        var partner = PipeMaterialConnectorReader.Partner(connector, x.Id.Value, connectorIndex);
                         return new JunctionConnector(direction.X, direction.Y, direction.Z, partner.Id);
-                    }).ToList())).ToList()))
-            .ToList();
+                    }).ToList())).ToList(), warnings)];
     }
 
     public IReadOnlyList<JunctionPreviewItem> GetPreviewItems(JunctionDetailGroup group)
     {
         var document = Document();
-        var order = JunctionVerticalChain.Resolve(group.JunctionId, group.Nodes).Slots.ToDictionary(x => x.ElementId, x => x.Order);
-        var disconnected = group.Nodes.Where(x => x.Connectors.Any(connector => connector.PartnerId is null))
-            .Select(x => x.Id).ToHashSet();
-        var viewName = PipeMaterialViewName.For(CreateJunctionDetailViewUseCase.NamePrefix, group.JunctionId);
-        var upDirection = new FilteredElementCollector(document).OfClass(typeof(ViewPlan)).Cast<ViewPlan>()
-            .FirstOrDefault(x => !x.IsTemplate && x.ViewType == ViewType.FloorPlan && x.Name == viewName)?.UpDirection
-            ?? XYZ.BasisY;
+        var chain = JunctionVerticalChain.Resolve(group.JunctionId, group.Nodes);
+        var order = chain.Slots.ToDictionary(x => x.ElementId, x => x.Order);
+        var orphans = chain.Orphans.ToHashSet();
+        var viewName = ViewName(group.JunctionId);
+        var plan = new FilteredElementCollector(document).OfClass(typeof(ViewPlan)).Cast<ViewPlan>()
+            .FirstOrDefault(x => !x.IsTemplate && x.ViewType == ViewType.FloorPlan && x.Name == viewName);
+        var upDirection = plan?.UpDirection ?? XYZ.BasisY;
+        var rightDirection = plan?.RightDirection ?? XYZ.BasisX;
         return Instances(document, group).Select(instance =>
         {
             string Read(string name) => (ValvePipingParameters.Guids.TryGetValue(name, out var guid)
                 ? instance.get_Parameter(guid) : null)?.AsString() ?? instance.LookupParameter(name)?.AsString() ?? string.Empty;
             var transform = instance.GetTransform();
             var rotation = Math.Atan2(transform.BasisX.Y, transform.BasisX.X) * 180 / Math.PI;
+            var name = Read(ValvePipingParameters.ItemName);
+            var familyName = instance.Symbol?.FamilyName ?? instance.Symbol?.Name ?? instance.Name;
+            var previewName = string.IsNullOrWhiteSpace(name) ? $"{familyName} : {instance.Symbol?.Name}" : name;
+            var part = Read(ValvePipingParameters.Part);
             return new JunctionPreviewItem(instance.Id.Value,
                 instance.LookupParameter(ValvePipingParameters.ItemNumber)?.AsInteger() ?? 0,
-                Read(ValvePipingParameters.ItemName), Read(ValvePipingParameters.ItemSpec),
-                JunctionSymbolKindMapper.Map(Read(ValvePipingParameters.Part), Read(ValvePipingParameters.ItemName)),
+                previewName, Read(ValvePipingParameters.ItemSpec),
+                JunctionSymbolKindMapper.Map(part, string.IsNullOrWhiteSpace(name) ? familyName : name),
                 order.GetValueOrDefault(instance.Id.Value), ToVector(transform.BasisX), ToVector(transform.BasisY),
-                ToVector(transform.BasisZ), ToVector(upDirection), rotation, !disconnected.Contains(instance.Id.Value));
+                ToVector(transform.BasisZ), ToVector(upDirection), rotation, !orphans.Contains(instance.Id.Value),
+                ToVector(rightDirection));
         }).ToList();
     }
 
@@ -82,33 +89,36 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
         try
         {
             var instances = Instances(document, group);
-            var root = FindRoot(group, instances)
-                ?? throw new InvalidOperationException($"격점 {group.JunctionId}: 수직 분기 뿌리 부재가 없습니다.");
-            var level = document.GetElement(root.LevelId) as Level
-                ?? throw new InvalidOperationException($"격점 {group.JunctionId}: 뿌리 부재에 레벨이 없습니다.");
-            var viewName = PipeMaterialViewName.For(CreateJunctionDetailViewUseCase.NamePrefix, group.JunctionId);
+            var root = FindRoot(group, instances);
+            var level = SelectLevel(document, root, instances)
+                ?? throw new InvalidOperationException($"격점 {group.JunctionId}: 사용할 레벨을 찾을 수 없습니다.");
+            var viewName = ViewName(group.JunctionId);
             var existing = new FilteredElementCollector(document).OfClass(typeof(View)).Cast<View>()
                 .FirstOrDefault(x => !x.IsTemplate && string.Equals(x.Name, viewName, StringComparison.Ordinal));
             if (existing is not null && (existing is not ViewPlan || existing.ViewType != ViewType.FloorPlan))
                 throw new InvalidOperationException($"'{viewName}' 이름을 다른 종류의 뷰가 사용합니다.");
             if (existing is ViewPlan existingPlan && existingPlan.GenLevel?.Id != level.Id)
-                throw new InvalidOperationException($"'{viewName}'의 레벨이 격점 뿌리 부재 레벨과 다릅니다.");
+                throw new InvalidOperationException($"'{viewName}'의 레벨이 대상 부재 레벨과 다릅니다.");
 
             var created = existing is null;
             var view = existing as ViewPlan ?? CreateView(document, viewName, level);
             if (view.ViewTemplateId != ElementId.InvalidElementId)
-                throw new InvalidOperationException($"'{viewName}'에 뷰 템플릿이 적용돼 있습니다.");
+            {
+                if (created) view.ViewTemplateId = ElementId.InvalidElementId;
+                else throw new InvalidOperationException($"'{viewName}'의 뷰 템플릿을 해제한 뒤 다시 실행하세요.");
+            }
 
             view.DetailLevel = ViewDetailLevel.Coarse;
             view.Scale = options.ViewScale;
             ConfigureRange(view, level, instances);
-            ConfigureCrop(view, instances, slots, options.StepPaperMm);
+            var direction = ExpandDirection(view, options);
+            ConfigureCrop(view, instances, slots, options.StepPaperMm, direction);
             ConfigureCategories(document, view);
-            ConfigureJunctionFilter(document, view, group.JunctionId);
+            RemovePreviousFilter(document, view);
 
             var warnings = ResetInstances(instances);
-            WriteOffsets(instances, slots, view, options.StepPaperMm, warnings);
-            if (options.PlaceTags) PlaceNumberTags(document, view, instances, group.Nodes, slots, options.TagTypeId, options.StepPaperMm, warnings);
+            WriteOffsets(instances, slots, view, options.StepPaperMm, direction, warnings);
+            if (options.PlaceTags) PlaceNumberTags(document, view, instances, group.Nodes, slots, options.TagTypeId, options.StepPaperMm, direction, options.ExpandAxis, warnings);
             sub.Commit();
             return new JunctionDetailViewChange(created, warnings);
         }
@@ -148,7 +158,39 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
         return instances.FirstOrDefault(x => x.Id.Value == rootId);
     }
 
-    private static ViewPlan CreateView(Document document, string name, Level level)
+    private static string ViewName(string junctionId)
+        => string.IsNullOrWhiteSpace(junctionId) ? "격점상세도_미지정"
+            : PipeMaterialViewName.For(CreateJunctionDetailViewUseCase.NamePrefix, junctionId);
+
+    internal static Level? SelectLevel(Document document, FamilyInstance? root,
+        IReadOnlyList<FamilyInstance> instances)
+    {
+        if (root is not null && document.GetElement(root.LevelId) is Level rootLevel) return rootLevel;
+        var mostCommon = instances.Select(x => document.GetElement(x.LevelId) as Level).OfType<Level>()
+            .GroupBy(x => x.Id.Value).OrderByDescending(x => x.Count()).ThenBy(x => x.Key)
+            .Select(x => x.First()).FirstOrDefault();
+        if (mostCommon is not null) return mostCommon;
+        var lowest = Bounds(instances).Min.Z;
+        return new FilteredElementCollector(document).OfClass(typeof(Level)).Cast<Level>()
+            .Where(x => x.Elevation <= lowest).OrderByDescending(x => x.Elevation).FirstOrDefault();
+    }
+
+    private static XYZ ExpandDirection(ViewPlan view, JunctionDetailViewOptions options)
+    {
+        var selected = JunctionExpandDirection.Select(ToVector(view.RightDirection), ToVector(view.UpDirection),
+            options.ExpandAxis, options.ExpandPositive);
+        return new XYZ(selected.X, selected.Y, selected.Z);
+    }
+
+    private static void RemovePreviousFilter(Document document, ViewPlan view)
+    {
+        var name = $"격점상세도_필터_{view.Id.Value}";
+        var filter = new FilteredElementCollector(document).OfClass(typeof(ParameterFilterElement))
+            .Cast<ParameterFilterElement>().FirstOrDefault(x => x.Name == name);
+        if (filter is not null && view.GetFilters().Contains(filter.Id)) view.RemoveFilter(filter.Id);
+    }
+
+    internal static ViewPlan CreateView(Document document, string name, Level level)
     {
         var type = new FilteredElementCollector(document).OfClass(typeof(ViewFamilyType))
             .Cast<ViewFamilyType>().FirstOrDefault(x => x.ViewFamily == ViewFamily.FloorPlan)
@@ -158,7 +200,7 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
         return view;
     }
 
-    private static void ConfigureRange(ViewPlan view, Level level, IReadOnlyList<FamilyInstance> instances)
+    internal static void ConfigureRange(ViewPlan view, Level level, IReadOnlyList<FamilyInstance> instances)
     {
         var bounds = Bounds(instances);
         var range = view.GetViewRange();
@@ -175,11 +217,11 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
     }
 
     private static void ConfigureCrop(ViewPlan view, IReadOnlyList<FamilyInstance> instances,
-        IReadOnlyList<VerticalSlot> slots, double stepPaperMm)
+        IReadOnlyList<VerticalSlot> slots, double stepPaperMm, XYZ direction)
     {
         var bounds = Bounds(instances);
         var maxOrder = slots.Count == 0 ? 0 : slots.Max(x => x.Order);
-        var shift = view.UpDirection * RevitUnitConverter.MmToFt(maxOrder * stepPaperMm * view.Scale);
+        var shift = direction * RevitUnitConverter.MmToFt(maxOrder * stepPaperMm * view.Scale);
         var crop = view.CropBox;
         var inverse = crop.Transform.Inverse;
         var corners = new[]
@@ -197,7 +239,7 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
         view.CropBox = crop;
     }
 
-    private static (XYZ Min, XYZ Max) Bounds(IReadOnlyList<FamilyInstance> instances)
+    internal static (XYZ Min, XYZ Max) Bounds(IReadOnlyList<FamilyInstance> instances)
     {
         var points = new List<XYZ>();
         foreach (var instance in instances)
@@ -216,10 +258,20 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
         foreach (Category category in document.Settings.Categories)
         {
             if (category.CategoryType != CategoryType.Model || !view.CanCategoryBeHidden(category.Id)) continue;
+            // 심볼 .rfa = 일반 모델. 공유 중첩이면 자기 카테고리로 가시성 판정 → 같이 켬 (docs/284)
             var keep = category.Id.Value == (long)BuiltInCategory.OST_PipeFitting ||
-                category.Id.Value == (long)BuiltInCategory.OST_PipeAccessory;
+                category.Id.Value == (long)BuiltInCategory.OST_PipeAccessory ||
+                category.Id.Value == (long)BuiltInCategory.OST_GenericModel;
             view.SetCategoryHidden(category.Id, !keep);
+            if (keep) ShowSubCategories(view, category);
         }
+    }
+
+    // 하위 카테고리 개별로 꺼져 있으면 심볼 선 빠짐 → 재실행마다 켬
+    internal static void ShowSubCategories(View view, Category category)
+    {
+        foreach (Category subCategory in category.SubCategories)
+            if (view.CanCategoryBeHidden(subCategory.Id)) view.SetCategoryHidden(subCategory.Id, false);
     }
 
     private static void ConfigureJunctionFilter(Document document, ViewPlan view, string junctionId)
@@ -250,13 +302,13 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
         foreach (var instance in instances)
         {
             if (!TryParameters(instance, warnings, out var parameters)) continue;
-            foreach (var parameter in parameters) parameter.Set(0d);
+            foreach (var parameter in parameters) parameter?.Set(0d);
         }
         return warnings;
     }
 
     private static void WriteOffsets(IReadOnlyList<FamilyInstance> instances, IReadOnlyList<VerticalSlot> slots,
-        ViewPlan view, double stepPaperMm, List<string> warnings)
+        ViewPlan view, double stepPaperMm, XYZ direction, List<string> warnings)
     {
         var byId = instances.ToDictionary(x => x.Id.Value);
         foreach (var slot in slots)
@@ -264,19 +316,23 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
             if (!byId.TryGetValue(slot.ElementId, out var instance) ||
                 !TryParameters(instance, warnings, out var parameters)) continue;
             var distance = RevitUnitConverter.MmToFt(slot.Order * stepPaperMm * view.Scale);
-            var world = view.UpDirection * distance;
+            var world = direction * distance;
             var transform = instance.GetTransform();
             var local = SymbolOffsetMath.ToLocal(ToVector(world), ToVector(transform.BasisX),
                 ToVector(transform.BasisY), ToVector(transform.BasisZ));
-            parameters[0].Set(local.X);
-            parameters[1].Set(local.Y);
-            parameters[2].Set(local.Z);
+            var values = new[] { local.X, local.Y, local.Z };
+            var present = parameters.Select(x => x is not null).ToArray();
+            var writable = parameters.Select(x => x is { IsReadOnly: false, StorageType: StorageType.Double }).ToArray();
+            var components = JunctionExpandDirection.WritableComponents(present, writable, local, out var missing);
+            foreach (var index in components) parameters[index]!.Set(values[index]);
+            foreach (var index in missing)
+                warnings.Add($"부재 {instance.Id.Value}: 로컬 {new[] { "X", "Y", "Z" }[index]} 방향 오프셋이 필요하지만 매개변수가 없습니다");
         }
     }
 
     private static SymbolVector ToVector(XYZ vector) => new(vector.X, vector.Y, vector.Z);
 
-    private static bool TryParameters(FamilyInstance instance, List<string> warnings, out Parameter[] parameters)
+    private static bool TryParameters(FamilyInstance instance, List<string> warnings, out Parameter?[] parameters)
     {
         var names = new[] { JunctionDetailParameters.SymbolOffsetX, JunctionDetailParameters.SymbolOffsetY,
             JunctionDetailParameters.SymbolOffsetZ };
@@ -287,48 +343,55 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
             warnings.Add($"부재 {instance.Id.Value}: 패밀리 갱신 필요 (심볼 오프셋 매개변수 없음)");
             return false;
         }
-        if (found.Any(x => x is null || x.IsReadOnly || x.StorageType != StorageType.Double))
+        if (found.Any(x => x is not null && (x.IsReadOnly || x.StorageType != StorageType.Double)))
         {
             warnings.Add($"부재 {instance.Id.Value}: 심볼 오프셋 매개변수가 없거나 읽기 전용입니다.");
             return false;
         }
-        parameters = found.Select(x => x!).ToArray();
+        parameters = found;
         return true;
     }
 
     private static void PlaceNumberTags(Document document, ViewPlan view, IReadOnlyList<FamilyInstance> instances,
-        IReadOnlyList<JunctionNode> nodes, IReadOnlyList<VerticalSlot> slots, long tagTypeId, double stepPaperMm, List<string> warnings)
+        IReadOnlyList<JunctionNode> nodes, IReadOnlyList<VerticalSlot> slots, long tagTypeId, double stepPaperMm,
+        XYZ direction, JunctionExpandAxis axis, List<string> warnings)
     {
         var types = new FilteredElementCollector(document).OfCategory(BuiltInCategory.OST_MultiCategoryTags)
             .WhereElementIsElementType().OfType<FamilySymbol>().ToList();
         var selectedType = tagTypeId > 0 ? types.FirstOrDefault(x => x.Id.Value == tagTypeId) : null;
-        if (selectedType is null && types.Count != 1)
-        {
-            warnings.Add(types.Count == 0 ? "격점 번호 태그 유형이 없어 태그를 만들지 않았습니다."
-                : "격점 번호 태그 유형이 여러 개라 대상을 정할 수 없습니다.");
-            return;
-        }
-        var type = selectedType ?? types[0];
-        if (!type.IsActive) type.Activate();
-        var taggedIds = new FilteredElementCollector(document, view.Id).OfClass(typeof(IndependentTag))
-            .Cast<IndependentTag>().SelectMany(x => x.GetTaggedLocalElementIds())
-            .ToHashSet();
+        var type = selectedType ?? (types.Count == 1 ? types[0] : null);
+        if (type is null)
+            warnings.Add(types.Count == 0 ? "격점 번호 태그 유형이 없어 새 태그를 만들지 않았습니다."
+                : "격점 번호 태그 유형이 여러 개라 새 태그 대상을 정할 수 없습니다.");
+        else if (!type.IsActive) type.Activate();
+        var groupIds = instances.Select(x => x.Id).ToHashSet();
+        var existingTags = new FilteredElementCollector(document, view.Id).OfClass(typeof(IndependentTag))
+            .Cast<IndependentTag>().Where(tag => tag.GetTaggedLocalElementIds().All(groupIds.Contains))
+            .SelectMany(tag => tag.GetTaggedLocalElementIds()
+                .Select(id => (id, tag))).GroupBy(x => x.id).ToDictionary(x => x.Key, x => x.First().tag);
         var orderById = slots.ToDictionary(x => x.ElementId, x => x.Order);
         var verticalIds = nodes.Where(x => x.Connectors.Count > 0 &&
                 x.Connectors.All(connector => Math.Abs(connector.Dz) >= JunctionVerticalChain.VerticalCosine))
             .Select(x => x.Id).ToHashSet();
         var gap = RevitUnitConverter.MmToFt(4.5 * view.Scale);
+        var moved = 0;
         foreach (var instance in instances)
         {
-            if (taggedIds.Contains(instance.Id)) continue;
+            if ((instance.LookupParameter(ValvePipingParameters.ItemNumber)?.AsInteger() ?? 0) <= 0) continue;
             var center = instance.GetTransform().Origin;
             var isVertical = verticalIds.Contains(instance.Id.Value);
             if (isVertical && orderById.TryGetValue(instance.Id.Value, out var order))
-                center += view.UpDirection * RevitUnitConverter.MmToFt(order * stepPaperMm * view.Scale);
-            var position = isVertical ? center - view.RightDirection * gap : center - view.UpDirection * gap;
+                center += direction * RevitUnitConverter.MmToFt(order * stepPaperMm * view.Scale);
+            var side = axis == JunctionExpandAxis.Y ? view.RightDirection : view.UpDirection;
+            var position = isVertical ? center - side * gap : center - view.UpDirection * gap;
             try
             {
-                IndependentTag.Create(document, type.Id, view.Id, new Reference(instance), false,
+                if (existingTags.TryGetValue(instance.Id, out var tag))
+                {
+                    tag.TagHeadPosition = position;
+                    moved++;
+                }
+                else if (type is not null) IndependentTag.Create(document, type.Id, view.Id, new Reference(instance), false,
                     TagOrientation.Horizontal, position);
             }
             catch (Exception ex)
@@ -336,5 +399,6 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
                 warnings.Add($"부재 {instance.Id.Value}: 번호 태그를 만들 수 없습니다 ({ex.Message})");
             }
         }
+        if (moved > 0) warnings.Add($"번호 태그 {moved}개를 다시 배치했습니다");
     }
 }

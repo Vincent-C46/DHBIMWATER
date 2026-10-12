@@ -29,6 +29,29 @@ public sealed class BackfillPipeMaterialParametersUseCase
     /// <summary>재기록 후보를 센다. 읽기 전용이므로 트랜잭션을 열지 않는다.</summary>
     public PipeMaterialBackfillScan ScanCandidates() => _repo.ScanCandidates();
 
+    /// <summary>격점상세도 자동 경로. 값 빈 배관 부재만 채움, 개수 재산정 없음. 후보 없으면 트랜잭션 안 열고 null.</summary>
+    public PipeMaterialBackfillResult? ExecuteUntagged()
+    {
+        if (_repo.ScanCandidates().CandidateCount == 0) return null;
+        using (_transaction)
+        {
+            try
+            {
+                _transaction.Begin("배관재료표 값 자동 기록");
+                // 바인딩 없는 옛 문서 대비. 값 쓰기 전 필수(docs/131 § A).
+                _sharedParameterRepo.EnsureParameters(ValvePipingParameters.Definitions);
+                var result = _repo.BackfillUntagged(_bendSettings.Load().Settings);
+                _transaction.Commit();
+                return result;
+            }
+            catch
+            {
+                _transaction.Rollback();
+                throw;
+            }
+        }
+    }
+
     public PipeMaterialBackfillResult Execute()
     {
         using (_transaction)

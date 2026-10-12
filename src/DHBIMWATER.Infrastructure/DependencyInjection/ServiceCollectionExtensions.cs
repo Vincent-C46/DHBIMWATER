@@ -44,6 +44,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IPipeMaterialScheduleRepo, RevitPipeMaterialScheduleRepo>();
         services.AddTransient<IPipeMaterialDraftingRepo, RevitPipeMaterialDraftingRepo>();
         services.AddTransient<IJunctionDetailRepo, RevitJunctionDetailRepo>();
+        services.AddTransient<IJunctionSymbolShapeRepo, RevitJunctionSymbolShapeRepo>();
         services.AddTransient<IPipeMaterialBackfillRepo, RevitPipeMaterialBackfillRepo>();
         services.AddTransient<IPipeJointConnectionRepo, RevitPipeJointConnectionRepo>();   // docs/266 § 1 연결 패스
         services.AddTransient<IBeamCommandRepo, RevitBeamCommandRepo>();
@@ -126,6 +127,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IPipeMaterialScheduleRepo, MockPipeMaterialScheduleRepo>();
         services.AddTransient<IPipeMaterialDraftingRepo, MockPipeMaterialDraftingRepo>();
         services.AddTransient<IJunctionDetailRepo, MockJunctionDetailRepo>();
+        services.AddTransient<IJunctionSymbolShapeRepo, MockJunctionSymbolShapeRepo>();
         services.AddTransient<IPipeMaterialBackfillRepo, MockPipeMaterialBackfillRepo>();
         services.AddTransient<IPipeJointConnectionRepo, MockPipeJointConnectionRepo>();
 

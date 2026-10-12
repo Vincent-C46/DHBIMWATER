@@ -54,7 +54,12 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             PipeMaterialPartCollector.AddinInstances(document).Count(), AdaptiveCandidates(document).Count);
     }
 
-    public PipeMaterialBackfillResult Backfill(BendSettings catalog)
+    public PipeMaterialBackfillResult Backfill(BendSettings catalog) => Run(catalog, untaggedOnly: false);
+
+    public PipeMaterialBackfillResult BackfillUntagged(BendSettings catalog) => Run(catalog, untaggedOnly: true);
+
+    /// <param name="untaggedOnly">true = 격점상세도 자동 경로. 선택 무시·문서 전체, 빈 격점번호 채움, 개수 재산정·가변 패밀리·연결 패스 안 돔.</param>
+    private PipeMaterialBackfillResult Run(BendSettings catalog, bool untaggedOnly)
     {
         var document = Document();
         var catalogHandle = _catalogSource.OpenCatalog();
@@ -62,7 +67,9 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
         // 이 한 줄이 빠지면 오래된 문서에서 전부 실패한다(docs/136 § 3-6.2).
         document.Regenerate();
 
-        var (candidates, _) = Candidates(document);
+        var candidates = untaggedOnly
+            ? Ordered(PipeMaterialPartCollector.UntaggedInstances(document))
+            : Candidates(document).Candidates;
         var warnings = new List<string>();
         var restored = new List<Restored>();
         var skipped = 0;
@@ -72,6 +79,19 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             var part = Describe(instance, warnings);
             if (part is null) { skipped++; continue; }
             restored.Add(part);
+        }
+
+        // 격점상세도는 문서 전체를 한 격점으로 묶는다(RevitJunctionDetailRepo.GetJunctions와 같은 규칙: 사전순 첫 값).
+        // 수동 배치 부재도 그 격점 재료표에 들어가도록 빈 격점번호를 채운다. 채번도 이 격점 번호 체계를 잇는다.
+        var filledJunction = new HashSet<ElementId>();
+        if (untaggedOnly && DocumentJunctionId(document) is { } documentJunctionId)
+        {
+            restored = restored.Select(part =>
+            {
+                if (!string.IsNullOrWhiteSpace(part.JunctionId)) return part;
+                filledJunction.Add(part.Instance.Id);
+                return part with { JunctionId = documentJunctionId };
+            }).ToList();
         }
 
         // 접합 방식을 채번보다 먼저 정한다 — 부재명 표기·채번·비고·접합수가 모두 이 결과를 본다(docs/170 § C-⚠2).
@@ -111,6 +131,8 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
         foreach (var part in restored)
         {
             SetOptionalText(part.Instance, ValvePipingParameters.Addin, ValvePipingParameters.AddinValue, failed);
+            if (filledJunction.Contains(part.Instance.Id))
+                SetOptionalText(part.Instance, ValvePipingParameters.JunctionId, part.JunctionId, failed);
             SetOptionalText(part.Instance, ValvePipingParameters.ItemName, part.Name, failed);
             SetOptionalText(part.Instance, ValvePipingParameters.ItemSpec, part.Spec, failed);
             SetOptionalInteger(part.Instance, ValvePipingParameters.ItemNumber, numbers[part.Instance.Id], failed);
@@ -157,13 +179,19 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
                 catalogHandle, _rules, failed);
         }
 
-        // 개수 재계산(docs/267 § 1) — 이미 태깅된 부재도 규칙 값으로 다시 쓴다. 개수는 이웃 연결에 따라 바뀌어 문서 전체를 봐야 맞다.
-        var restoredIds = restored.Select(x => x.Instance.Id).ToHashSet();
-        var recounted = restored.Count + RecountTagged(document, restoredIds, failed, diagnostics);
-        // 직접 배치한 계획관로 가변 패밀리 자동입력(docs/267 § 2).
-        var adaptiveFilled = FillAdaptivePipes(document, warnings, failed);
-        // 연결 기준 개수(플랜지 접합 · 유입부 절단) — 부재별 기록이 슬롯을 다시 쓴 뒤에 돈다(docs/266 § 1).
-        PipeJointConnectionRecorder.Apply(document, warnings, _rules);
+        // 자동 경로는 값 빈 부재만 채움. 손으로 고친 개수를 덮는 문서 전체 재산정은 사용자가 체크했을 때만.
+        var recounted = 0;
+        var adaptiveFilled = 0;
+        if (!untaggedOnly)
+        {
+            // 개수 재계산(docs/267 § 1) — 이미 태깅된 부재도 규칙 값으로 다시 쓴다. 개수는 이웃 연결에 따라 바뀌어 문서 전체를 봐야 맞다.
+            var restoredIds = restored.Select(x => x.Instance.Id).ToHashSet();
+            recounted = restored.Count + RecountTagged(document, restoredIds, failed, diagnostics);
+            // 직접 배치한 계획관로 가변 패밀리 자동입력(docs/267 § 2).
+            adaptiveFilled = FillAdaptivePipes(document, warnings, failed);
+            // 연결 기준 개수(플랜지 접합 · 유입부 절단) — 부재별 기록이 슬롯을 다시 쓴 뒤에 돈다(docs/266 § 1).
+            PipeJointConnectionRecorder.Apply(document, warnings, _rules);
+        }
 
         if (diagnostics.Warning is { } jointWarning) warnings.Add(jointWarning);
 
@@ -352,6 +380,14 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
         }
         return (Ordered(PipeMaterialPartCollector.UntaggedInstances(document)), false);
     }
+
+    /// <summary>문서 배관 부재의 격점번호 중 사전순 첫 값. 없으면 null.</summary>
+    private static string? DocumentJunctionId(Document document)
+        => PipeMaterialPartCollector.AllPipingInstances(document)
+            .Select(x => x.LookupParameter(ValvePipingParameters.JunctionId)?.AsString())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .FirstOrDefault();
 
     /// <summary>ElementId 오름차순 — 배치 순서에 가장 가까운 대용이다. 번호가 도면 읽는 순서에 가깝게 나온다.</summary>
     private static List<FamilyInstance> Ordered(IEnumerable<FamilyInstance> instances)
