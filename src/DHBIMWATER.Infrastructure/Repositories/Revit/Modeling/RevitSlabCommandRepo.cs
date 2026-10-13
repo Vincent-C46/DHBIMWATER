@@ -79,5 +79,40 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             elementId = (int)floor.Id.Value;
             return elementId;
         }
+
+        /// <summary>레거시 배수지 결합 이식(RH:2940-2975). 슬래브와 교차하는 보·헌치·벽을 결합.
+        /// 트랜잭션은 호출 UseCase 것을 씀. 쌍별 실패는 대화상자 대신 경고로 모음.</summary>
+        public IReadOnlyList<string> JoinWithIntersectingFramingAndWalls(int slabId)
+        {
+            var warnings = new List<string>();
+            var doc = _doc();
+            if (doc == null || slabId == 0) return warnings;
+            if (doc.GetElement(new ElementId((long)slabId)) is not Floor slab) return warnings;
+
+            // 방금 만든 부재는 재생성 전 형상이 비어 교차 판정 못 함
+            doc.Regenerate();
+            var intersects = new ElementIntersectsElementFilter(slab);
+            var targets = new FilteredElementCollector(doc)
+                .WherePasses(new LogicalOrFilter(
+                    new ElementCategoryFilter(BuiltInCategory.OST_StructuralFraming),
+                    new ElementCategoryFilter(BuiltInCategory.OST_Walls)))
+                .WhereElementIsNotElementType()
+                .WherePasses(intersects)
+                .ToElements();
+
+            foreach (var target in targets)
+            {
+                try
+                {
+                    if (JoinGeometryUtils.AreElementsJoined(doc, slab, target)) continue;
+                    JoinGeometryUtils.JoinGeometry(doc, slab, target);
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add($"슬래브-부재 결합 실패 — 슬래브 {slab.Id.Value}, 부재 {target.Id.Value}: {ex.Message}");
+                }
+            }
+            return warnings;
+        }
     }
 }

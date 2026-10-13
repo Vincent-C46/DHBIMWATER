@@ -70,6 +70,10 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             WallUtils.DisallowWallJoinAtEnd(wall, 0);
             WallUtils.DisallowWallJoinAtEnd(wall, 1);
 
+            // 상부 레벨 구속. TopLevelName 비면 기존 높이값 벽 그대로(docs/289 § B)
+            if (!string.IsNullOrEmpty(linearWallDefinition.TopLevelName))
+                ApplyTopConstraint(doc, wall, linearWallDefinition);
+
             //wall.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).Set(linearWallDefinition.ElementCode);
             wall.LookupParameter("DH_Addin")?.Set("DHBIMWATER");
             wall.LookupParameter("DH_Category")?.Set(linearWallDefinition.Category);
@@ -135,6 +139,25 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             WallUtils.DisallowWallJoinAtEnd(profileWall, 1);
 
             return (int)(profileWall.Id.Value);
+        }
+        #endregion
+
+        #region Private Helpers
+        /// <summary>벽 상부를 레벨+간격띄우기로 구속. 레벨 못 찾으면 경고 후 높이값 벽으로 남김(작업 중단 안 함).</summary>
+        private void ApplyTopConstraint(Document doc, Wall wall, LinearWallDefinition def)
+        {
+            var topLevel = new FilteredElementCollector(doc)
+                .OfClass(typeof(Level))
+                .Cast<Level>()
+                .FirstOrDefault(level => level.Name == def.TopLevelName);
+            if (topLevel == null)
+            {
+                _dialog.Warn("Error", $"벽 상부 레벨을 찾을 수 없습니다: {def.TopLevelName}\nElementCode: {def.ElementCode}");
+                return;
+            }
+
+            wall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE)?.Set(topLevel.Id);
+            wall.get_Parameter(BuiltInParameter.WALL_TOP_OFFSET)?.Set(UC.MmToFt(def.TopOffset));
         }
         #endregion
     }

@@ -21,6 +21,9 @@ namespace DHBIMWATER.Application.Services
         public const string HWLLevelName = "HWL";
         #endregion
 
+        // 덧침콘크리트 두께(mm). 레거시 "일반 100mm" 유형과 같음(docs/289 § E-3)
+        private const double ToppingThickness = 100;
+
         // ─────────────────────────────────────────────────────────── Public API
 
         public static IReadOnlyList<LevelDefinition> CalculateLevels(ReservoirCreationRequestDto dto)
@@ -107,8 +110,8 @@ namespace DHBIMWATER.Application.Services
                 });
 
                 List<Point2D> l1Pts;
-                if (isFirst && n >= 2) l1Pts = LeftCellFoundShape(-(wteThk + ltt + lcThk), -(wteThk + ltt + lcThk), s_W + lcThk, s_L + 2 * lcThk, bp1 - whThk, bp2 + whThk, bl1 + lcThk + wteThk, lh + wteThk);
-                else if (isLast && n >= 2) l1Pts = RightCellFoundShape(xOff - wtiThk / 2, -(wteThk + ltt + lcThk), s_W + lcThk, s_L + 2 * lcThk, bp1 - whThk, bp2 + whThk, bl1 + lcThk + wteThk, lh + wteThk);
+                if (isFirst && n >= 2) l1Pts = LeftCellFoundShape(-(wteThk + ltt + lcThk), -(wteThk + ltt + lcThk), s_W + lcThk, s_L + 2 * lcThk, bp1 - whThk, bp2 + whThk, bl1 + lcThk + whThk, lh + wteThk);
+                else if (isLast && n >= 2) l1Pts = RightCellFoundShape(xOff - wtiThk / 2, -(wteThk + ltt + lcThk), s_W + lcThk, s_L + 2 * lcThk, bp1 - whThk, bp2 + whThk, bl1 + lcThk + whThk, lh + wteThk);
                 else l1Pts = Rect(xOff - wtiThk / 2, -(wteThk + ltt + lcThk), w + wtiThk, s_L + 2 * lcThk);
 
                 slabs.Add(new SlabDefinition
@@ -238,8 +241,8 @@ namespace DHBIMWATER.Application.Services
             {
                 Points = Rect(tcStartX, tcStartY, lv - 2 * trOff, wv - 2 * trOff),
                 SubPoints = Array.Empty<Point2D>(),
-                Thickness = 50,
-                ElevationZ = vfE + 50,
+                Thickness = ToppingThickness,
+                ElevationZ = vfE + ToppingThickness,
                 LevelName = ValveFoundLevelName,
                 ElementCode = "TC1",
                 Zone = "배관실",
@@ -249,8 +252,8 @@ namespace DHBIMWATER.Application.Services
             {
                 Points = Rect(tcStartX, tcStartY, lv - we - 2 * trOff - wviThk, wv - 2 * trOff),
                 SubPoints = Array.Empty<Point2D>(),
-                Thickness = 50,
-                ElevationZ = vmE + 50,
+                Thickness = ToppingThickness,
+                ElevationZ = vmE + ToppingThickness,
                 LevelName = ValveMidLevelName,
                 ElementCode = "TC2",
                 Zone = "배관실",
@@ -261,8 +264,8 @@ namespace DHBIMWATER.Application.Services
             {
                 Points = Rect(tc3StartX, tcStartY, we - 2 * trOff, wv - 2 * trOff),
                 SubPoints = Array.Empty<Point2D>(),
-                Thickness = 50,
-                ElevationZ = vmE + 50,
+                Thickness = ToppingThickness,
+                ElevationZ = vmE + ToppingThickness,
                 LevelName = ValveMidLevelName,
                 ElementCode = "TC3",
                 Zone = "배관실",
@@ -299,85 +302,97 @@ namespace DHBIMWATER.Application.Services
             double innerWCX = w + wtiThk / 2;
             double vCenterX = innerWCX;
 
+            // 상부 구속·높이는 레거시 RH:2156-2310과 같게 맞춤(docs/289 § B).
+            // 높이 = 상부레벨 + 상부간격띄우기 - 기준레벨. 상부 구속은 RevitWallCommandRepo가 설정
             double tankWallH = tuE - tfE - th.StuThk;
             double hopperH = tfE - vfE - th.StbThk;
-            double valveFullH = tuE - vfE - th.StuThk;
-            double elecWallH = tuE - vmE - th.StuThk;
+            double tankToValveFoundH = tuE - vfE - th.StuThk;   // W5_2·W6_2: Hopper 바닥부터
+            double valveFullH = tuE - vfE - th.SvuThk;          // 밸브실 외벽: 밸브실 상부슬래브 하단까지
+            double elecWallH = tuE - vmE - th.SvuThk;
             var walls = new List<LinearWallDefinition>();
 
-            walls.Add(Wall("W1", wteThk, TankFoundLevelName, tankWallH,
-                new Point3D(-wteThk / 2, 0, 0), new Point3D(-wteThk / 2, l, 0), "수조부", "외벽_좌측"));
+            // 수조부 상부슬래브 하단까지 구속
+            LinearWallDefinition TankTop(LinearWallDefinition wall) => wall with { TopLevelName = TankUpperLevelName, TopOffset = -th.StuThk };
+            // 밸브실 상부슬래브 하단까지 구속
+            LinearWallDefinition ValveTop(LinearWallDefinition wall) => wall with { TopLevelName = TankUpperLevelName, TopOffset = -th.SvuThk };
+
+            walls.Add(TankTop(Wall("W1", wteThk, TankFoundLevelName, tankWallH,
+                new Point3D(-wteThk / 2, 0, 0), new Point3D(-wteThk / 2, l, 0), "수조부", "외벽_좌측")));
 
             double w2X = totalIW + wteThk / 2;
-            walls.Add(Wall("W2", wteThk, TankFoundLevelName, tankWallH,
-                new Point3D(w2X, 0, 0), new Point3D(w2X, l, 0), "수조부", "외벽_우측"));
+            walls.Add(TankTop(Wall("W2", wteThk, TankFoundLevelName, tankWallH,
+                new Point3D(w2X, 0, 0), new Point3D(w2X, l, 0), "수조부", "외벽_우측")));
 
-            walls.Add(Wall("W3", wteThk, TankFoundLevelName, tankWallH,
-                new Point3D(-wteThk, l + wteThk / 2, 0), new Point3D(totalIW + wteThk, l + wteThk / 2, 0), "수조부", "외벽_후면"));
+            walls.Add(TankTop(Wall("W3", wteThk, TankFoundLevelName, tankWallH,
+                new Point3D(-wteThk, l + wteThk / 2, 0), new Point3D(totalIW + wteThk, l + wteThk / 2, 0), "수조부", "외벽_후면")));
 
             double w4_1EndX = vCenterX - lv / 2 - wveThk;
             double w4_2StaX = vCenterX + lv / 2 + wveThk;
-            walls.Add(Wall("W4", wteThk, TankFoundLevelName, tankWallH,
-                new Point3D(-wteThk, -wteThk / 2, 0), new Point3D(w4_1EndX, -wteThk / 2, 0), "수조부", "외벽_전면"));
-            walls.Add(Wall("W4", wteThk, TankFoundLevelName, tankWallH,
-                new Point3D(w4_2StaX, -wteThk / 2, 0), new Point3D(totalIW + wteThk, -wteThk / 2, 0), "수조부", "외벽_전면"));
+            walls.Add(TankTop(Wall("W4", wteThk, TankFoundLevelName, tankWallH,
+                new Point3D(-wteThk, -wteThk / 2, 0), new Point3D(w4_1EndX, -wteThk / 2, 0), "수조부", "외벽_전면")));
+            walls.Add(TankTop(Wall("W4", wteThk, TankFoundLevelName, tankWallH,
+                new Point3D(w4_2StaX, -wteThk / 2, 0), new Point3D(totalIW + wteThk, -wteThk / 2, 0), "수조부", "외벽_전면")));
 
             double w5_1EndX = w - wh;
             double w5_2EndX = w + wh + wtiThk;
-            walls.Add(Wall("W5", wteThk, TankFoundLevelName, tankWallH,
-                new Point3D(w4_1EndX, -wteThk / 2, 0), new Point3D(w5_1EndX, -wteThk / 2, 0), "배관실", "경계부_벽체"));
-            walls.Add(Wall("W5", wtiThk, TankFoundLevelName, tankWallH,
-                new Point3D(w5_1EndX, -wteThk / 2, 0), new Point3D(w5_2EndX, -wteThk / 2, 0), "배관실", "경계부_벽체"));
-            walls.Add(Wall("W5", wteThk, TankFoundLevelName, tankWallH,
-                new Point3D(w5_2EndX, -wteThk / 2, 0), new Point3D(w4_2StaX, -wteThk / 2, 0), "배관실", "경계부_벽체"));
+            walls.Add(TankTop(Wall("W5", wteThk, TankFoundLevelName, tankWallH,
+                new Point3D(w4_1EndX, -wteThk / 2, 0), new Point3D(w5_1EndX, -wteThk / 2, 0), "배관실", "경계부_벽체")));
+            // W5_2: Hopper 위 경계부. 레거시는 수조 외벽 유형·밸브실 바닥 기준(RH:2252-2273)
+            walls.Add(TankTop(Wall("W5", wteThk, ValveFoundLevelName, tankToValveFoundH,
+                new Point3D(w5_1EndX, -wteThk / 2, 0), new Point3D(w5_2EndX, -wteThk / 2, 0), "배관실", "경계부_벽체")));
+            walls.Add(TankTop(Wall("W5", wteThk, TankFoundLevelName, tankWallH,
+                new Point3D(w5_2EndX, -wteThk / 2, 0), new Point3D(w4_2StaX, -wteThk / 2, 0), "배관실", "경계부_벽체")));
 
             for (int i = 0; i < n - 1; i++)
             {
                 double wxCenter = (i + 1) * (w + wtiThk) - wtiThk / 2;
                 if (i == 0)
                 {
-                    walls.Add(Wall("W6", wtiThk, TankFoundLevelName, tankWallH,
-                        new Point3D(wxCenter, lh, 0), new Point3D(wxCenter, l, 0), "수조부", "내벽"));
-                    walls.Add(Wall("W6", wtiThk, TankFoundLevelName, tankWallH,
-                        new Point3D(wxCenter, 0, 0), new Point3D(wxCenter, lh, 0), "수조부", "내벽"));
+                    // W6_1: L→Lh, W6_2: Lh→0 (레거시 방향 RH:822-832). W6_2는 Hopper 바닥부터(RH:2297-2310)
+                    walls.Add(TankTop(Wall("W6", wtiThk, TankFoundLevelName, tankWallH,
+                        new Point3D(wxCenter, l, 0), new Point3D(wxCenter, lh, 0), "수조부", "내벽")));
+                    walls.Add(TankTop(Wall("W6", wtiThk, ValveFoundLevelName, tankToValveFoundH,
+                        new Point3D(wxCenter, lh, 0), new Point3D(wxCenter, 0, 0), "수조부", "내벽")));
                 }
                 else
                 {
-                    walls.Add(Wall("W6", wtiThk, TankFoundLevelName, tankWallH,
-                        new Point3D(wxCenter, 0, 0), new Point3D(wxCenter, l, 0), "수조부", "내벽"));
+                    walls.Add(TankTop(Wall("W6", wtiThk, TankFoundLevelName, tankWallH,
+                        new Point3D(wxCenter, 0, 0), new Point3D(wxCenter, l, 0), "수조부", "내벽")));
                 }
             }
 
+            // Hopper 벽: 수조부 바닥슬래브 하단까지 구속
+            LinearWallDefinition HopperTop(LinearWallDefinition wall) => wall with { TopLevelName = TankFoundLevelName, TopOffset = -th.StbThk };
             double b3_1Sy = -wteThk + whThk / 2;
-            walls.Add(Wall("B3", whThk, ValveFoundLevelName, hopperH,
-                new Point3D(w4_1EndX, b3_1Sy, 0), new Point3D(w5_1EndX, b3_1Sy, 0), "배관실", "Hopper_벽체"));
+            walls.Add(HopperTop(Wall("B3", whThk, ValveFoundLevelName, hopperH,
+                new Point3D(w4_1EndX, b3_1Sy, 0), new Point3D(w5_1EndX, b3_1Sy, 0), "배관실", "Hopper_벽체")));
             double b3_2X = w5_1EndX - whThk / 2;
             double b3_2Sy = -wteThk + whThk;
-            walls.Add(Wall("B3", whThk, ValveFoundLevelName, hopperH,
-                new Point3D(b3_2X, b3_2Sy, 0), new Point3D(b3_2X, lh, 0), "배관실", "Hopper_벽체"));
+            walls.Add(HopperTop(Wall("B3", whThk, ValveFoundLevelName, hopperH,
+                new Point3D(b3_2X, b3_2Sy, 0), new Point3D(b3_2X, lh, 0), "배관실", "Hopper_벽체")));
             double b3_4X = w5_2EndX + whThk / 2;
-            walls.Add(Wall("B3", whThk, ValveFoundLevelName, hopperH,
-                new Point3D(b3_4X, b3_2Sy, 0), new Point3D(b3_4X, lh, 0), "배관실", "Hopper_벽체"));
-            walls.Add(Wall("B3", whThk, ValveFoundLevelName, hopperH,
-                new Point3D(b3_2X - whThk / 2, lh + whThk / 2, 0), new Point3D(b3_4X + whThk / 2, lh + whThk / 2, 0), "배관실", "Hopper_벽체"));
-            walls.Add(Wall("B3", whThk, ValveFoundLevelName, hopperH,
-                new Point3D(w5_2EndX, b3_1Sy, 0), new Point3D(w4_2StaX, b3_1Sy, 0), "배관실", "Hopper_벽체"));
+            walls.Add(HopperTop(Wall("B3", whThk, ValveFoundLevelName, hopperH,
+                new Point3D(b3_4X, b3_2Sy, 0), new Point3D(b3_4X, lh, 0), "배관실", "Hopper_벽체")));
+            walls.Add(HopperTop(Wall("B3", whThk, ValveFoundLevelName, hopperH,
+                new Point3D(b3_2X - whThk / 2, lh + whThk / 2, 0), new Point3D(b3_4X + whThk / 2, lh + whThk / 2, 0), "배관실", "Hopper_벽체")));
+            walls.Add(HopperTop(Wall("B3", whThk, ValveFoundLevelName, hopperH,
+                new Point3D(w5_2EndX, b3_1Sy, 0), new Point3D(w4_2StaX, b3_1Sy, 0), "배관실", "Hopper_벽체")));
 
             double w7X = vCenterX - lv / 2 - wveThk / 2;
             double w79TopY = -wteThk;
             double w79BotY = -(wteThk + wv);
-            walls.Add(Wall("W7", wveThk, ValveFoundLevelName, valveFullH,
-                new Point3D(w7X, w79TopY, 0), new Point3D(w7X, w79BotY, 0), "배관실", "외벽_좌측"));
+            walls.Add(ValveTop(Wall("W7", wveThk, ValveFoundLevelName, valveFullH,
+                new Point3D(w7X, w79TopY, 0), new Point3D(w7X, w79BotY, 0), "배관실", "외벽_좌측")));
             double w8X = vCenterX + lv / 2 + wveThk / 2;
-            walls.Add(Wall("W8", wveThk, ValveFoundLevelName, valveFullH,
-                new Point3D(w8X, w79TopY, 0), new Point3D(w8X, w79BotY, 0), "배관실", "외벽_우측"));
-            walls.Add(Wall("W9", wveThk, ValveFoundLevelName, valveFullH,
+            walls.Add(ValveTop(Wall("W8", wveThk, ValveFoundLevelName, valveFullH,
+                new Point3D(w8X, w79TopY, 0), new Point3D(w8X, w79BotY, 0), "배관실", "외벽_우측")));
+            walls.Add(ValveTop(Wall("W9", wveThk, ValveFoundLevelName, valveFullH,
                 new Point3D(w7X - wveThk / 2, w79BotY - wveThk / 2, 0),
-                new Point3D(w8X + wveThk / 2, w79BotY - wveThk / 2, 0), "배관실", "외벽_전면"));
+                new Point3D(w8X + wveThk / 2, w79BotY - wveThk / 2, 0), "배관실", "외벽_전면")));
 
             double w10X = w8X - wveThk / 2 - we - wviThk / 2;
-            walls.Add(Wall("W10", wviThk, ValveMidLevelName, elecWallH,
-                new Point3D(w10X, w79TopY, 0), new Point3D(w10X, w79BotY, 0), "배관실", "전기실_벽체"));
+            walls.Add(ValveTop(Wall("W10", wviThk, ValveMidLevelName, elecWallH,
+                new Point3D(w10X, w79TopY, 0), new Point3D(w10X, w79BotY, 0), "배관실", "전기실_벽체")));
 
             return walls;
         }
@@ -410,12 +425,11 @@ namespace DHBIMWATER.Application.Services
             var columns = new List<ColumnDefinition>();
             for (int ci = 0; ci < n; ci++)
             {
-                double xOff = ci * (w + wtiThk);
                 for (int r = 0; r < rowNum; r++)
                     for (int c = 0; c < colNum; c++)
                         columns.Add(new ColumnDefinition
                         {
-                            Position = new Point3D(xOff + m3 + c * colOff, m2 + r * rowOff, 0),
+                            Position = new Point3D(MapX(ci, w, wtiThk, m3 + c * colOff), m2 + r * rowOff, 0),
                             TypeName = th.ColumnTypeName,
                             BaseLevelName = TankFoundLevelName,
                             TopLevelName = TankUpperLevelName,
@@ -428,10 +442,12 @@ namespace DHBIMWATER.Application.Services
             }
             return columns;
         }
-        public static IReadOnlyList<BeamDefinition> CalculateBeams(ReservoirCreationRequestDto dto)
+        /// <param name="sizes">기둥 b·h, 보 b(mm). 보를 기둥 면에서 끊고 헌치를 보 폭만큼 끊는 데 씀(레거시 RH:1087-1490). null이면 공제 없음.</param>
+        public static IReadOnlyList<BeamDefinition> CalculateBeams(ReservoirCreationRequestDto dto, ReservoirMemberSizes? sizes = null)
         {
             var d = dto.DesignConditionDto;
             var t = dto.TankDto;
+            var v = dto.ValveDto;
             var th = dto.ThicknessDto;
 
             int n = d.N;
@@ -446,7 +462,11 @@ namespace DHBIMWATER.Application.Services
             double wtiThk = th.WtiThk;
             double stuThk = th.StuThk;
 
-            var (tfE, tuE, _, _) = LevelElevations(dto);
+            double colB = sizes?.ColumnB ?? 0;   // 기둥 X 폭
+            double colH = sizes?.ColumnH ?? 0;   // 기둥 Y 깊이
+            double hb = (sizes?.BeamB ?? 0) / 2; // 보 반폭
+
+            var (tfE, tuE, _, vmE) = LevelElevations(dto);
             double beamZ = tuE;
 
             const double maxCTC = 5000;
@@ -457,64 +477,77 @@ namespace DHBIMWATER.Application.Services
             double colOff = Math.Round(colSpan / (colNum - 1), 0);
             double rowOff = Math.Round(rowSpan / (rowNum - 1), 0);
 
-            var beams = new List<BeamDefinition>();
+            // 1번째 지 로컬 좌표(x 0..w)로 만들고 지마다 MapX로 옮김. 홀수 지는 미러(레거시 MirrorElements 결과)
+            var local = new List<BeamDefinition>();
+            string beamType = th.BeamTypeName;
+            var pts = ColumnGrid(m3, m2, rowOff, colOff, rowNum, colNum, beamZ);
 
-            for (int ci = 0; ci < n; ci++)
+            // G1: 기둥 면에서 시작·끝 (RH:1091-1170)
+            for (int i = 0; i < pts.Count; i++)
             {
-                double xOff = ci * (w + wtiThk);
-                var pts = ColumnGrid(xOff + m3, m2, rowOff, colOff, rowNum, colNum, beamZ);
+                var p = pts[i];
+                if ((i + 1) % colNum != 0)
+                    local.Add(Beam("G1", beamType, TankUpperLevelName,
+                        new Point3D(p.X + colB / 2, p.Y, beamZ),
+                        new Point3D(pts[i + 1].X - colB / 2, pts[i + 1].Y, beamZ), "수조부", "보"));
 
-                string beamType = th.BeamTypeName;
-                for (int i = 0; i < pts.Count; i++)
-                {
-                    if ((i + 1) % colNum != 0)
-                        beams.Add(Beam("G1", beamType, TankUpperLevelName,
-                            new Point3D(pts[i].X, pts[i].Y, beamZ),
-                            new Point3D(pts[i + 1].X, pts[i + 1].Y, beamZ), "수조부", "보"));
+                if (i + colNum < pts.Count)
+                    local.Add(Beam("G1", beamType, TankUpperLevelName,
+                        new Point3D(p.X, p.Y + colH / 2, beamZ),
+                        new Point3D(pts[i + colNum].X, pts[i + colNum].Y - colH / 2, beamZ), "수조부", "보"));
 
-                    if (i + colNum < pts.Count)
-                        beams.Add(Beam("G1", beamType, TankUpperLevelName,
-                            new Point3D(pts[i].X, pts[i].Y, beamZ),
-                            new Point3D(pts[i + colNum].X, pts[i + colNum].Y, beamZ), "수조부", "보"));
+                if (i >= colNum * (rowNum - 1))
+                    local.Add(Beam("G1", beamType, TankUpperLevelName,
+                        new Point3D(p.X, p.Y + colH / 2, beamZ),
+                        new Point3D(p.X, p.Y + m1, beamZ), "수조부", "보"));
 
-                    if (i >= colNum * (rowNum - 1))
-                        beams.Add(Beam("G1", beamType, TankUpperLevelName,
-                            new Point3D(pts[i].X, pts[i].Y, beamZ),
-                            new Point3D(pts[i].X, pts[i].Y + m1, beamZ), "수조부", "보"));
+                if (i < colNum)
+                    local.Add(Beam("G1", beamType, TankUpperLevelName,
+                        new Point3D(p.X, p.Y - colH / 2, beamZ),
+                        new Point3D(p.X, p.Y - m2, beamZ), "수조부", "보"));
 
-                    if (i < colNum)
-                        beams.Add(Beam("G1", beamType, TankUpperLevelName,
-                            new Point3D(pts[i].X, pts[i].Y, beamZ),
-                            new Point3D(pts[i].X, pts[i].Y - m2, beamZ), "수조부", "보"));
+                if (i % colNum == 0)
+                    local.Add(Beam("G1", beamType, TankUpperLevelName,
+                        new Point3D(p.X - colB / 2, p.Y, beamZ),
+                        new Point3D(p.X - m3, p.Y, beamZ), "수조부", "보"));
 
-                    if (i % colNum == 0)
-                        beams.Add(Beam("G1", beamType, TankUpperLevelName,
-                            new Point3D(pts[i].X, pts[i].Y, beamZ),
-                            new Point3D(pts[i].X - m3, pts[i].Y, beamZ), "수조부", "보"));
-
-                    if (i % colNum == colNum - 1)
-                        beams.Add(Beam("G1", beamType, TankUpperLevelName,
-                            new Point3D(pts[i].X, pts[i].Y, beamZ),
-                            new Point3D(pts[i].X + m4, pts[i].Y, beamZ), "수조부", "보"));
-                }
-
-                // H2: 기초 헌치
-                var fndPts = new List<Point3D>
-                {
-                    new Point3D(xOff + w, lh, tfE),
-                    new Point3D(xOff + w, l,  tfE),
-                    new Point3D(xOff,     l,  tfE),
-                    new Point3D(xOff,     0,  tfE),
-                    new Point3D(xOff + w - wh, 0, tfE),
-                };
-                for (int i = 0; i < fndPts.Count - 1; i++)
-                    beams.Add(Beam("H2", beamType, TankFoundLevelName, fndPts[i], fndPts[i + 1], "수조부", "HAUNCH"));
-
-                // H1: 상부 헌치
-                var upperPts = BuildUpperHaunchPoints(xOff, w, l, m1, m2, m3, m4, rowOff, colOff, rowNum, colNum, beamZ - stuThk);
-                for (int i = 0; i < upperPts.Count - 1; i++)
-                    beams.Add(Beam("H1", beamType, TankUpperLevelName, upperPts[i], upperPts[i + 1], "수조부", "HAUNCH"));
+                if (i % colNum == colNum - 1)
+                    local.Add(Beam("G1", beamType, TankUpperLevelName,
+                        new Point3D(p.X + colB / 2, p.Y, beamZ),
+                        new Point3D(p.X + m4, p.Y, beamZ), "수조부", "보"));
             }
+
+            // H2: 기초 헌치
+            var fndPts = new List<Point3D>
+            {
+                new Point3D(w,      lh, tfE),
+                new Point3D(w,      l,  tfE),
+                new Point3D(0,      l,  tfE),
+                new Point3D(0,      0,  tfE),
+                new Point3D(w - wh, 0,  tfE),
+            };
+            for (int i = 0; i < fndPts.Count - 1; i++)
+                local.Add(Haunch("H2", TankFoundLevelName, fndPts[i], fndPts[i + 1], "수조부"));
+
+            // H1: 상부 헌치. 닫힌 루프 + 보 폭 공제(RH:1229-1490). 높이·방향은 기존 신규 방식(슬래브 하단, 상단 맞춤) — Revit 확인
+            var upperPts = BuildUpperHaunchPoints(0, w, l, m1, m2, m3, m4, rowOff, colOff, rowNum, colNum, beamZ - stuThk);
+            foreach (var (start, end) in TrimUpperHaunchSegments(upperPts, rowNum, colNum, hb))
+                local.Add(Haunch("H1", TankUpperLevelName, start, end, "수조부"));
+
+            var beams = new List<BeamDefinition>();
+            for (int ci = 0; ci < n; ci++)
+                foreach (var b in local)
+                    beams.Add(MapBeam(b, ci, w, wtiThk));
+
+            // H3/H4: 밸브실·전기실 헌치. 밸브실은 1개라 미러 대상 아님(레거시도 첫 밸브실만, RH:1493-1550, 2681-2720)
+            double vmStartX = w + wtiThk / 2 - v.Lv / 2;
+            double vmStartY = -(th.WteThk + v.Wv);
+            AddHaunchLoop(beams, "H3", ValveMidLevelName,
+                Square(vmStartX, vmStartY, v.Lv, v.Wv, vmE - th.SvmThk));
+            AddHaunchLoop(beams, "H4", TankUpperLevelName,
+                Square(vmStartX, vmStartY, v.Lv - v.We - th.WviThk, v.Wv, tuE - th.SvuThk));
+            AddHaunchLoop(beams, "H4", TankUpperLevelName,
+                Square(vmStartX + v.Lv - v.We, vmStartY, v.We, v.Wv, tuE - th.SvuThk));
 
             return beams;
         }
@@ -555,8 +588,11 @@ namespace DHBIMWATER.Application.Services
                 new GenericModelPlacementDefinition
                 {
                     SymbolName = "DH_단차버림콘크리트",
-                    Origin = new Point3D(innerWallCX, b2StartY, -(stbThk + lcThk)),
+                    // 레거시처럼 Z=0 비구조 배치 후 레벨로부터 높이로 내림(RH:2087, 2115-2116)
+                    Origin = new Point3D(innerWallCX, b2StartY, 0),
                     LevelName = TankFoundLevelName,
+                    IsNonStructural = true,
+                    ElevationFromLevel = -(stbThk + lcThk),
                     Rotation = 0,
                     Category = "슬래브",
                     ElementCode = "L3",
@@ -587,6 +623,7 @@ namespace DHBIMWATER.Application.Services
                     SymbolName = "DH_배수지피트",
                     Origin = new Point3D(vmStartX + wp / 2, vmStartY + wp / 2, 0),
                     LevelName = ValveFoundLevelName,
+                    IsNonStructural = true, // 레거시 RH:2446
                     Rotation = 0,
                     Category = "PIT",
                     ElementCode = "P1",
@@ -606,6 +643,54 @@ namespace DHBIMWATER.Application.Services
                 },
             };
         }
+        /// <summary>단면뷰 A~D. 레거시 상자(RH:2774-2796)를 절단선·폭·표고·깊이로 옮김. 여유 1m.
+        /// 레거시 근사식(B의 W-Lv/2, A의 (W+Wte)·N 등)은 그대로 둠(docs/289 § F).</summary>
+        public static IReadOnlyList<SectionCutDefinition> CalculateSectionViews(ReservoirCreationRequestDto dto)
+        {
+            var d = dto.DesignConditionDto;
+            var t = dto.TankDto;
+            var v = dto.ValveDto;
+            var th = dto.ThicknessDto;
+            const double margin = 1000;
+
+            var (tfE, tuE, vfE, _) = LevelElevations(dto);
+            double wte = th.WteThk, wve = th.WveThk, wti = th.WtiThk;
+
+            SectionCutDefinition Cut(string name, double cutX, double cutY, Vector3D right, double min, double max,
+                double zMin, double depth)
+            {
+                // 가로 범위 중앙을 절단점으로. right 축 방향 좌표만 중앙으로 옮김
+                double center = (min + max) / 2;
+                var origin = right.X != 0 ? new Point3D(center, cutY, 0) : new Point3D(cutX, center, 0);
+                return new SectionCutDefinition
+                {
+                    Name = name, CutOrigin = origin, Right = right,
+                    HalfWidth = (max - min) / 2, ZMin = zMin, ZMax = tuE + margin, FarClipDepth = depth,
+                };
+            }
+
+            // A·B: 화면 오른쪽 +X → +Y 바라봄. C·D: 화면 오른쪽 -Y → +X 바라봄
+            var plusX = new Vector3D(1, 0, 0);
+            var minusY = new Vector3D(0, -1, 0);
+
+            double aMin = -(wte + margin + t.Ltt);
+            double aMax = (t.W + wte) * d.N + margin * 2 + t.Ltt * 2;
+            double bMin = t.W - v.Lv / 2 - (v.Lvt + wve + margin);
+            double bMax = bMin + v.Lv + v.Lvt * 2 + wve * 2 + margin * 2;
+            double cMin = -(wte + margin + t.Ltt);
+            double cMax = t.L + wte + margin + t.Ltt;
+            double dMin = -(wte + margin + v.Lvt + v.Wv + wve);
+            double dMax = t.L + wte + margin + v.Lvt;
+
+            return new List<SectionCutDefinition>
+            {
+                Cut("A", 0, t.Lh / 2, plusX, aMin, aMax, vfE - margin, t.L / 2),
+                Cut("B", 0, wte - v.Wv, plusX, bMin, bMax, vfE - margin, v.Wv / 2),
+                Cut("C", t.M3 / 2, 0, minusY, cMin, cMax, tfE - margin, t.M3),
+                Cut("D", t.W + t.Wh / 2 + wti, 0, minusY, dMin, dMax, vfE - margin, t.M4),
+            };
+        }
+
         // ─────────────────────────────────────────────── Private Helpers
 
         /// <summary>레벨 절대 표고 계산 (mm). LWL·He는 m 단위 DTO이므로 *1000 변환.</summary>
@@ -732,6 +817,96 @@ namespace DHBIMWATER.Application.Services
                 ZJustification = 0,
             };
 
+        /// <summary>헌치 정의. 커브 z = 슬래브 하단, Z맞춤 상단(0), 회전 없음.
+        /// 레거시(원점 + 슬래브 두께 + 180°)가 아니라 기존 신규 방식이 맞다고 사용자 확인(2026-10-13, docs/289 § C-3).</summary>
+        private static BeamDefinition Haunch(string code, string levelName, Point3D start, Point3D end, string zone)
+            => new BeamDefinition
+            {
+                ElementCode = code,
+                LevelName = levelName,
+                StartPoint = start,
+                EndPoint = end,
+                Zone = zone,
+                Part = "HAUNCH",
+                ZJustification = 0,
+            };
+
+        /// <summary>레거시 CreateSquare 후 Reverse와 같은 점 순서(시계방향).</summary>
+        private static List<Point3D> Square(double x, double y, double width, double length, double z)
+            => new List<Point3D>
+            {
+                new Point3D(x,         y + length, z),
+                new Point3D(x + width, y + length, z),
+                new Point3D(x + width, y,          z),
+                new Point3D(x,         y,          z),
+            };
+
+        /// <summary>밸브실 헌치 닫힌 루프. pts z는 슬래브 하단.</summary>
+        private static void AddHaunchLoop(List<BeamDefinition> beams, string code, string levelName, List<Point3D> pts)
+        {
+            for (int i = 0; i < pts.Count; i++)
+                beams.Add(Haunch(code, levelName, pts[i], pts[(i + 1) % pts.Count], "배관실"));
+        }
+
+        /// <summary>지 인덱스별 X 좌표. 짝수 지 = 평행이동, 홀수 지 = 직전 내벽 중심면 기준 미러.
+        /// 레거시는 1번째 지를 내벽 평면마다 MirrorElements 함(RH:1669-1674, 2854-2859).</summary>
+        private static double MapX(int ci, double w, double wtiThk, double xLocal)
+        {
+            double xOff = ci * (w + wtiThk);
+            return ci % 2 == 0 ? xOff + xLocal : xOff + w - xLocal;
+        }
+
+        /// <summary>홀수 지는 시작·끝을 바꿔 진행 방향을 뒤집음. 헌치 단면(삼각형)이 미러 후에도 수조 안쪽을 향하게 하려는 것.</summary>
+        private static BeamDefinition MapBeam(BeamDefinition b, int ci, double w, double wtiThk)
+        {
+            bool mirrored = ci % 2 == 1;
+            var start = mirrored ? b.EndPoint : b.StartPoint;
+            var end = mirrored ? b.StartPoint : b.EndPoint;
+            return new BeamDefinition
+            {
+                StartPoint = new Point3D(MapX(ci, w, wtiThk, start.X), start.Y, start.Z),
+                EndPoint = new Point3D(MapX(ci, w, wtiThk, end.X), end.Y, end.Z),
+                TypeName = b.TypeName,
+                Width = b.Width,
+                Height = b.Height,
+                LevelName = b.LevelName,
+                ZJustification = b.ZJustification,
+                CrossSectionRotationDeg = b.CrossSectionRotationDeg,
+                Category = b.Category,
+                ElementCode = b.ElementCode,
+                Zone = b.Zone,
+                Part = b.Part,
+            };
+        }
+
+        /// <summary>상부 헌치 구간. 마지막 점→첫 점까지 닫고, 보와 만나는 끝은 보 반폭(hb)만큼 끊음.
+        /// 분기 경계는 레거시 RH:1278-1490 if/else 그대로. 점 순서는 BuildUpperHaunchPoints(좌변↑ 상변→ 우변↓ 하변←).</summary>
+        private static IEnumerable<(Point3D Start, Point3D End)> TrimUpperHaunchSegments(
+            List<Point3D> pts, int rowNum, int colNum, double hb)
+        {
+            for (int i = 0; i < pts.Count; i++)
+            {
+                var s = pts[i];
+                var e = pts[(i + 1) % pts.Count];
+                double sx = 0, sy = 0, ex = 0, ey = 0;
+
+                if (i == 0) ey = -hb;                                            // 좌하단 구석→첫 보
+                else if (i < rowNum) { sy = hb; ey = -hb; }                      // 좌변 보 사이
+                else if (i == rowNum) sy = hb;                                   // 마지막 보→좌상단 구석
+                else if (i == rowNum + 1) ex = -hb;                              // 좌상단 구석→첫 보
+                else if (i < rowNum + colNum + 1) { sx = hb; ex = -hb; }         // 상변 보 사이
+                else if (i == rowNum + colNum + 1) sx = hb;                      // 마지막 보→우상단 구석
+                else if (i == rowNum + colNum + 2) ey = hb;                      // 우상단 구석→첫 보
+                else if (i < 2 * rowNum + colNum + 2) { sy = -hb; ey = hb; }     // 우변 보 사이
+                else if (i == 2 * rowNum + colNum + 2) sy = -hb;                 // 마지막 보→우하단 구석
+                else if (i == 2 * rowNum + colNum + 3) ex = hb;                  // 우하단 구석→첫 보
+                else if (i < 2 * rowNum + 2 * colNum + 3) { sx = -hb; ex = hb; } // 하변 보 사이
+                else sx = -hb;                                                   // 마지막 보→좌하단 구석(닫힘)
+
+                yield return (new Point3D(s.X + sx, s.Y + sy, s.Z), new Point3D(e.X + ex, e.Y + ey, e.Z));
+            }
+        }
+
         private static List<Point3D> BuildUpperHaunchPoints(
             double xOff, double w, double l,
             double m1, double m2, double m3, double m4,
@@ -750,6 +925,9 @@ namespace DHBIMWATER.Application.Services
             return pts;
         }
     }
+
+    /// <summary>배수지 부재 단면 크기(mm). 기둥 b = X 폭, h = Y 깊이, 보 b = 폭.</summary>
+    public sealed record ReservoirMemberSizes(double ColumnB, double ColumnH, double BeamB);
 }
  
 

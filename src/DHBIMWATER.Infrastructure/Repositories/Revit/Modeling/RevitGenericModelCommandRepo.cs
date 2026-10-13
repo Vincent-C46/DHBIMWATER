@@ -45,10 +45,20 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
                                  UC.MmToFt(def.Origin.Y),
                                  UC.MmToFt(def.Origin.Z));
 
+            // 배수지 단차버림·피트는 레거시처럼 비구조 배치. 기본은 기존 Footing 유지(docs/289 § G)
             FamilyInstance instance = doc.Create.NewFamilyInstance(
-                origin, symbol, level, StructuralType.Footing);
+                origin, symbol, level, def.IsNonStructural ? StructuralType.NonStructural : StructuralType.Footing);
 
             if (instance == null) TaskDialog.Show("Error", "패밀리인스턴스가 배치되지않았습니다");
+
+            if (instance != null && def.ElevationFromLevel.HasValue)
+            {
+                var elevation = instance.get_Parameter(BuiltInParameter.INSTANCE_ELEVATION_PARAM);
+                if (elevation == null || elevation.IsReadOnly)
+                    _dialog.Warn("Error", $"레벨로부터 높이를 설정할 수 없습니다: {def.SymbolName}");
+                else
+                    elevation.Set(UC.MmToFt(def.ElevationFromLevel.Value));
+            }
 
             if (def.Rotation != 0.0)
             {

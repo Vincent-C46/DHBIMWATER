@@ -24,6 +24,8 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
         private readonly ISharedParameterRepository _sharedParameterRepo;
         private readonly ClassifyExteriorWallsUseCase _classifyWallsUseCase;
         private readonly IConcreteSettingsRepo _concreteSettingsRepo;
+        private readonly IElementTypeQueryRepo _elementTypeQueryRepo;
+        private readonly IViewCommandRepo _viewCmdRepo;
         #endregion
 
         #region Constructor
@@ -39,7 +41,9 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
             IGenericModelCommandRepo genericModelCmdRepo, IElementTypeCommandRepo elementTypeCmdRepo,
             ISharedParameterRepository sharedParameterRepo,
             ClassifyExteriorWallsUseCase classifyWallsUseCase,
-            IConcreteSettingsRepo concreteSettingsRepo)
+            IConcreteSettingsRepo concreteSettingsRepo,
+            IElementTypeQueryRepo elementTypeQueryRepo,
+            IViewCommandRepo viewCmdRepo)
         {
             _tx = tx;
             _dialogService = dialogService;
@@ -54,6 +58,8 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
             _sharedParameterRepo = sharedParameterRepo;
             _classifyWallsUseCase = classifyWallsUseCase;
             _concreteSettingsRepo = concreteSettingsRepo;
+            _elementTypeQueryRepo = elementTypeQueryRepo;
+            _viewCmdRepo = viewCmdRepo;
         }
         #endregion
 
@@ -76,7 +82,8 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
 
                     foreach (var lvl in ReservoirGeometryCalculator.CalculateLevels(dto))
                     {
-                        var existing = existingLevels.FirstOrDefault(s => s.Contains(lvl.Name));
+                        // 이름 완전일치. 부분일치면 "…_old" 레벨을 잡아 정확한 이름 레벨이 안 생김(docs/289 § E-4)
+                        var existing = existingLevels.FirstOrDefault(s => s == lvl.Name);
                         long levelId;
                         if (existing != null)
                             levelId = _levelCmdRepo.UpdateLevel(existing, lvl.Elevation);
@@ -97,8 +104,13 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                     // 부재별 콘크리트는 문서 공용 설정을 쓴다(docs/249 § D). 기초·버림·슬래브(덧침 포함)는 Part로 나뉜다.
                     var concrete = new ConcreteTypeResolver(_elementTypeCmdRepo, _concreteSettingsRepo.Load() ?? Core.Structures.ConcreteSettings.Default);
                     var slabTypes = concrete.ResolveSlabTypes(slabDefs);
+                    // 수조부 상부슬래브(S1)는 마지막에 보·헌치·벽과 결합(docs/289 § D)
+                    var upperSlabIds = new List<int>();
                     for (var i = 0; i < slabDefs.Count; i++)
-                        _slabCmdRepo.CreateSlab(slabDefs[i], slabLevels[slabDefs[i].LevelName], slabTypes[i].TypeId);
+                    {
+                        var slabId = _slabCmdRepo.CreateSlab(slabDefs[i], slabLevels[slabDefs[i].LevelName], slabTypes[i].TypeId);
+                        if (slabDefs[i].ElementCode == "S1") upperSlabIds.Add(slabId);
+                    }
                     #endregion
 
                     #region 3. 벽체 생성
@@ -121,13 +133,26 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                     #endregion
 
                     #region 5. 보 생성
-                    var beamDefs = ReservoirGeometryCalculator.CalculateBeams(dto).ToList();
+                    // 보는 기둥 면에서, 헌치는 보 폭만큼 끊음 — 단면 크기 필요(docs/289 § C-1)
+                    var columnSize = _elementTypeQueryRepo.GetStructuralColumnSectionSizeMm(dto.ThicknessDto.ColumnTypeName);
+                    var beamWidth = _elementTypeQueryRepo.GetStructuralFramingSectionWidthMm(dto.ThicknessDto.BeamTypeName);
+                    var memberSizes = new ReservoirMemberSizes(columnSize.WidthX, columnSize.DepthY, beamWidth);
+                    var beamDefs = ReservoirGeometryCalculator.CalculateBeams(dto, memberSizes).ToList();
                     var beamLevels = _levelQueryRepo.GetLevelIds(beamDefs.Select(b => b.LevelName));
                     var beamTypes = beamDefs.GroupBy(b => b.Part == "HAUNCH" ? "HAUNCH" : b.TypeName ?? $"{b.Width} x {b.Height}").ToDictionary(g => g.Key, g => g.Key == "HAUNCH" ? _elementTypeCmdRepo.FindHaunchBeamSymbol() : !string.IsNullOrEmpty(g.First().TypeName) ? _elementTypeCmdRepo.FindBeamSymbol(g.First().TypeName) : _elementTypeCmdRepo.FindOrCreateBeamType(new Core.Structures.BeamTypeSpec(g.First().Width, g.First().Height, g.Key)));
                     foreach (var beamTypeId in beamTypes.Values.Distinct())
                         concrete.ApplyTo(beamTypeId, Core.Structures.ConcreteMember.Beam);
+                    var haunchIdsByLevel = new Dictionary<string, List<int>>();
                     foreach (var beamDef in beamDefs)
-                        _beamCmdRepo.CreateBeam(beamDef, beamLevels[beamDef.LevelName], beamTypes[beamDef.Part == "HAUNCH" ? "HAUNCH" : beamDef.TypeName ?? $"{beamDef.Width} x {beamDef.Height}"]);
+                    {
+                        var beamId = _beamCmdRepo.CreateBeam(beamDef, beamLevels[beamDef.LevelName], beamTypes[beamDef.Part == "HAUNCH" ? "HAUNCH" : beamDef.TypeName ?? $"{beamDef.Width} x {beamDef.Height}"]);
+                        if (beamDef.Part != "HAUNCH") continue;
+                        if (!haunchIdsByLevel.TryGetValue(beamDef.LevelName, out var ids))
+                            haunchIdsByLevel[beamDef.LevelName] = ids = new List<int>();
+                        ids.Add(beamId);
+                    }
+                    // 헌치 코너·T접합 겹침 정리(레거시 RH:2978-3014, 밸브실 UseCase와 같은 방식)
+                    foreach (var levelHaunches in haunchIdsByLevel.Values) _beamCmdRepo.JoinHaunches(levelHaunches);
                     #endregion
 
                     #region 6. 일반 패밀리 배치 (단차버림 Con'c, PIT)
@@ -138,12 +163,25 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                         _genericModelCmdRepo.PlaceInstance(def, genericLevels[def.LevelName], genericSymbols[def.SymbolName]);
                     #endregion
 
+                    #region 7. 상부 슬래브 결합 (레거시 RH:2940-2975)
+                    var joinWarnings = new List<string>();
+                    foreach (var slabId in upperSlabIds)
+                        joinWarnings.AddRange(_slabCmdRepo.JoinWithIntersectingFramingAndWalls(slabId));
+                    #endregion
+
+                    #region 8. 단면뷰 A~D (레거시 RH:2731-2845)
+                    foreach (var cut in ReservoirGeometryCalculator.CalculateSectionViews(dto))
+                        _viewCmdRepo.CreateSectionView(cut);
+                    #endregion
+
                     // TODO: 오프닝 배치 (파이프 관통 슬리브 등) — ReservoirGeometryCalculator.CalculateOpenings() 추가 후 구현
-                    // TODO: 단면뷰 작성 — ReservoirGeometryCalculator.CalculateSectionViews() 추가 후 구현
 
                     _tx.Commit();
 
-                    _dialogService.Info("Success", "배수지 작성 완료");
+                    var message = "배수지 작성 완료";
+                    if (joinWarnings.Count > 0)
+                        message += $"\n\n결합 경고 {joinWarnings.Count}건:\n" + string.Join("\n", joinWarnings.Take(10));
+                    _dialogService.Info("Success", message);
                 }
                 catch (Exception ex)
                 {

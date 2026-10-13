@@ -385,7 +385,9 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                 var errors = new List<string>();
                 SetDouble(values, "Q", v => Q = v, errors);
                 SetDouble(values, "RT", v => RT = v, errors);
-                SetInt(values, "N", v => N = v, errors);
+                // N=2만 지원. 다른 값은 무시하고 알림(docs/289 § A).
+                // TODO: N 확장 시 ReservoirGeometryCalculator 미러 매핑으로 3지 이상 검증 필요 (docs/289)
+                SetInt(values, "N", v => { if (v == 2) N = v; else errors.Add($"N은 현재 2만 지원합니다(입력값 {v} 무시)"); }, errors);
                 SetDouble(values, "LWL", v => LWL = v, errors);
                 SetDouble(values, "HWL", v => HWL = v, errors);
                 SetDouble(values, "Hf", v => Hf = v, errors);

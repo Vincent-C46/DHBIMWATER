@@ -15,6 +15,10 @@ namespace DHBIMWATER.Core.Structures
         public string LevelName { get; set; } = string.Empty;
         public double Height { get; set; }
         public double BaseOffset { get; set; }
+        // 상부 구속 레벨 이름. 비면 높이값(미연결) 벽 그대로 — 기존 호출부 동작 유지(docs/289 § B)
+        public string TopLevelName { get; set; } = string.Empty;
+        // 상부 간격띄우기(mm). TopLevelName 있을 때만 씀
+        public double TopOffset { get; set; }
         public bool IsFlipped { get; set; } = false;
         public bool IsExterior { get; set; } = false;
 
