@@ -33,6 +33,7 @@ public sealed class RunJunctionDetailUseCase
         var warnings = new List<string>();
 
         // 체크 = 문서 전체 재산정 포함 재기록. 미체크여도 값 빈 부재(수동 배치 밸브 등)는 자동 기록 — 재료표에 빠지지 않게.
+        // 격점상세도 UI는 체크 영역 제거로 항상 false → 자동 기록 경로만(docs/291)
         if (options.Backfill || _backfill.ScanCandidates().CandidateCount > 0)
         {
             try
@@ -54,7 +55,7 @@ public sealed class RunJunctionDetailUseCase
             catch (Exception ex) { warnings.Add($"일람표 생성 실패: {ex.Message}"); }
 
         if (options.CreateDrafting)
-            try { drafting = _drafting.Execute(options.RedrawExistingDrafting, options.UseTypeImage); }
+            try { drafting = _drafting.Execute(options.UseTypeImage); }
             catch (DhbimwaterException ex) when (ex.Code == ErrorCodes.NoActiveDocument) { throw; }
             catch (Exception ex) { warnings.Add($"도면 생성 실패: {ex.Message}"); }
 

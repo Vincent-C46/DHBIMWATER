@@ -5,9 +5,9 @@ using Xunit;
 
 namespace DHBIMWATER.UI.Tests.Piping;
 
-/// <summary>드래프팅뷰 도면의 생성·갱신 분기(docs/173).
+/// <summary>드래프팅뷰 도면의 생성·갱신 분기(docs/173, docs/291).
 /// 드래프팅뷰는 선·문자를 박아 넣은 정적 도면이라 일람표와 달리 저절로 갱신되지 않는다.
-/// 갱신은 사용자가 승인한 경우에만 일어나야 하고, 승인하지 않으면 종전 동작(건너뛰기)이어야 한다.</summary>
+/// 기존 뷰는 저장된 표 서명과 비교 — 같으면 그대로, 다르거나 기록 없으면 다시 그린다.</summary>
 public class CreatePipeMaterialDraftingUseCaseTests
 {
     private const string ViewA = CreatePipeMaterialDraftingUseCase.NamePrefix + "_V-1";
@@ -26,7 +26,7 @@ public class CreatePipeMaterialDraftingUseCaseTests
     {
         var repo = new FakeDraftingRepo(TwoJunctions());
 
-        var result = UseCase(repo).Execute(updateExisting: false);
+        var result = UseCase(repo).Execute();
 
         Assert.Equal([ViewA, ViewB], result.Created);
         Assert.Empty(result.Updated);
@@ -35,26 +35,41 @@ public class CreatePipeMaterialDraftingUseCaseTests
         Assert.Empty(repo.RedrawnViews);
     }
 
-    [Fact]   // T2 — 종전 동작 회귀
-    public void Execute_SkipsExistingWhenUpdateNotApproved()
+    [Fact]   // T2 — 내용 같으면 손대지 않음(docs/291)
+    public void Execute_LeavesExistingWhenSignatureMatches()
     {
-        var repo = new FakeDraftingRepo(TwoJunctions(), existing: [ViewA, ViewB]);
+        var repo = new FakeDraftingRepo(TwoJunctions());
+        UseCase(repo).Execute();                     // 생성 시 서명 기록
 
-        var result = UseCase(repo).Execute(updateExisting: false);
+        var result = UseCase(repo).Execute();       // 모델 그대로 재실행
 
-        Assert.Equal([ViewA, ViewB], result.Skipped);
+        Assert.Equal([ViewA, ViewB], result.Unchanged);
         Assert.Empty(result.Created);
         Assert.Empty(result.Updated);
-        Assert.Empty(repo.RedrawnViews);      // 승인 없이는 뷰를 비우지 않는다
-        Assert.Empty(repo.CreatedViews);
+        Assert.Empty(result.Skipped);
+        Assert.Empty(repo.RedrawnViews);
     }
 
-    [Fact]   // T3
-    public void Execute_RedrawsExistingWhenUpdateApproved()
+    [Fact]   // T2-2 — 내용 바뀐 격점만 다시 그림
+    public void Execute_RedrawsOnlyViewsWhoseContentChanged()
+    {
+        var repo = new FakeDraftingRepo(TwoJunctions());
+        UseCase(repo).Execute();
+        repo.Parts = [new("V-1", 1, "직관", "D160x6.00m"), new("V-2", 1, "곡관", "D160x45°"), new("V-2", 1, "곡관", "D160x45°")];
+
+        var result = UseCase(repo).Execute();
+
+        Assert.Equal([ViewA], result.Unchanged);
+        Assert.Equal([ViewB], result.Updated);
+        Assert.Equal([ViewB], repo.RedrawnViews);
+    }
+
+    [Fact]   // T3 — 기록 없는 기존 뷰(이 기능 이전 생성)는 다시 그림
+    public void Execute_RedrawsExistingWithoutSignature()
     {
         var repo = new FakeDraftingRepo(TwoJunctions(), existing: [ViewA, ViewB]);
 
-        var result = UseCase(repo).Execute(updateExisting: true);
+        var result = UseCase(repo).Execute();
 
         Assert.Equal([ViewA, ViewB], result.Updated);
         Assert.Empty(result.Created);
@@ -70,7 +85,7 @@ public class CreatePipeMaterialDraftingUseCaseTests
     {
         var repo = new FakeDraftingRepo(TwoJunctions(), existing: [ViewA, ViewB], redrawResult: false);
 
-        var result = UseCase(repo).Execute(updateExisting: true);
+        var result = UseCase(repo).Execute();
 
         Assert.Equal([ViewA, ViewB], result.Skipped);
         Assert.Empty(result.Updated);
@@ -82,7 +97,7 @@ public class CreatePipeMaterialDraftingUseCaseTests
     {
         var repo = new FakeDraftingRepo(TwoJunctions(), existing: [ViewA]);
 
-        var result = UseCase(repo).Execute(updateExisting: true);
+        var result = UseCase(repo).Execute();
 
         Assert.Equal([ViewA], result.Updated);
         Assert.Equal([ViewB], result.Created);
@@ -112,7 +127,7 @@ public class CreatePipeMaterialDraftingUseCaseTests
         var parts = new PipeMaterialPart[] { new("V-1", 1, "직관", "D160x6.00m"), new("", 2, "곡관", "D160x45°") };
         var repo = new FakeDraftingRepo(parts, existing: [ViewUnassigned]);
 
-        var result = UseCase(repo).Execute(updateExisting: true);
+        var result = UseCase(repo).Execute();
 
         Assert.Equal([ViewUnassigned], result.Updated);
         Assert.Equal([ViewA], result.Created);
@@ -129,10 +144,10 @@ public class CreatePipeMaterialDraftingUseCaseTests
         };
 
         var created = new FakeDraftingRepo(parts);
-        UseCase(created).Execute(updateExisting: false);
+        UseCase(created).Execute();
 
         var redrawn = new FakeDraftingRepo(parts, existing: [ViewA]);
-        UseCase(redrawn).Execute(updateExisting: true);
+        UseCase(redrawn).Execute();
 
         var fromCreate = Assert.Single(created.Calls);
         var fromRedraw = Assert.Single(redrawn.Calls);
@@ -150,20 +165,21 @@ public class CreatePipeMaterialDraftingUseCaseTests
         Assert.False(Assert.Single(created.Calls).IncludeTypeImage);
 
         var redrawn = new FakeDraftingRepo(parts, existing: [ViewA]);
-        UseCase(redrawn).Execute(updateExisting: true, includeTypeImage: false);
+        UseCase(redrawn).Execute(includeTypeImage: false);
         Assert.False(Assert.Single(redrawn.Calls).IncludeTypeImage);
     }
 
     private sealed class FakeDraftingRepo : IPipeMaterialDraftingRepo
     {
-        private readonly IReadOnlyList<PipeMaterialPart> _parts;
         private readonly HashSet<string> _existing;
+        // 뷰에 저장된 서명(Revit에선 ExtensibleStorage). 없으면 기록 없는 기존 뷰
+        private readonly Dictionary<string, string> _signatures = new(StringComparer.Ordinal);
         private readonly bool _redrawResult;
 
         public FakeDraftingRepo(IReadOnlyList<PipeMaterialPart> parts,
             IEnumerable<string>? existing = null, bool redrawResult = true)
         {
-            _parts = parts;
+            Parts = parts;
             _existing = new HashSet<string>(existing ?? [], StringComparer.Ordinal);
             _redrawResult = redrawResult;
         }
@@ -172,20 +188,25 @@ public class CreatePipeMaterialDraftingUseCaseTests
         public List<string> RedrawnViews { get; } = [];
         public List<(string ViewName, string Title, IReadOnlyList<PipeMaterialRow> Rows, bool IncludeTypeImage)> Calls { get; } = [];
 
-        public IReadOnlyList<PipeMaterialPart> GetParts() => _parts;
+        public IReadOnlyList<PipeMaterialPart> Parts { get; set; }
+        public IReadOnlyList<PipeMaterialPart> GetParts() => Parts;
+        public string? GetTableSignature(string viewName) => _signatures.GetValueOrDefault(viewName);
 
         public IReadOnlySet<string> GetExistingViewNames() => _existing;
 
-        public void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true)
+        public void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage, string signature)
         {
             CreatedViews.Add(viewName);
+            _existing.Add(viewName);
+            _signatures[viewName] = signature;
             Calls.Add((viewName, title, rows, includeTypeImage));
         }
 
-        public bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true)
+        public bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage, string signature)
         {
             if (!_redrawResult) return false;
             RedrawnViews.Add(viewName);
+            _signatures[viewName] = signature;
             Calls.Add((viewName, title, rows, includeTypeImage));
             return true;
         }

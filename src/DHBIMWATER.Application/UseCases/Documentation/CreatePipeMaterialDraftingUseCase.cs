@@ -10,6 +10,7 @@ namespace DHBIMWATER.Application.UseCases.Documentation;
 /// 드래프팅뷰 그리기가 실패해도 이미 만든 일람표까지 롤백되면 안 된다.</para>
 /// <para>일람표는 필터 기반 live 뷰라 모델이 바뀌면 값이 저절로 따라오지만, 드래프팅뷰는 선·문자를 박아 넣은
 /// 정적 도면이라 그렇지 않다. 그래서 여기에만 갱신 경로가 있다(docs/173).</para>
+/// <para>docs/291: 갱신 여부는 사용자가 고르지 않는다. 표 서명이 저장값과 같으면 그대로, 다르면 애드인이 그린 요소만 다시 그린다.</para>
 /// </summary>
 public sealed class CreatePipeMaterialDraftingUseCase
 {
@@ -30,6 +31,7 @@ public sealed class CreatePipeMaterialDraftingUseCase
     /// <summary>이미 있어 갱신 대상이 되는 도면 뷰 이름. 확인 대화상자를 띄울지 판단하는 용도다(docs/173).
     /// <para>읽기 전용이라 트랜잭션을 열지 않는다. 결과를 보관하지 않고 <see cref="Execute"/>가 다시 읽는다 —
     /// 그 사이 모델이 바뀌어도 실제로 그리는 값은 항상 Execute 시점의 값이어야 하기 때문이다.</para></summary>
+    // TODO: docs/291 이후 호출처 없음(확인 대화상자 제거). 테스트만 사용
     public IReadOnlyList<string> FindExistingViews()
     {
         var parts = _repo.GetParts();
@@ -41,9 +43,9 @@ public sealed class CreatePipeMaterialDraftingUseCase
             .ToList();
     }
 
-    /// <param name="updateExisting">true면 이름이 같은 도면 뷰의 내용을 전부 지우고 다시 그린다(docs/173).
-    /// false면 종전대로 건너뛴다. 이 판단은 사용자 확인을 받은 호출자가 내린다.</param>
-    public PipeMaterialScheduleResult Execute(bool updateExisting = false, bool includeTypeImage = true)
+    /// <summary>이름이 같은 도면 뷰가 있으면 서명 비교 → 같으면 <see cref="PipeMaterialScheduleResult.Unchanged"/>,
+    /// 다르거나 비교 불가면 다시 그림(docs/291).</summary>
+    public PipeMaterialScheduleResult Execute(bool includeTypeImage = true)
     {
         // 읽기는 트랜잭션 밖에서 먼저 한다. 만들 것이 없으면 트랜잭션을 아예 열지 않는다.
         var parts = _repo.GetParts();
@@ -54,6 +56,7 @@ public sealed class CreatePipeMaterialDraftingUseCase
 
         var created = new List<string>();
         var updated = new List<string>();
+        var unchanged = new List<string>();
         var skipped = new List<string>();
 
         using (_transaction)
@@ -72,17 +75,18 @@ public sealed class CreatePipeMaterialDraftingUseCase
                     // 격점 하나가 실패해도 나머지 격점은 살린다(docs/208 § C). Repo가 SubTransaction으로 그 격점만 되돌린다.
                     try
                     {
+                        var signature = PipeMaterialTableSignature.Of(title, rows, includeTypeImage);
                         if (existing.Contains(viewName))
                         {
-                            // 사용자가 갱신을 승인하지 않았으면 손대지 않는다(종전 동작).
-                            if (!updateExisting) { skipped.Add(viewName); continue; }
+                            // 내용 같으면 손대지 않음(docs/291)
+                            if (_repo.GetTableSignature(viewName) == signature) { unchanged.Add(viewName); continue; }
                             // 그 이름을 다른 종류의 뷰가 쓰고 있으면 지우지 않고 건너뛴다(docs/173 § B).
-                            if (!_repo.RedrawTableView(viewName, title, rows, includeTypeImage)) { skipped.Add(viewName); continue; }
+                            if (!_repo.RedrawTableView(viewName, title, rows, includeTypeImage, signature)) { skipped.Add(viewName); continue; }
                             updated.Add(viewName);
                             continue;
                         }
 
-                        _repo.CreateTableView(viewName, title, rows, includeTypeImage);
+                        _repo.CreateTableView(viewName, title, rows, includeTypeImage, signature);
                         created.Add(viewName);
                         existing.Add(viewName);
                     }
@@ -93,7 +97,7 @@ public sealed class CreatePipeMaterialDraftingUseCase
                     }
                 }
                 _transaction.Commit();
-                return new PipeMaterialScheduleResult(created, skipped, scan) { Updated = updated };
+                return new PipeMaterialScheduleResult(created, skipped, scan) { Updated = updated, Unchanged = unchanged };
             }
             catch
             {

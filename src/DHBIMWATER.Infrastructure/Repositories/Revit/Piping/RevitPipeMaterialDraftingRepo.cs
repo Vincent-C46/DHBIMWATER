@@ -44,26 +44,38 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
             .Select(x => x.Name)
             .ToHashSet(StringComparer.Ordinal);
 
-    public void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true)
+    public string? GetTableSignature(string viewName)
+    {
+        var document = Document();
+        if (FindDraftingView(document, viewName) is not { } view) return null;
+        // 기록 Id 0개 = 그린 요소 수집 실패 → 기록 없는 뷰로 취급(지울 대상 몰라 겹쳐 그려짐 방지)
+        if (PipeMaterialDraftingStorageSchema.Read(view) is not { ElementIds.Count: > 0 } record) return null;
+        // 애드인이 그린 선·문자를 사용자가 지웠으면 표가 깨진 것 → 다시 그림
+        return record.ElementIds.All(id => document.GetElement(id) is not null) ? record.Signature : null;
+    }
+
+    public void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage, string signature)
     {
         var document = Document();
         // 격점 하나의 실패가 나머지 격점까지 되돌리지 않도록 그 격점의 변경만 묶는다(docs/208 § C-2).
         using var sub = new SubTransaction(document);
         sub.Start();
-        try { DrawTable(document, CreateView(document, viewName), title, rows, includeTypeImage); sub.Commit(); }
+        try
+        {
+            var view = CreateView(document, viewName);
+            DrawTableAndRecord(document, view, title, rows, includeTypeImage, signature);
+            sub.Commit();
+        }
         catch { sub.RollBack(); throw; }
     }
 
-    public bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true)
+    public bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage, string signature)
     {
         var document = Document();
 
         // 이름은 있는데 드래프팅뷰가 아니면(다른 종류의 뷰가 그 이름을 쓰는 중) 아무것도 지우지 않는다.
         // 여기서 예외를 던지면 UseCase가 트랜잭션을 통째로 롤백해 정상인 다른 격점 도면까지 날아간다(docs/173 § B).
-        var view = new FilteredElementCollector(document)
-            .OfClass(typeof(ViewDrafting))
-            .Cast<ViewDrafting>()
-            .FirstOrDefault(x => !x.IsTemplate && string.Equals(x.Name, viewName, StringComparison.Ordinal));
+        var view = FindDraftingView(document, viewName);
         if (view is null) return false;
 
         // 축척을 1로 되돌린다 — 이 클래스의 mm 값은 1:1을 전제로 하고(CreateView 주석),
@@ -79,16 +91,45 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
         sub.Start();
         try
         {
-            ClearView(document, view);
+            // 기록 있으면 애드인이 그린 요소만 지움(사용자 주석 보존). 기록 없는 기존 뷰만 전체 삭제(docs/291)
+            // 기록 Id 0개면 지울 대상 모름 → 전체 삭제 경로
+            if (PipeMaterialDraftingStorageSchema.Read(view) is { ElementIds.Count: > 0 } record)
+            {
+                var alive = record.ElementIds.Where(id => document.GetElement(id) is not null).ToList();
+                if (alive.Count > 0) document.Delete(alive);
+            }
+            else ClearView(document, view);
             if (view.Scale != 1) view.Scale = 1;
-            DrawTable(document, view, title, rows, includeTypeImage);
+            DrawTableAndRecord(document, view, title, rows, includeTypeImage, signature);
             sub.Commit();
         }
         catch { sub.RollBack(); throw; }
         return true;
     }
 
+    private static ViewDrafting? FindDraftingView(Document document, string viewName)
+        => new FilteredElementCollector(document)
+            .OfClass(typeof(ViewDrafting))
+            .Cast<ViewDrafting>()
+            .FirstOrDefault(x => !x.IsTemplate && string.Equals(x.Name, viewName, StringComparison.Ordinal));
+
+    /// <summary>표 그리고, 그리기 전후 뷰 소유 요소 차이 = 애드인이 그린 요소를 서명과 함께 뷰에 기록(docs/291).</summary>
+    private static void DrawTableAndRecord(Document document, ViewDrafting view, string title,
+        IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage, string signature)
+    {
+        var before = OwnedElementIds(document, view);
+        DrawTable(document, view, title, rows, includeTypeImage);
+        // 새 요소가 뷰 collector에 잡히도록 재생성
+        document.Regenerate();
+        var drawn = OwnedElementIds(document, view).Where(id => !before.Contains(id)).ToList();
+        PipeMaterialDraftingStorageSchema.Write(view, signature, drawn);
+    }
+
+    private static HashSet<ElementId> OwnedElementIds(Document document, ViewDrafting view)
+        => new FilteredElementCollector(document, view.Id).WhereElementIsNotElementType().ToElementIds().ToHashSet();
+
     /// <summary>뷰가 소유한 요소를 전부 지운다(docs/173 — 전체 삭제 후 재작도).
+    /// <para>docs/291 이후: 기록(<see cref="PipeMaterialDraftingStorageSchema"/>) 없는 기존 뷰 전용. 최초 1회만 탄다.</para>
     /// <para>사용자가 이 뷰에 덧붙인 치수·상세항목·주석도 함께 사라진다. 실행 전 사용자 확인이 유일한 방어선이다.</para>
     /// <para>한 번의 <see cref="Document.Delete(ICollection{ElementId})"/>로 넘겨야 종속 요소를
     /// Revit이 알아서 함께 처리한다. 하나씩 지우면 이미 사라진 ID를 다시 지우려다 예외가 난다.</para></summary>

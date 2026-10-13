@@ -18,6 +18,9 @@ public sealed record PipeMaterialScheduleResult(
     /// 일람표는 갱신 경로가 없으므로 항상 비어 있다.
     /// <para>위치 매개변수가 아니라 init 속성인 이유: 일람표 UseCase의 기존 호출부를 건드리지 않기 위해서다.</para></summary>
     public IReadOnlyList<string> Updated { get; init; } = [];
+
+    /// <summary>저장된 서명과 내용이 같아 손대지 않은 도면 뷰 이름(docs/291). 일람표는 항상 비어 있다.</summary>
+    public IReadOnlyList<string> Unchanged { get; init; } = [];
 }
 
 /// <summary>격점상세도 배관재료표 일람표(ViewSchedule) 조회·생성 경계(docs/132).</summary>

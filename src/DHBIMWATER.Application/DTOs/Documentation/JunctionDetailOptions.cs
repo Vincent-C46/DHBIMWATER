@@ -8,6 +8,7 @@ public sealed record JunctionDetailOptions(
     bool CreateSchedule = true,
     bool CreateDrafting = true,
     bool CreatePlan = true,
+    // 격점상세도 UI는 false 고정(docs/291). true = 문서 전체 재산정 포함 재기록
     bool Backfill = false,
     bool ExpandVertical = true,
     double StepPaperMm = JunctionDetailParameters.StepPaperMm,
@@ -15,7 +16,6 @@ public sealed record JunctionDetailOptions(
     bool PlaceTags = true,
     long TagTypeId = 0,
     bool UseTypeImage = true,
-    bool RedrawExistingDrafting = false,
     JunctionExpandAxis ExpandAxis = JunctionExpandAxis.Y,
     bool ExpandPositive = true,
     IReadOnlyList<JunctionSetOffset>? SetOffsets = null);

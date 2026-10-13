@@ -4,6 +4,7 @@
         xmlns:local="clr-namespace:DHBIMWATER.UI.Views.Documentation"
         xmlns:controls="clr-namespace:DHBIMWATER.UI.Controls"
         xmlns:core="clr-namespace:DHBIMWATER.Core.Piping;assembly=DHBIMWATER.Core"
+        xmlns:vm="clr-namespace:DHBIMWATER.UI.ViewModels.Documentation"
         Title="격점상세도" Width="1260" Height="850" MinWidth="1080" MinHeight="700"
         WindowStartupLocation="CenterOwner" Background="{DynamicResource MainBackgroundBrush}"
         WindowStyle="None" AllowsTransparency="False"
@@ -18,6 +19,8 @@
             </ResourceDictionary.MergedDictionaries>
             <local:BooleanInverterConverter x:Key="BooleanInverterConverter"/>
             <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+            <!-- 세트 선택 강조색(docs/290). Color.Warning 브러시가 공용에 없어 여기서 만든다 -->
+            <SolidColorBrush x:Key="SetHighlightBrush" Color="{StaticResource Color.Warning}"/>
         <!-- 미리보기 도형 선 굵기. 도면 축소(Viewbox)에도 선이 가늘어지지 않게 한다. -->
         <Style x:Key="SymbolLine" TargetType="Shape">
             <Setter Property="Stroke" Value="{StaticResource MainTextBrush}"/>
@@ -64,9 +67,13 @@
             <Setter Property="Padding" Value="10"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
+        <!-- 비활성 흐리게(docs/291). TODO: 전역 PrimaryCheckBoxStyle에도 비활성 표시 필요 — 지금은 활성과 똑같이 보임 -->
         <Style TargetType="CheckBox" BasedOn="{StaticResource PrimaryCheckBoxStyle}">
             <Setter Property="Margin" Value="0,5"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+            </Style.Triggers>
         </Style>
         <Style TargetType="DataGrid" BasedOn="{StaticResource PrimaryDataGridStyle}">
             <Setter Property="AutoGenerateColumns" Value="False"/>
@@ -96,21 +103,11 @@
         <Grid Grid.Row="1" Margin="12">
             <Grid.ColumnDefinitions><ColumnDefinition Width="350"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 
-            <!-- 왼쪽: 설정 3칸. 시안(279_격점상세도_창_목업.html)의 fieldset 순서·번호와 같게 둔다. -->
+            <!-- 왼쪽: 설정 2칸. "값 재기록" 칸은 제거(docs/291) — 값 빈 부재 자동 기록만 유지, 문서 전체 재산정 없음 -->
             <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
                 <StackPanel Margin="0,14,0,0">
-                    <!-- 일람표·도면·평면 상세도는 항상 작성. 값 빈 부재는 실행 시 자동 기록. 체크는 문서 전체 개수 재산정 포함 -->
-                    <GroupBox Header="1. 값 재기록">
-                        <StackPanel>
-                            <CheckBox Content="접합·부설·절단 수 다시 계산 (문서 전체)"
-                                      IsChecked="{Binding Backfill, Mode=TwoWay}"
-                                      IsEnabled="{Binding IsBackfillEnabled, Mode=OneWay}"/>
-                            <TextBlock Text="{Binding BackfillMessage, Mode=OneWay}" Style="{StaticResource HintText}"/>
-                        </StackPanel>
-                    </GroupBox>
-
                     <!-- 펼침 항상 켬, 축척 1/50 고정. 수직분기 세트(수평 부재에서 이어진 수직 구간)마다 축·간격 입력 -->
-                    <GroupBox Header="2. 수직분기 오프셋 (세트별)">
+                    <GroupBox Header="1. 수직분기 오프셋 (세트별)">
                         <StackPanel>
                             <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,0,0,6" FontWeight="Normal"
                                        Text="간격은 도면 mm. 실제 이동 = 순서 × 간격 × 축척. 음수 = 반대 방향, 0 = 펼치지 않음."/>
@@ -122,17 +119,32 @@
                             <ItemsControl ItemsSource="{Binding OffsetSets, Mode=OneWay}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border BorderBrush="{StaticResource CommonBorderBrush}" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,0,0,6">
+                                        <!-- 카드 클릭 = 세트 선택 → 캔버스 강조(docs/290). 선택 시 테두리 2px, 안쪽 여백 1px 줄여 내용 위치 고정 -->
+                                        <Border CornerRadius="4" Margin="0,0,0,6" Background="Transparent" Cursor="Hand"
+                                                PreviewMouseLeftButtonDown="OnSetCardMouseDown" GotKeyboardFocus="OnSetCardKeyboardFocus">
+                                            <Border.Style><Style TargetType="Border">
+                                                <Setter Property="BorderBrush" Value="{StaticResource CommonBorderBrush}"/>
+                                                <Setter Property="BorderThickness" Value="1"/>
+                                                <Setter Property="Padding" Value="8,6"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsSelected, Mode=OneWay}" Value="True">
+                                                        <Setter Property="BorderBrush" Value="{StaticResource SetHighlightBrush}"/>
+                                                        <Setter Property="BorderThickness" Value="2"/>
+                                                        <Setter Property="Padding" Value="7,5"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style></Border.Style>
                                             <StackPanel>
                                                 <TextBlock Text="{Binding Label, Mode=OneWay}"/>
                                                 <TextBlock Text="{Binding Members, Mode=OneWay}" Style="{StaticResource HintText}" TextWrapping="Wrap" FontWeight="Normal"/>
                                                 <Grid Margin="0,6,0,0">
                                                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                                        <RadioButton Content="X축" GroupName="{Binding AxisGroupName, Mode=OneWay}" Tag="6,0,0,6" Margin="0" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding IsX, Mode=TwoWay}"/>
-                                                        <RadioButton Content="Y축" GroupName="{Binding AxisGroupName, Mode=OneWay}" Tag="0,6,6,0" Margin="-1,0,0,0" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding IsY, Mode=TwoWay}"/>
+                                                        <RadioButton Content="X축" GroupName="{Binding AxisGroupName, Mode=OneWay}" Tag="6,0,0,6" Margin="0" MinWidth="56" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding IsX, Mode=TwoWay}"/>
+                                                        <RadioButton Content="Y축" GroupName="{Binding AxisGroupName, Mode=OneWay}" Tag="0,6,6,0" Margin="-1,0,0,0" MinWidth="56" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding IsY, Mode=TwoWay}"/>
                                                     </StackPanel>
-                                                    <TextBlock Grid.Column="1" Text="간격" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,8,0" FontWeight="Normal"/>
+                                                    <!-- 토글 기본 MinWidth 86 × 2면 이 칸 폭이 0에 가까워 글자가 토글 위로 넘침 → 토글 56 + 말줄임(docs/290) -->
+                                                    <TextBlock Grid.Column="1" Text="간격" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,8,0" FontWeight="Normal" TextTrimming="CharacterEllipsis"/>
                                                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                                                         <!-- 입력 0.3초 뒤 반영(포커스 안 잃어도). 숫자 아니면 이전 값 유지 + 빨간 테두리 -->
                                                         <TextBox Width="64" HorizontalContentAlignment="Right" ToolTip="도면 위 간격(mm). 음수 = 반대 방향"
@@ -155,8 +167,8 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <TextBlock Text="모든 세트" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="Normal"/>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <RadioButton Content="X축" GroupName="BulkAxis" Tag="6,0,0,6" Margin="0" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding BulkAxisX, Mode=TwoWay}"/>
-                                    <RadioButton Content="Y축" GroupName="BulkAxis" Tag="0,6,6,0" Margin="-1,0,0,0" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding BulkAxisY, Mode=TwoWay}"/>
+                                    <RadioButton Content="X축" GroupName="BulkAxis" Tag="6,0,0,6" Margin="0" MinWidth="56" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding BulkAxisX, Mode=TwoWay}"/>
+                                    <RadioButton Content="Y축" GroupName="BulkAxis" Tag="0,6,6,0" Margin="-1,0,0,0" MinWidth="56" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding BulkAxisY, Mode=TwoWay}"/>
                                 </StackPanel>
                                 <TextBox Grid.Column="3" Width="64" HorizontalContentAlignment="Right" Margin="8,0,6,0" VerticalAlignment="Center"
                                          Text="{Binding BulkStepText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
@@ -165,7 +177,7 @@
                         </StackPanel>
                     </GroupBox>
 
-                    <GroupBox Header="3. 상세도 · 표 옵션">
+                    <GroupBox Header="2. 상세도 · 표 옵션">
                         <StackPanel>
                             <CheckBox Content="부재 번호 원(태그) 붙이기" IsChecked="{Binding PlaceTags, Mode=TwoWay}" IsEnabled="{Binding CanPlaceTags, Mode=OneWay}"/>
                             <Grid Margin="22,2,0,6">
@@ -174,12 +186,9 @@
                                 <ComboBox Grid.Column="1" ItemsSource="{Binding TagTypes, Mode=OneWay}" DisplayMemberPath="Name"
                                           SelectedItem="{Binding SelectedTagType, Mode=TwoWay}" IsEnabled="{Binding CanPlaceTags, Mode=OneWay}"/>
                             </Grid>
-                            <TextBlock Text="{Binding TagTypeMessage, Mode=OneWay}" Style="{StaticResource HintText}" Margin="22,0,0,4"/>
+                            <TextBlock Text="{Binding TagTypeMessage, Mode=OneWay}" Style="{StaticResource HintText}" Margin="22,0,0,4" TextWrapping="Wrap"/>
+                            <!-- 기존 도면 뷰: 내용 바뀐 경우만 자동 다시 그림, 사용자 주석 보존(docs/291). 선택 라디오 제거 -->
                             <CheckBox Content="재료표 형상 열에 유형 이미지 넣기" IsChecked="{Binding UseTypeImage, Mode=TwoWay}"/>
-                            <TextBlock Text="이미 있는 뷰" Style="{StaticResource FieldLabel}"/>
-                            <RadioButton Content="그대로 둠 (건너뜀)" GroupName="Redraw"
-                                         IsChecked="{Binding RedrawExistingDrafting, Mode=TwoWay, Converter={StaticResource BooleanInverterConverter}}"/>
-                            <RadioButton Content="다시 그림" GroupName="Redraw" IsChecked="{Binding RedrawExistingDrafting, Mode=TwoWay}"/>
                         </StackPanel>
                     </GroupBox>
                 </StackPanel>
@@ -210,7 +219,13 @@
                                         </TransformGroup>
                                     </Canvas.RenderTransform>
                                     <!-- 중심선: 주관(수평 부재 사이) + 세트(뿌리 → 마지막 부재) -->
-                                    <Path Data="{Binding PreviewCenterGeometry, Mode=OneWay}" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1" StrokeDashArray="6 3 1.5 3" IsHitTestVisible="False"/>
+                                    <!-- 세트 선택 중이면 선택 세트 외 중심선 흐림. 선택 세트 중심선은 아래 강조 Path -->
+                                    <Path Data="{Binding PreviewCenterGeometry, Mode=OneWay}" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1" StrokeDashArray="6 3 1.5 3" IsHitTestVisible="False">
+                                        <Path.Style><Style TargetType="Path"><Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsPreviewDimmed, Mode=OneWay}" Value="True"><Setter Property="Opacity" Value="0.3"/></DataTrigger>
+                                        </Style.Triggers></Style></Path.Style>
+                                    </Path>
+                                    <Path Data="{Binding PreviewHighlightCenterGeometry, Mode=OneWay}" Stroke="{StaticResource SetHighlightBrush}" StrokeThickness="2" StrokeDashArray="6 3 1.5 3" IsHitTestVisible="False"/>
                                     <!-- 격점 부재 전부(실제 평면 위치). 컨테이너 위치(X,Y) = 부재 원점. 번호 원 = Revit 태그 자리. 명칭은 툴팁 -->
                                     <ItemsControl ItemsSource="{Binding PreviewPoints, Mode=OneWay}">
                                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
@@ -223,24 +238,52 @@
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
                                                 <Canvas Width="0" Height="0">
+                                                    <Canvas.Style><Style TargetType="Canvas"><Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Highlight, Mode=OneWay}" Value="{x:Static vm:SetHighlight.Dimmed}"><Setter Property="Opacity" Value="0.3"/></DataTrigger>
+                                                    </Style.Triggers></Style></Canvas.Style>
                                                     <Grid Width="20" Height="20" Canvas.Left="{Binding NumberLeft, Mode=OneWay}" Canvas.Top="{Binding NumberTop, Mode=OneWay}" ToolTip="{Binding ToolTip, Mode=OneWay}">
                                                         <Grid.Style><Style TargetType="Grid"><Style.Triggers>
                                                             <DataTrigger Binding="{Binding Item.ItemNumber, Mode=OneWay}" Value="0"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
                                                         </Style.Triggers></Style></Grid.Style>
-                                                        <Ellipse Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1.4" Fill="{StaticResource WhiteBrush}"/>
-                                                        <TextBlock Text="{Binding Item.ItemNumber, Mode=OneWay}" FontSize="11" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                        <!-- 선택 세트 = 강조색. 트리거가 이기도록 색·굵기는 Setter로 둔다 -->
+                                                        <Ellipse Fill="{StaticResource WhiteBrush}">
+                                                            <Ellipse.Style><Style TargetType="Ellipse">
+                                                                <Setter Property="Stroke" Value="{StaticResource PrimaryBrush}"/>
+                                                                <Setter Property="StrokeThickness" Value="1.4"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Highlight, Mode=OneWay}" Value="{x:Static vm:SetHighlight.Highlighted}">
+                                                                        <Setter Property="Stroke" Value="{StaticResource SetHighlightBrush}"/>
+                                                                        <Setter Property="StrokeThickness" Value="2"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style></Ellipse.Style>
+                                                        </Ellipse>
+                                                        <TextBlock Text="{Binding Item.ItemNumber, Mode=OneWay}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                            <TextBlock.Style><Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Highlight, Mode=OneWay}" Value="{x:Static vm:SetHighlight.Highlighted}"><Setter Property="Foreground" Value="{StaticResource SetHighlightBrush}"/></DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style></TextBlock.Style>
+                                                        </TextBlock>
                                                     </Grid>
                                                     <!-- 기호선 좌표가 부재 원점 기준이라 (0,0)에 둔다. 연결 끊긴 부재 = 빨강 -->
-                                                    <Path Data="{Binding ShapeGeometry, Mode=OneWay}" StrokeThickness="1.4" ToolTip="{Binding ToolTip, Mode=OneWay}">
+                                                    <!-- 굵기는 SymbolLine Setter(1.4). 선택 세트 = 강조색·굵게, 연결 끊김 빨강이 뒤 트리거라 이김 -->
+                                                    <Path Data="{Binding ShapeGeometry, Mode=OneWay}" ToolTip="{Binding ToolTip, Mode=OneWay}">
                                                         <Path.Style><Style TargetType="Path" BasedOn="{StaticResource SymbolLine}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers>
                                                             <DataTrigger Binding="{Binding HasShape, Mode=OneWay}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger>
+                                                            <DataTrigger Binding="{Binding Highlight, Mode=OneWay}" Value="{x:Static vm:SetHighlight.Highlighted}">
+                                                                <Setter Property="Stroke" Value="{StaticResource SetHighlightBrush}"/>
+                                                                <Setter Property="StrokeThickness" Value="2.4"/>
+                                                            </DataTrigger>
                                                             <DataTrigger Binding="{Binding Item.Connected, Mode=OneWay}" Value="False"><Setter Property="Stroke" Value="#E74C3C"/></DataTrigger>
                                                         </Style.Triggers></Style></Path.Style>
                                                     </Path>
                                                     <!-- 기호선 없는 패밀리: 종류별 대체 기호(흐리게) -->
                                                     <ContentControl Canvas.Left="{Binding SymbolLeft, Mode=OneWay}" Canvas.Top="{Binding SymbolTop, Mode=OneWay}" Width="44" Height="44" RenderTransformOrigin="0.5,0.5"
-                                                                    Content="{Binding Item.SymbolKind, Mode=OneWay}" Opacity="0.55" ToolTip="{Binding ToolTip, Mode=OneWay}">
-                                                        <ContentControl.Style><Style TargetType="ContentControl" BasedOn="{StaticResource JunctionSymbolStyle}"><Style.Triggers>
+                                                                    Content="{Binding Item.SymbolKind, Mode=OneWay}" ToolTip="{Binding ToolTip, Mode=OneWay}">
+                                                        <ContentControl.Style><Style TargetType="ContentControl" BasedOn="{StaticResource JunctionSymbolStyle}"><Setter Property="Opacity" Value="0.55"/><Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Highlight, Mode=OneWay}" Value="{x:Static vm:SetHighlight.Highlighted}"><Setter Property="Opacity" Value="1"/></DataTrigger>
                                                             <DataTrigger Binding="{Binding HasShape, Mode=OneWay}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
                                                         </Style.Triggers></Style></ContentControl.Style>
                                                         <ContentControl.RenderTransform><ScaleTransform ScaleX="0.8" ScaleY="0.8"/></ContentControl.RenderTransform>
@@ -256,9 +299,30 @@
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
                                                 <Canvas>
-                                                    <Path Data="{Binding Geometry, Mode=OneWay}" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1"/>
+                                                    <Canvas.Style><Style TargetType="Canvas"><Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Highlight, Mode=OneWay}" Value="{x:Static vm:SetHighlight.Dimmed}"><Setter Property="Opacity" Value="0.3"/></DataTrigger>
+                                                    </Style.Triggers></Style></Canvas.Style>
+                                                    <Path Data="{Binding Geometry, Mode=OneWay}">
+                                                        <Path.Style><Style TargetType="Path">
+                                                            <Setter Property="Stroke" Value="{StaticResource PrimaryBrush}"/>
+                                                            <Setter Property="StrokeThickness" Value="1"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding Highlight, Mode=OneWay}" Value="{x:Static vm:SetHighlight.Highlighted}">
+                                                                    <Setter Property="Stroke" Value="{StaticResource SetHighlightBrush}"/>
+                                                                    <Setter Property="StrokeThickness" Value="1.6"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style></Path.Style>
+                                                    </Path>
                                                     <TextBlock Canvas.Left="{Binding LabelLeft, Mode=OneWay}" Canvas.Top="{Binding LabelTop, Mode=OneWay}"
-                                                               Text="{Binding Text, Mode=OneWay}" Foreground="{StaticResource PrimaryBrush}" FontSize="11"/>
+                                                               Text="{Binding Text, Mode=OneWay}" FontSize="11">
+                                                        <TextBlock.Style><Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding Highlight, Mode=OneWay}" Value="{x:Static vm:SetHighlight.Highlighted}"><Setter Property="Foreground" Value="{StaticResource SetHighlightBrush}"/></DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style></TextBlock.Style>
+                                                    </TextBlock>
                                                 </Canvas>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>

@@ -17,15 +17,15 @@ public sealed class JunctionDetailViewModelTests
         Assert.True(vm.CreateSchedule);
         Assert.True(vm.CreateDrafting);
         Assert.True(vm.CreatePlan);
-        Assert.False(vm.Backfill);
         Assert.True(vm.ExpandVertical);
         var set = Assert.Single(vm.OffsetSets);
         Assert.Equal(8, set.StepPaperMm);
         Assert.True(set.IsY);
         Assert.Equal(50, vm.ViewScale);
-        Assert.True(vm.PlaceTags);
-        Assert.False(vm.IsBackfillEnabled);
+        // 태그 유형 0개 → 체크 해제로 보이고 실행에도 false(docs/291)
         Assert.False(vm.CanPlaceTags);
+        Assert.False(vm.PlaceTags);
+        Assert.Contains("다중 카테고리 태그", vm.TagTypeMessage);
     }
 
     [Fact]
@@ -91,6 +91,71 @@ public sealed class JunctionDetailViewModelTests
     }
 
     [Fact]
+    public void SelectSet_HighlightsSetMembers_DimsOthers_AndSurvivesStepChange()
+    {
+        var vm = Create();
+        var set = vm.OffsetSets[0];
+        Assert.All(vm.PreviewPoints, x => Assert.Equal(SetHighlight.Normal, x.Highlight));
+
+        vm.SelectSet(set, toggle: true);
+        Assert.True(set.IsSelected);
+        Assert.Equal(SetHighlight.Highlighted, vm.PreviewPoints.Single(x => x.Item.ElementId == 2).Highlight);
+        Assert.Equal(SetHighlight.Dimmed, vm.PreviewPoints.Single(x => x.Item.ElementId == 1).Highlight);
+        Assert.NotNull(vm.PreviewHighlightCenterGeometry);
+        Assert.True(vm.IsPreviewDimmed);
+
+        set.StepText = "-5";   // 미리보기 재생성 후에도 선택 유지
+        Assert.True(set.IsSelected);
+        Assert.Equal(SetHighlight.Highlighted, vm.PreviewPoints.Single(x => x.Item.ElementId == 2).Highlight);
+
+        vm.SelectSet(set, toggle: false);   // 입력 클릭은 해제 안 함
+        Assert.True(vm.HasSelectedSet);
+        vm.SelectSet(set, toggle: true);
+        Assert.False(set.IsSelected);
+        Assert.Null(vm.PreviewHighlightCenterGeometry);
+        Assert.All(vm.PreviewPoints, x => Assert.Equal(SetHighlight.Normal, x.Highlight));
+
+        vm.SelectSet(set, toggle: true);
+        vm.ClearSetSelection();
+        Assert.False(vm.HasSelectedSet);
+
+        // 더블클릭 맞춤 복원 경로: Id로 선택, 없는 Id는 무시
+        vm.SelectSet(set.SetId);
+        Assert.True(set.IsSelected);
+        vm.ClearSetSelection();
+        vm.SelectSet(-12345);
+        Assert.False(vm.HasSelectedSet);
+    }
+
+    // XAML 스모크: 하이라이트 트리거(x:Static vm:SetHighlight)·카드 스타일이 실제 로드되는지(docs/290)
+    [Fact]
+    public void View_LoadsAndRendersSelectedSet_WithoutXamlErrors()
+    {
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                if (System.Windows.Application.Current == null) _ = new System.Windows.Application();
+                var vm = Create();
+                var view = new DHBIMWATER.UI.Views.Documentation.JunctionDetailView(vm);
+                view.Measure(new System.Windows.Size(1260, 850));
+                view.Arrange(new System.Windows.Rect(0, 0, 1260, 850));
+                view.UpdateLayout();
+                vm.SelectSet(vm.OffsetSets[0], toggle: true);
+                view.UpdateLayout();
+            }
+            catch (Exception ex) { error = ex; }
+            finally { System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeShutdown(); }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.IsBackground = true;
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(30)));
+        Assert.Null(error);
+    }
+
+    [Fact]
     public void DisconnectedVerticalItem_HasNoOrderAndZeroOffset()
     {
         var vm = Create(connected: false);
@@ -110,7 +175,7 @@ public sealed class JunctionDetailViewModelTests
     }
 
     [Fact]
-    public void RunAvailability_RequiresAnOutputOrUsableBackfill()
+    public void RunAvailability_RequiresAnOutput()
     {
         var vm = Create();
         Assert.True(vm.CanRun);
@@ -192,8 +257,9 @@ public sealed class JunctionDetailViewModelTests
         [new("GV-01", 3, "단관", "DN100 L=300", TypeImagePath: "sample.png")];
         public IReadOnlyList<PipeMaterialPart> GetParts() => material ? Parts : [];
         public IReadOnlySet<string> GetExistingViewNames() => new HashSet<string>();
-        public void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true) { }
-        public bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true) => false;
+        public string? GetTableSignature(string viewName) => null;
+        public void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage, string signature) { }
+        public bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage, string signature) => false;
     }
 
     private sealed class BackfillRepo : IPipeMaterialBackfillRepo

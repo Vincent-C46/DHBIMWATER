@@ -14,13 +14,18 @@ public interface IPipeMaterialDraftingRepo
     /// 격점마다 전체를 훑는 대신 한 번 받아 둔다(docs/208 § D-3).</summary>
     IReadOnlySet<string> GetExistingViewNames();
 
-    /// <summary>드래프팅뷰 1개를 만들고 그 안에 6열 배관재료표를 선·문자로 그린다.</summary>
-    void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true);
+    /// <summary>기존 드래프팅뷰에 저장한 표 서명(docs/291). null = 비교 불가 → 다시 그림:
+    /// 기록 없음(이 기능 이전 생성), 드래프팅뷰 아님, 애드인이 그린 요소 중 하나라도 사라짐.</summary>
+    string? GetTableSignature(string viewName);
 
-    /// <summary>이미 있는 드래프팅뷰의 내용을 <b>전부 지우고</b> 표를 다시 그린다(docs/173).
-    /// <para>사용자가 그 뷰에 덧붙인 치수·주석·상세항목도 함께 사라진다 —
-    /// 호출 전에 사용자 확인을 받는 것은 호출자 책임이다(<c>JunctionDetailCommand</c>).</para>
+    /// <summary>드래프팅뷰 1개를 만들고 그 안에 6열 배관재료표를 선·문자로 그린다.
+    /// 그린 요소 Id와 <paramref name="signature"/>를 뷰에 기록한다(docs/291).</summary>
+    void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage, string signature);
+
+    /// <summary>이미 있는 드래프팅뷰의 표를 다시 그린다(docs/173, docs/291).
+    /// <para>기록이 있으면 애드인이 그린 요소만 지운다 — 사용자가 덧붙인 치수·주석은 남는다.
+    /// 기록 없는 기존 뷰는 최초 1회 뷰 내용을 전부 지운다.</para>
     /// <returns><paramref name="viewName"/>을 쓰는 드래프팅뷰를 찾아 다시 그렸으면 true.
     /// 그 이름을 다른 종류의 뷰(일람표·평면도 등)가 쓰고 있으면 <b>아무것도 지우지 않고</b> false.</returns></summary>
-    bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true);
+    bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage, string signature);
 }

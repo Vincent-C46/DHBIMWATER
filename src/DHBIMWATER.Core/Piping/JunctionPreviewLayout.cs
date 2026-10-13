@@ -15,7 +15,8 @@ public sealed record JunctionPreviewLink(long A, long B);
 // 좌표 단위 = 도면 mm, X = 뷰 오른쪽, Y = 뷰 위쪽
 public sealed record JunctionPreviewPlacement(JunctionPreviewItem Item, double X, double Y,
     double MinX, double MinY, double MaxX, double MaxY, double TagX, double TagY);
-public sealed record JunctionPreviewSegment(double X1, double Y1, double X2, double Y2);
+// SetId 0 = 주관(수평 부재 사이). 세트 중심선은 세트 Id
+public sealed record JunctionPreviewSegment(double X1, double Y1, double X2, double Y2, long SetId = 0);
 public sealed record JunctionPreviewDimension(JunctionPreviewPlacement First, JunctionPreviewPlacement Second,
     JunctionExpandAxis Axis, double StepPaperMm);
 public sealed record JunctionPreviewScene(IReadOnlyList<JunctionPreviewPlacement> Placements,
@@ -65,7 +66,7 @@ public static class JunctionPreviewLayout
                 .OrderBy(x => x.Item.Order).ToList();
             if (members.Count == 0 || !expand || set.StepPaperMm == 0) continue;
             if (roots.TryGetValue(set.SetId, out var root))
-                centerLines.Add(new JunctionPreviewSegment(root.X, root.Y, members[^1].X, members[^1].Y));
+                centerLines.Add(new JunctionPreviewSegment(root.X, root.Y, members[^1].X, members[^1].Y, set.SetId));
             if (members.Count >= 2)
                 dimensions.Add(new JunctionPreviewDimension(members[0], members[1], set.Axis, set.StepPaperMm));
         }

@@ -87,8 +87,9 @@ public sealed class BuildJunctionDetailPreviewUseCaseTests
     {
         public IReadOnlyList<PipeMaterialPart> GetParts() => [];
         public IReadOnlySet<string> GetExistingViewNames() => new HashSet<string>();
-        public void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true) { }
-        public bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage = true) => false;
+        public string? GetTableSignature(string viewName) => null;
+        public void CreateTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage, string signature) { }
+        public bool RedrawTableView(string viewName, string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage, string signature) => false;
     }
 
     private sealed class TestShapeRepo : IJunctionSymbolShapeRepo

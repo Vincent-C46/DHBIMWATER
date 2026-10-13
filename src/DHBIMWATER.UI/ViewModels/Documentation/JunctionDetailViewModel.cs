@@ -18,7 +18,7 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     private readonly BackfillPipeMaterialParametersUseCase _backfillUseCase;
     private JunctionDetailPreview _preview;
     private bool _createSchedule = true, _createDrafting = true, _createPlan = true;
-    private bool _backfill, _expandVertical = true, _placeTags = true, _useTypeImage = true, _redrawExistingDrafting;
+    private bool _expandVertical = true, _placeTags = true, _useTypeImage = true;
     // 재실행·재조회해도 세트 설정 유지 (SetId = 세트 첫 부재 ElementId)
     private readonly Dictionary<long, JunctionSetOffset> _setState = [];
     private bool _bulkAxisX;
@@ -28,7 +28,6 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     private string _activeTab = "Plan";
     private bool _isRunning;
     private string _resultText = string.Empty;
-    private bool _fromSelection;
     private string _statusText = string.Empty;
 
     public JunctionDetailViewModel(BuildJunctionDetailPreviewUseCase previewUseCase,
@@ -42,11 +41,8 @@ public sealed class JunctionDetailViewModel : ViewModelBase
         _preview = previewUseCase.Execute();
         TagTypes = new ObservableCollection<JunctionDetailTagType>(_preview.TagTypes);
         _selectedTagType = TagTypes.Count == 1 ? TagTypes[0] : null;
-        var scan = backfillUseCase.ScanCandidates();
-        HasBackfillWork = scan.HasWork;
-        _fromSelection = scan.FromSelection;
-        BackfillCandidateCount = scan.CandidateCount + scan.RecountCount + scan.AdaptiveCandidateCount;
-        UntaggedCount = scan.CandidateCount;
+        // 값 빈 부재 수 = 실행 시 자동 기록 대상. 문서 전체 재산정 체크는 제거(docs/291)
+        UntaggedCount = backfillUseCase.ScanCandidates().CandidateCount;
         RunCommand = new RelayCommand(_ => Run(), _ => CanRun && !IsRunning);
         ResetOffsetsCommand = new RelayCommand(_ => ResetOffsets(), _ => !IsRunning);
         CancelCommand = new RelayCommand(_ => CloseAction?.Invoke());
@@ -92,26 +88,35 @@ public sealed class JunctionDetailViewModel : ViewModelBase
             return $"{item.ItemNumber} · {item.Name}{rotated} · 기호선 {diagnostic?.CurveCount ?? 0}개 · 점 {diagnostic?.PointCount ?? 0}개 · 크기 {diagnostic?.WidthMm ?? 0:0.#}×{diagnostic?.HeightMm ?? 0:0.#} mm · 오프셋 {diagnostic?.OffsetResponse ?? "확인 안 함"} · {diagnostic?.Note ?? ""}";
         }).ToList();
     public JunctionDetailPreviewJunction? FirstJunction => _preview.Junctions.FirstOrDefault();
-    public int BackfillCandidateCount { get; }
     /// <summary>값 빈 배관 부재 수(수동 배치 밸브 등). 실행 시 자동 기록 대상.</summary>
     public int UntaggedCount { get; private set; }
-    public bool HasBackfillWork { get; }
-    public bool FromSelection { get => _fromSelection; private set => SetProperty(ref _fromSelection, value); }
-    public bool IsBackfillEnabled => HasBackfillWork;
     public bool CanPlaceTags => TagTypes.Count > 0;
     public bool IsRunning { get => _isRunning; private set { if (SetProperty(ref _isRunning, value)) RaiseCommands(); } }
     public string ResultText { get => _resultText; private set => SetProperty(ref _resultText, value); }
     public string ActiveTab { get => _activeTab; set => SetProperty(ref _activeTab, value); }
     public string StatusText { get => _statusText; private set => SetProperty(ref _statusText, value); }
-    public string TagTypeMessage => TagTypes.Count == 0 ? "태그 유형이 없습니다" : string.Empty;
-    public string BackfillMessage => HasBackfillWork ? (FromSelection ? "선택한 요소 기준" : "") : "재기록할 부재가 없습니다";
+    // 태그는 다중 카테고리 태그 유형만 씀(RevitJunctionDetailRepo.GetTagTypes)
+    public string TagTypeMessage => TagTypes.Count == 0
+        ? "다중 카테고리 태그 유형이 없습니다. 프로젝트에 다중 카테고리 태그 패밀리를 로드하면 번호 원을 붙일 수 있습니다."
+        : string.Empty;
     private double _previewCanvasWidth = MinCanvasWidth, _previewCanvasHeight = MinCanvasHeight;
-    private Geometry? _previewCenterGeometry;
+    private Geometry? _previewCenterGeometry, _previewHighlightCenterGeometry;
+    // 세트 선택(docs/290). 간격 바꿔 미리보기 다시 그려도 유지
+    private long _selectedSetId;
+    // 캔버스 좌표 중심선. 선택 바뀔 때 일반/강조 Geometry 다시 나눔
+    private List<(long SetId, double X1, double Y1, double X2, double Y2)> _centerSegments = [];
     /// <summary>캔버스 크기 = 그린 내용 범위 + 여백. Viewbox가 창에 맞춰 줄인다.</summary>
     public double PreviewCanvasWidth { get => _previewCanvasWidth; private set => SetProperty(ref _previewCanvasWidth, value); }
     public double PreviewCanvasHeight { get => _previewCanvasHeight; private set => SetProperty(ref _previewCanvasHeight, value); }
     /// <summary>주관(수평 부재 사이) + 세트(뿌리→마지막 부재) 중심선.</summary>
     public Geometry? PreviewCenterGeometry { get => _previewCenterGeometry; private set => SetProperty(ref _previewCenterGeometry, value); }
+    /// <summary>선택 세트 중심선만. 선택 없으면 null.</summary>
+    public Geometry? PreviewHighlightCenterGeometry { get => _previewHighlightCenterGeometry; private set => SetProperty(ref _previewHighlightCenterGeometry, value); }
+    /// <summary>선택 세트 Id. 0 = 선택 없음.</summary>
+    public long SelectedSetId => _selectedSetId;
+    public bool HasSelectedSet => _selectedSetId != 0;
+    // 세트 선택 중이면 일반 중심선 흐리게
+    public bool IsPreviewDimmed => HasSelectedSet;
     public bool HasOffsetSets => OffsetSets.Count > 0;
     public bool BulkAxisX { get => _bulkAxisX; set { if (SetProperty(ref _bulkAxisX, value)) OnPropertyChanged(nameof(BulkAxisY)); } }
     public bool BulkAxisY { get => !_bulkAxisX; set => BulkAxisX = !value; }
@@ -124,15 +129,13 @@ public sealed class JunctionDetailViewModel : ViewModelBase
           + (FirstJunction.Warnings.Count > 0 ? " · 경고: " + string.Join("; ", FirstJunction.Warnings) : "");
     public int TotalPartCount => _preview.MaterialPartCount;
     public bool HasJunctionTargets => _preview.Junctions.Any(x => x.PartCount > 0);
-    public bool CanRun => (CreateSchedule || CreateDrafting || CreatePlan || Backfill)
+    public bool CanRun => (CreateSchedule || CreateDrafting || CreatePlan)
         && (!(CreateSchedule || CreateDrafting) || TotalPartCount > 0 || UntaggedCount > 0)
-        && (!CreatePlan || HasJunctionTargets)
-        && (!Backfill || HasBackfillWork || CreateSchedule || CreateDrafting || CreatePlan);
+        && (!CreatePlan || HasJunctionTargets);
 
     public bool CreateSchedule { get => _createSchedule; set { if (SetProperty(ref _createSchedule, value)) RefreshSummary(); } }
     public bool CreateDrafting { get => _createDrafting; set { if (SetProperty(ref _createDrafting, value)) RefreshSummary(); } }
     public bool CreatePlan { get => _createPlan; set { if (SetProperty(ref _createPlan, value)) RefreshSummary(); } }
-    public bool Backfill { get => _backfill; set { if (SetProperty(ref _backfill, value)) RefreshSummary(); } }
     public bool ExpandVertical { get => _expandVertical; set { if (SetProperty(ref _expandVertical, value)) { RefreshPreview(); RefreshSummary(); } } }
     public int ViewScale
     {
@@ -144,9 +147,9 @@ public sealed class JunctionDetailViewModel : ViewModelBase
             RefreshPreview();
         }
     }
-    public bool PlaceTags { get => _placeTags; set { if (CanPlaceTags && SetProperty(ref _placeTags, value)) RefreshSummary(); } }
+    // 태그 유형 없으면 체크 해제로 보이고 실행에도 false(docs/291). 종전엔 체크된 채 비활성이라 안 바뀌는 것처럼 보였음
+    public bool PlaceTags { get => _placeTags && CanPlaceTags; set { if (CanPlaceTags && SetProperty(ref _placeTags, value)) RefreshSummary(); } }
     public bool UseTypeImage { get => _useTypeImage; set { if (SetProperty(ref _useTypeImage, value)) RefreshTableRows(); } }
-    public bool RedrawExistingDrafting { get => _redrawExistingDrafting; set { if (SetProperty(ref _redrawExistingDrafting, value)) RefreshSummary(); } }
     public JunctionDetailTagType? SelectedTagType { get => _selectedTagType; set => SetProperty(ref _selectedTagType, value); }
 
     // 캔버스 배율: 도면 1mm = 8px. 여백·최소 크기는 px
@@ -166,6 +169,8 @@ public sealed class JunctionDetailViewModel : ViewModelBase
             PreviewCanvasWidth = MinCanvasWidth;
             PreviewCanvasHeight = MinCanvasHeight;
             PreviewCenterGeometry = null;
+            PreviewHighlightCenterGeometry = null;
+            _centerSegments = [];
             return;
         }
 
@@ -191,11 +196,11 @@ public sealed class JunctionDetailViewModel : ViewModelBase
         PreviewCanvasHeight = Math.Max(MinCanvasHeight, height);
 
         foreach (var placement in scene.Placements) PreviewPoints.Add(CreateCanvasItem(placement, Cx, Cy));
-        PreviewCenterGeometry = BuildSegments(scene.CenterLines.Select(x => (Cx(x.X1), Cy(x.Y1), Cx(x.X2), Cy(x.Y2))));
+        _centerSegments = scene.CenterLines.Select(x => (x.SetId, Cx(x.X1), Cy(x.Y1), Cx(x.X2), Cy(x.Y2))).ToList();
         foreach (var dimension in dimensions)
             PreviewDimensions.Add(new JunctionPreviewDimensionItem(
                 BuildSegments(dimension.Lines.Select(x => (Cx(x.X1), Cy(x.Y1), Cx(x.X2), Cy(x.Y2)))),
-                Cx(dimension.LabelX), Cy(dimension.LabelY) - 8, dimension.Text));
+                Cx(dimension.LabelX), Cy(dimension.LabelY) - 8, dimension.Text, dimension.SetId));
         foreach (var warning in scene.Warnings) PreviewWarnings.Add(warning);
 
         RefreshTableRows();
@@ -214,6 +219,7 @@ public sealed class JunctionDetailViewModel : ViewModelBase
                 $"{(Math.Abs(local.Y) < 0.5 ? 0 : local.Y):0}", item.Connected ? "" : "연결 끊김",
                 setNumber.TryGetValue(item.SetId, out var number) ? $"세트 {number} · {set!.Axis}" : "—"));
         }
+        ApplySetHighlight();
         OnPropertyChanged(nameof(HeaderSummary));
         OnPropertyChanged(nameof(CanRun));
     }
@@ -233,11 +239,70 @@ public sealed class JunctionDetailViewModel : ViewModelBase
             var members = string.Join(" → ", items.Where(x => x.SetId == setId).OrderBy(x => x.Order)
                 .Select(x => x.ItemNumber > 0 ? $"{x.ItemNumber} {x.Name}" : x.Name));
             OffsetSets.Add(new JunctionOffsetSetViewModel(setId, i + 1, members, state.Axis, state.StepPaperMm,
-                () => ViewScale, OnSetChanged));
+                () => ViewScale, OnSetChanged) { IsSelected = setId == _selectedSetId });
         }
+        // 재조회 후 선택 세트가 사라졌으면 해제
+        if (!setIds.Contains(_selectedSetId)) SetSelectedSetId(0);
         OnPropertyChanged(nameof(HasOffsetSets));
         ApplyAllSetsCommand?.RaiseCanExecuteChanged();
     }
+
+    /// <summary>세트 카드 클릭. toggle = 같은 세트 다시 누르면 해제(입력 컨트롤 클릭은 false → 항상 선택).</summary>
+    public void SelectSet(JunctionOffsetSetViewModel set, bool toggle)
+    {
+        SetSelectedSetId(toggle && set.SetId == _selectedSetId ? 0 : set.SetId);
+        ApplySetHighlight();
+    }
+
+    /// <summary>Id로 선택(더블클릭 맞춤 시 첫 클릭이 지운 선택 복원용). 목록에 없는 Id면 무시.</summary>
+    public void SelectSet(long setId)
+    {
+        if (OffsetSets.All(x => x.SetId != setId)) return;
+        SetSelectedSetId(setId);
+        ApplySetHighlight();
+    }
+
+    /// <summary>캔버스 빈 곳 클릭 → 선택 해제.</summary>
+    public void ClearSetSelection()
+    {
+        if (_selectedSetId == 0) return;
+        SetSelectedSetId(0);
+        ApplySetHighlight();
+    }
+
+    private void SetSelectedSetId(long setId)
+    {
+        if (_selectedSetId == setId) return;
+        _selectedSetId = setId;
+        OnPropertyChanged(nameof(SelectedSetId));
+        OnPropertyChanged(nameof(HasSelectedSet));
+        OnPropertyChanged(nameof(IsPreviewDimmed));
+    }
+
+    // 미리보기 재생성 없이 항목 교체만. 표·오프셋 표 스크롤 유지
+    private void ApplySetHighlight()
+    {
+        foreach (var set in OffsetSets) set.IsSelected = set.SetId == _selectedSetId;
+        for (var i = 0; i < PreviewPoints.Count; i++)
+        {
+            var highlight = HighlightOf(PreviewPoints[i].Item.SetId);
+            if (PreviewPoints[i].Highlight != highlight) PreviewPoints[i] = PreviewPoints[i] with { Highlight = highlight };
+        }
+        for (var i = 0; i < PreviewDimensions.Count; i++)
+        {
+            var highlight = HighlightOf(PreviewDimensions[i].SetId);
+            if (PreviewDimensions[i].Highlight != highlight) PreviewDimensions[i] = PreviewDimensions[i] with { Highlight = highlight };
+        }
+        PreviewCenterGeometry = BuildSegments(_centerSegments.Where(x => !HasSelectedSet || x.SetId != _selectedSetId)
+            .Select(x => (x.X1, x.Y1, x.X2, x.Y2)));
+        PreviewHighlightCenterGeometry = HasSelectedSet
+            ? BuildSegments(_centerSegments.Where(x => x.SetId == _selectedSetId).Select(x => (x.X1, x.Y1, x.X2, x.Y2)))
+            : null;
+    }
+
+    // 수평 부재(SetId 0)는 선택 중이면 흐림
+    private SetHighlight HighlightOf(long setId)
+        => !HasSelectedSet ? SetHighlight.Normal : setId == _selectedSetId ? SetHighlight.Highlighted : SetHighlight.Dimmed;
 
     private void OnSetChanged()
     {
@@ -309,15 +374,15 @@ public sealed class JunctionDetailViewModel : ViewModelBase
         {
             var x = Math.Max(a.MaxX, b.MaxX) + DimensionGapPaperMm;
             return new DimensionDraft([(x, a.Y, x, b.Y), (x - 1, a.Y, x + 1, a.Y), (x - 1, b.Y, x + 1, b.Y)],
-                x + 1, (a.Y + b.Y) / 2, text);
+                x + 1, (a.Y + b.Y) / 2, text, a.Item.SetId);
         }
         var y = Math.Max(a.MaxY, b.MaxY) + DimensionGapPaperMm;
         return new DimensionDraft([(a.X, y, b.X, y), (a.X, y - 1, a.X, y + 1), (b.X, y - 1, b.X, y + 1)],
-            Math.Min(a.X, b.X), y + 3, text);
+            Math.Min(a.X, b.X), y + 3, text, a.Item.SetId);
     }
 
     private sealed record DimensionDraft(IReadOnlyList<(double X1, double Y1, double X2, double Y2)> Lines,
-        double LabelX, double LabelY, string Text)
+        double LabelX, double LabelY, string Text, long SetId)
     {
         public double X1 => Lines.Min(x => Math.Min(x.X1, x.X2));
         public double X2 => Lines.Max(x => Math.Max(x.X1, x.X2));
@@ -328,9 +393,11 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     /// <summary>캔버스 부재 하나. X·Y = 부재 원점(px). 나머지 Left/Top은 X·Y 기준 상대 위치, Left~Bottom은 절대 범위.</summary>
     public sealed record JunctionPreviewCanvasItem(JunctionPreviewItem Item, double X, double Y,
         Geometry? ShapeGeometry, bool HasShape, double SymbolLeft, double SymbolTop,
-        double NumberLeft, double NumberTop, double Left, double Right, double Top, double Bottom, string ToolTip);
+        double NumberLeft, double NumberTop, double Left, double Right, double Top, double Bottom, string ToolTip,
+        SetHighlight Highlight = SetHighlight.Normal);
 
-    public sealed record JunctionPreviewDimensionItem(Geometry? Geometry, double LabelLeft, double LabelTop, string Text);
+    public sealed record JunctionPreviewDimensionItem(Geometry? Geometry, double LabelLeft, double LabelTop, string Text,
+        long SetId = 0, SetHighlight Highlight = SetHighlight.Normal);
 
     private void RefreshTableRows()
     {
@@ -354,9 +421,8 @@ public sealed class JunctionDetailViewModel : ViewModelBase
               + (CreatePlan && ExpandVertical ? $" · 모델에 심볼오프셋 {OffsetRows.Count(x => x.WorldUpMm != "0" && x.Status.Length == 0)}개 기록" : "")
             : (CreatePlan && !HasJunctionTargets ? "평면 상세도 대상 배관 이음쇠·밸브류가 없습니다."
                 : (CreateSchedule || CreateDrafting) && TotalPartCount == 0 ? "재료표 값이 있는 배관 부재가 없습니다."
-                : "값 재기록 대상이 없습니다.");
+                : "작성할 대상이 없습니다.");
         if (UntaggedCount > 0) SummaryLine += $" · 값 없는 배관 부재 {UntaggedCount}개 자동 기록";
-        if (CreateDrafting && RedrawExistingDrafting) SummaryLine += " · 기존 도면 뷰의 주석·치수가 지워집니다.";
         if (CreatePlan && FirstJunction?.Items.Any(x => !x.Connected) == true)
             SummaryLine += " · 뿌리와 이어지지 않은 부재는 오프셋 없이 처리합니다.";
         OnPropertyChanged(nameof(SummaryLine));
@@ -370,9 +436,10 @@ public sealed class JunctionDetailViewModel : ViewModelBase
         ResultLines.Clear();
         try
         {
-            var options = new JunctionDetailOptions(CreateSchedule, CreateDrafting, CreatePlan, Backfill,
+            // Backfill false 고정: 값 빈 부재 자동 기록만(docs/291)
+            var options = new JunctionDetailOptions(CreateSchedule, CreateDrafting, CreatePlan, false,
                 ExpandVertical, JunctionDetailParameters.StepPaperMm, ViewScale, PlaceTags, SelectedTagType?.Id ?? 0,
-                UseTypeImage, RedrawExistingDrafting, JunctionExpandAxis.Y, true,
+                UseTypeImage, JunctionExpandAxis.Y, true,
                 OffsetSets.Select(x => x.ToOffset()).ToList());
             var result = _runUseCase.Execute(options);
             if (result.Backfill is { } backfill)
@@ -442,7 +509,8 @@ public sealed class JunctionDetailViewModel : ViewModelBase
             ResultLines.Add("[밸브실 배관]으로 관을 새로 생성하거나, 기존 관·곡관·T형을 선택한 뒤 이 버튼을 다시 눌러 값 재기록을 진행하세요.");
             return;
         }
-        ResultLines.Add($"{label}: 생성 {result.Created.Count}개, 갱신 {result.Updated.Count}개, 건너뜀 {result.Skipped.Count}개");
+        ResultLines.Add($"{label}: 생성 {result.Created.Count}개, 갱신 {result.Updated.Count}개, 건너뜀 {result.Skipped.Count}개"
+            + (result.Unchanged.Count > 0 ? $", 변경 없음 {result.Unchanged.Count}개" : ""));
         foreach (var skipped in result.Skipped) ResultLines.Add("건너뜀: " + skipped);
     }
 

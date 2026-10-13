@@ -13,6 +13,7 @@ public sealed class JunctionOffsetSetViewModel : ViewModelBase
     private double _stepPaperMm;
     private string _stepText;
     private bool _hasError;
+    private bool _isSelected;
 
     public JunctionOffsetSetViewModel(long setId, int number, string members, JunctionExpandAxis axis,
         double stepPaperMm, Func<int> viewScale, Action changed)
@@ -38,6 +39,8 @@ public sealed class JunctionOffsetSetViewModel : ViewModelBase
     public bool IsX { get => _axis == JunctionExpandAxis.X; set { if (value) SetAxis(JunctionExpandAxis.X); } }
     public bool IsY { get => _axis == JunctionExpandAxis.Y; set { if (value) SetAxis(JunctionExpandAxis.Y); } }
     public bool HasError { get => _hasError; private set => SetProperty(ref _hasError, value); }
+    // 카드 테두리 표시용. 선택 원본은 JunctionDetailViewModel.SelectedSetId
+    public bool IsSelected { get => _isSelected; set => SetProperty(ref _isSelected, value); }
 
     // 입력 중 "-"·빈칸은 숫자 아님 → 이전 값 유지, 빨간 표시만
     public string StepText
