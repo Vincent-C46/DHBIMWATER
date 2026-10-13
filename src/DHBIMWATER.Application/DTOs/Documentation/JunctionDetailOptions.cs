@@ -17,7 +17,8 @@ public sealed record JunctionDetailOptions(
     bool UseTypeImage = true,
     bool RedrawExistingDrafting = false,
     JunctionExpandAxis ExpandAxis = JunctionExpandAxis.Y,
-    bool ExpandPositive = true);
+    bool ExpandPositive = true,
+    IReadOnlyList<JunctionSetOffset>? SetOffsets = null);
 
 public sealed record JunctionDetailResult(IReadOnlyList<string> Created, IReadOnlyList<string> Updated,
     IReadOnlyList<string> Reset, IReadOnlyList<string> Skipped, IReadOnlyList<string> Warnings);
@@ -29,7 +30,13 @@ public sealed record JunctionDetailViewOptions(
     bool PlaceTags,
     long TagTypeId,
     JunctionExpandAxis ExpandAxis = JunctionExpandAxis.Y,
-    bool ExpandPositive = true);
+    bool ExpandPositive = true,
+    IReadOnlyList<JunctionSetOffset>? SetOffsets = null)
+{
+    // 세트 설정 없으면 공통 축·간격(ExpandPositive = 부호)
+    public JunctionSetOffset For(long setId)
+        => JunctionSetOffsets.For(SetOffsets, setId, ExpandAxis, ExpandPositive ? StepPaperMm : -StepPaperMm);
+}
 
 public sealed record JunctionDetailRunResult(
     PipeMaterialBackfillResult? Backfill,
@@ -39,8 +46,8 @@ public sealed record JunctionDetailRunResult(
     IReadOnlyList<string> Warnings);
 
 public sealed record JunctionDetailPreviewJunction(string JunctionId, string RoomType,
-    int PartCount, IReadOnlyList<JunctionPreviewItem> VerticalItems, IReadOnlyList<PipeMaterialRow> TableRows,
-    IReadOnlyList<string> Warnings);
+    int PartCount, IReadOnlyList<JunctionPreviewItem> Items, IReadOnlyList<PipeMaterialRow> TableRows,
+    IReadOnlyList<string> Warnings, IReadOnlyList<JunctionPreviewLink>? Links = null);
 
 public sealed record JunctionDetailPreview(IReadOnlyList<JunctionDetailPreviewJunction> Junctions,
     IReadOnlyList<PipeMaterialRow> UnassignedRows, IReadOnlyList<JunctionDetailTagType> TagTypes,

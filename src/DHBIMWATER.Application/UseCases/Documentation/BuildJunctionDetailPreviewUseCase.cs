@@ -29,18 +29,28 @@ public sealed class BuildJunctionDetailPreviewUseCase
             .Select(group =>
             {
                 var chain = JunctionVerticalChain.Resolve(group.JunctionId, group.Nodes);
-                var order = chain.Slots.ToDictionary(x => x.ElementId, x => x.Order);
+                var slots = chain.Slots.Select((x, i) => (Slot: x, Index: i)).ToDictionary(x => x.Slot.ElementId);
+                var vertical = group.Nodes.Where(x => x.Connectors.Count > 0 &&
+                        x.Connectors.All(c => Math.Abs(c.Dz) >= JunctionVerticalChain.VerticalCosine))
+                    .Select(x => x.Id).ToHashSet();
+                // 캔버스가 실제 평면을 그리도록 수평 부재(T관·단관)까지 전부 넣음. 세트 순서 = 사슬 발견 순서
                 var items = _junctions.GetPreviewItems(group)
-                    .Select(x => x with { Order = order.TryGetValue(x.ElementId, out var value) ? value : null })
-                    .Where(x => x.Order is not null || chain.Orphans.Contains(x.ElementId))
-                    .Select(x => chain.Orphans.Contains(x.ElementId) ? x with { Order = null, Connected = false } : x)
-                    .OrderBy(x => x.Order ?? int.MaxValue).ThenBy(x => x.ItemNumber).ToList();
+                    .Select(x => slots.TryGetValue(x.ElementId, out var slot)
+                        ? x with { Order = slot.Slot.Order, SetId = slot.Slot.SetId, IsVertical = true, Connected = true }
+                        : x with { Order = null, SetId = 0, IsVertical = vertical.Contains(x.ElementId),
+                            Connected = !chain.Orphans.Contains(x.ElementId) })
+                    .OrderBy(x => slots.TryGetValue(x.ElementId, out var slot) ? slot.Index : -1)
+                    .ThenBy(x => x.ItemNumber).ToList();
+                var links = group.Nodes.SelectMany(node => node.Connectors
+                        .Where(c => c.PartnerId is { } partner && partner != node.Id)
+                        .Select(c => new JunctionPreviewLink(Math.Min(node.Id, c.PartnerId!.Value), Math.Max(node.Id, c.PartnerId!.Value))))
+                    .Distinct().ToList();
                 return new JunctionDetailPreviewJunction(group.JunctionId, _junctions.GetRoomType(),
                     group.Nodes.Count, items, PipeMaterialTable.Build(parts, group.JunctionId),
-                    chain.Warnings.Concat(group.Warnings ?? []).ToList());
+                    chain.Warnings.Concat(group.Warnings ?? []).ToList(), links);
             }).ToList();
         var diagnostics = new List<JunctionSymbolShapeDiagnostic>();
-        var elementNames = previews.SelectMany(x => x.VerticalItems).ToDictionary(x => x.ElementId, x => x.Name);
+        var elementNames = previews.SelectMany(x => x.Items).ToDictionary(x => x.ElementId, x => x.Name);
         var elementIds = elementNames.Keys.ToList();
         if (elementIds.Count > 0)
         {
@@ -55,7 +65,7 @@ public sealed class BuildJunctionDetailPreviewUseCase
                         diagnostics.AddRange(result.Diagnostics);
                         previews = previews.Select(preview => preview with
                         {
-                            VerticalItems = preview.VerticalItems.Select(item =>
+                            Items = preview.Items.Select(item =>
                                 item with { Shape = result.Shapes.GetValueOrDefault(item.ElementId) }).ToList()
                         }).ToList();
                     }

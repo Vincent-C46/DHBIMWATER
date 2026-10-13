@@ -104,15 +104,10 @@ internal sealed class RevitPipeMaterialScheduleRepo : IPipeMaterialScheduleRepo
         foreach (var name in TrailingFields)
             AddField(definition, Find, name, missing);
 
-        // 다중 카테고리 일람표는 카테고리로 범위를 좁힐 수 없다. 지금까지 카테고리가 하던 역할을 DH_Addin 필터가 대신한다 —
-        // 없으면 DHBIMWATER가 만들지 않은 밸브류·이음쇠까지 표에 섞인다(docs/133 § 3-5).
-        var addinField = AddField(definition, Find, ValvePipingParameters.Addin, missing);
-        if (addinField is not null)
-        {
-            addinField.IsHidden = true;
-            definition.AddFilter(new ScheduleFilter(
-                addinField.FieldId, ScheduleFilterType.Equal, ValvePipingParameters.AddinValue));
-        }
+        // 다중 카테고리 일람표는 카테고리로 범위 못 좁힘. DH_Addin 필터 대신 DH_부재번호 보유 여부로 거름 —
+        // 이 매개변수는 배관 밸브류·이음쇠에만 바인딩. 수동 배치 부재(DH_Addin 빈칸)도 표에 들어감(docs/287 § A2).
+        if (numberFieldId is not null)
+            definition.AddFilter(new ScheduleFilter(numberFieldId, ScheduleFilterType.HasParameter));
 
         // 격점 필터는 DH_격점번호 열이 일람표에 있어야 걸 수 있다. 도면에는 보일 필요가 없으니 숨긴다.
         if (!string.IsNullOrWhiteSpace(junctionId))

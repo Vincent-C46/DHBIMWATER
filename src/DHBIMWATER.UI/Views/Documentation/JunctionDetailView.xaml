@@ -109,21 +109,60 @@
                         </StackPanel>
                     </GroupBox>
 
-                    <!-- 펼침 항상 켬, 방향 +, 축척 1/50 고정. 축·간격만 입력 -->
-                    <GroupBox Header="2. 수직분기 오프셋">
-                        <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <RadioButton Content="X축" GroupName="ExpandAxis" Tag="6,0,0,6" Margin="0" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding ExpandX, Mode=TwoWay}"/>
-                                <RadioButton Content="Y축" GroupName="ExpandAxis" Tag="0,6,6,0" Margin="-1,0,0,0" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding ExpandY, Mode=TwoWay}"/>
-                            </StackPanel>
-                            <TextBlock Grid.Column="1" Text="부재 간격" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,8,0"/>
-                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                <TextBox Width="60" HorizontalContentAlignment="Right" ToolTip="도면 위 간격 5~10 mm"
-                                         Text="{Binding StepPaperMm, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat={}{0:0.#}}"/>
-                                <TextBlock Text="mm" VerticalAlignment="Center" Margin="6,0,0,0"/>
-                            </StackPanel>
-                        </Grid>
+                    <!-- 펼침 항상 켬, 축척 1/50 고정. 수직분기 세트(수평 부재에서 이어진 수직 구간)마다 축·간격 입력 -->
+                    <GroupBox Header="2. 수직분기 오프셋 (세트별)">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,0,0,6" FontWeight="Normal"
+                                       Text="간격은 도면 mm. 실제 이동 = 순서 × 간격 × 축척. 음수 = 반대 방향, 0 = 펼치지 않음."/>
+                            <TextBlock Text="수직분기 세트가 없습니다." FontWeight="Normal">
+                                <TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource HintText}"><Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasOffsetSets, Mode=OneWay}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                                </Style.Triggers></Style></TextBlock.Style>
+                            </TextBlock>
+                            <ItemsControl ItemsSource="{Binding OffsetSets, Mode=OneWay}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{StaticResource CommonBorderBrush}" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,0,0,6">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Label, Mode=OneWay}"/>
+                                                <TextBlock Text="{Binding Members, Mode=OneWay}" Style="{StaticResource HintText}" TextWrapping="Wrap" FontWeight="Normal"/>
+                                                <Grid Margin="0,6,0,0">
+                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <RadioButton Content="X축" GroupName="{Binding AxisGroupName, Mode=OneWay}" Tag="6,0,0,6" Margin="0" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding IsX, Mode=TwoWay}"/>
+                                                        <RadioButton Content="Y축" GroupName="{Binding AxisGroupName, Mode=OneWay}" Tag="0,6,6,0" Margin="-1,0,0,0" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding IsY, Mode=TwoWay}"/>
+                                                    </StackPanel>
+                                                    <TextBlock Grid.Column="1" Text="간격" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,8,0" FontWeight="Normal"/>
+                                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <!-- 입력 0.3초 뒤 반영(포커스 안 잃어도). 숫자 아니면 이전 값 유지 + 빨간 테두리 -->
+                                                        <TextBox Width="64" HorizontalContentAlignment="Right" ToolTip="도면 위 간격(mm). 음수 = 반대 방향"
+                                                                 Text="{Binding StepText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=300}">
+                                                            <TextBox.Style><Style TargetType="TextBox" BasedOn="{StaticResource PrimaryTextBoxStyle}"><Style.Triggers>
+                                                                <DataTrigger Binding="{Binding HasError, Mode=OneWay}" Value="True"><Setter Property="BorderBrush" Value="#E74C3C"/></DataTrigger>
+                                                            </Style.Triggers></Style></TextBox.Style>
+                                                        </TextBox>
+                                                        <TextBlock Text="mm" VerticalAlignment="Center" Margin="6,0,0,0" FontWeight="Normal"/>
+                                                    </StackPanel>
+                                                </Grid>
+                                                <TextBlock Text="{Binding DirectionText, Mode=OneWay}" Style="{StaticResource HintText}" FontWeight="Normal"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <!-- 모든 세트 같은 값 -->
+                            <Grid Margin="0,4,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="모든 세트" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="Normal"/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <RadioButton Content="X축" GroupName="BulkAxis" Tag="6,0,0,6" Margin="0" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding BulkAxisX, Mode=TwoWay}"/>
+                                    <RadioButton Content="Y축" GroupName="BulkAxis" Tag="0,6,6,0" Margin="-1,0,0,0" Style="{StaticResource SegmentRadioButtonStyle}" IsChecked="{Binding BulkAxisY, Mode=TwoWay}"/>
+                                </StackPanel>
+                                <TextBox Grid.Column="3" Width="64" HorizontalContentAlignment="Right" Margin="8,0,6,0" VerticalAlignment="Center"
+                                         Text="{Binding BulkStepText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                <Button Grid.Column="4" Content="적용" Command="{Binding ApplyAllSetsCommand, Mode=OneWay}" Style="{StaticResource CancelButtonStyle}" MinWidth="0" Padding="10,2"/>
+                            </Grid>
+                        </StackPanel>
                     </GroupBox>
 
                     <GroupBox Header="3. 상세도 · 표 옵션">
@@ -161,7 +200,7 @@
                             <!-- 휠 확대·축소, 가운데 버튼 끌기 이동, 더블클릭 맞춤. 보기 전용 변환이라 code-behind 처리 -->
                             <Border Grid.Row="0" ClipToBounds="True" Margin="8">
                             <Viewbox Stretch="Uniform">
-                                <Canvas x:Name="PreviewCanvas" Width="760" Height="450" Background="{StaticResource WhiteBrush}"
+                                <Canvas x:Name="PreviewCanvas" Width="{Binding PreviewCanvasWidth, Mode=OneWay}" Height="{Binding PreviewCanvasHeight, Mode=OneWay}" Background="{StaticResource WhiteBrush}"
                                         MouseWheel="OnPreviewMouseWheel" MouseDown="OnPreviewMouseDown"
                                         MouseMove="OnPreviewMouseMove" MouseUp="OnPreviewMouseUp">
                                     <Canvas.RenderTransform>
@@ -170,33 +209,9 @@
                                             <TranslateTransform x:Name="PreviewTranslate"/>
                                         </TransformGroup>
                                     </Canvas.RenderTransform>
-                                    <!-- 밸브실 점선 박스: 수직 사슬 높이에 맞춰 위로 늘어난다. -->
-                                    <Border Canvas.Left="{Binding PreviewBoxLeft, Mode=OneWay}" Canvas.Top="{Binding PreviewBoxTop, Mode=OneWay}" Width="{Binding PreviewBoxWidth, Mode=OneWay}" Height="{Binding PreviewBoxHeight, Mode=OneWay}"
-                                            BorderBrush="{StaticResource TextSubBrush}" BorderThickness="1">
-                                        <Border.Background><SolidColorBrush Color="Transparent"/></Border.Background>
-                                        <TextBlock Text="밸브실" Style="{StaticResource HintText}" Margin="6,4,0,0" VerticalAlignment="Top"/>
-                                    </Border>
-                                    <Line X1="30" Y1="370" X2="730" Y2="370" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1" StrokeDashArray="6 3 1.5 3"/>
-                                    <Line X1="270" Y1="370" X2="{Binding PreviewStackRight, Mode=OneWay}" Y2="{Binding PreviewStackTop, Mode=OneWay}" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1" StrokeDashArray="6 3 1.5 3"/>
-                                    <Rectangle Canvas.Left="50" Canvas.Top="355" Width="150" Height="30" Style="{StaticResource SymbolLine}" Fill="{StaticResource WhiteBrush}"/>
-                                    <Rectangle Canvas.Left="200" Canvas.Top="355" Width="140" Height="30" Style="{StaticResource SymbolLine}" Fill="{StaticResource WhiteBrush}"/>
-                                    <Rectangle Canvas.Left="262" Canvas.Top="337" Width="16" Height="18" Style="{StaticResource SymbolLine}" Fill="{StaticResource WhiteBrush}"/>
-                                    <Rectangle Canvas.Left="340" Canvas.Top="355" Width="220" Height="30" Style="{StaticResource SymbolLine}" Fill="{StaticResource WhiteBrush}"/>
-                                    <Ellipse Canvas.Left="192" Canvas.Top="351" Width="16" Height="38" Style="{StaticResource SymbolLine}" Fill="{StaticResource WhiteBrush}"/>
-                                    <Ellipse Canvas.Left="332" Canvas.Top="351" Width="16" Height="38" Style="{StaticResource SymbolLine}" Fill="{StaticResource WhiteBrush}"/>
-                                    <Grid Canvas.Left="115" Canvas.Top="396" Width="20" Height="20">
-                                        <Ellipse Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1.4" Fill="{StaticResource WhiteBrush}"/>
-                                        <TextBlock Text="1" FontSize="11" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    </Grid>
-                                    <Grid Canvas.Left="260" Canvas.Top="396" Width="20" Height="20">
-                                        <Ellipse Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1.4" Fill="{StaticResource WhiteBrush}"/>
-                                        <TextBlock Text="2" FontSize="11" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    </Grid>
-                                    <Grid Canvas.Left="440" Canvas.Top="396" Width="20" Height="20">
-                                        <Ellipse Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1.4" Fill="{StaticResource WhiteBrush}"/>
-                                        <TextBlock Text="1" FontSize="11" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    </Grid>
-                                    <!-- 수직분기 부재: 컨테이너 위치(X,Y)가 심볼 중심이다. 번호 원은 왼쪽, 명칭·규격은 오른쪽. -->
+                                    <!-- 중심선: 주관(수평 부재 사이) + 세트(뿌리 → 마지막 부재) -->
+                                    <Path Data="{Binding PreviewCenterGeometry, Mode=OneWay}" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1" StrokeDashArray="6 3 1.5 3" IsHitTestVisible="False"/>
+                                    <!-- 격점 부재 전부(실제 평면 위치). 컨테이너 위치(X,Y) = 부재 원점. 번호 원 = Revit 태그 자리. 명칭은 툴팁 -->
                                     <ItemsControl ItemsSource="{Binding PreviewPoints, Mode=OneWay}">
                                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                                         <ItemsControl.ItemContainerStyle>
@@ -208,73 +223,55 @@
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
                                                 <Canvas Width="0" Height="0">
-                                                    <Grid Width="20" Height="20" Canvas.Left="{Binding NumberLeft, Mode=OneWay}" Canvas.Top="{Binding NumberTop, Mode=OneWay}">
+                                                    <Grid Width="20" Height="20" Canvas.Left="{Binding NumberLeft, Mode=OneWay}" Canvas.Top="{Binding NumberTop, Mode=OneWay}" ToolTip="{Binding ToolTip, Mode=OneWay}">
                                                         <Grid.Style><Style TargetType="Grid"><Style.Triggers>
                                                             <DataTrigger Binding="{Binding Item.ItemNumber, Mode=OneWay}" Value="0"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
                                                         </Style.Triggers></Style></Grid.Style>
                                                         <Ellipse Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1.4" Fill="{StaticResource WhiteBrush}"/>
                                                         <TextBlock Text="{Binding Item.ItemNumber, Mode=OneWay}" FontSize="11" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                                     </Grid>
-                                                    <Path Canvas.Left="{Binding SymbolLeft, Mode=OneWay}" Canvas.Top="{Binding SymbolTop, Mode=OneWay}"
-                                                          Data="{Binding ShapeGeometry, Mode=OneWay}" StrokeThickness="1.4" IsHitTestVisible="False">
+                                                    <!-- 기호선 좌표가 부재 원점 기준이라 (0,0)에 둔다. 연결 끊긴 부재 = 빨강 -->
+                                                    <Path Data="{Binding ShapeGeometry, Mode=OneWay}" StrokeThickness="1.4" ToolTip="{Binding ToolTip, Mode=OneWay}">
                                                         <Path.Style><Style TargetType="Path" BasedOn="{StaticResource SymbolLine}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers>
                                                             <DataTrigger Binding="{Binding HasShape, Mode=OneWay}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger>
+                                                            <DataTrigger Binding="{Binding Item.Connected, Mode=OneWay}" Value="False"><Setter Property="Stroke" Value="#E74C3C"/></DataTrigger>
                                                         </Style.Triggers></Style></Path.Style>
                                                     </Path>
+                                                    <!-- 기호선 없는 패밀리: 종류별 대체 기호(흐리게) -->
                                                     <ContentControl Canvas.Left="{Binding SymbolLeft, Mode=OneWay}" Canvas.Top="{Binding SymbolTop, Mode=OneWay}" Width="44" Height="44" RenderTransformOrigin="0.5,0.5"
-                                                                    Content="{Binding Item.SymbolKind, Mode=OneWay}">
+                                                                    Content="{Binding Item.SymbolKind, Mode=OneWay}" Opacity="0.55" ToolTip="{Binding ToolTip, Mode=OneWay}">
                                                         <ContentControl.Style><Style TargetType="ContentControl" BasedOn="{StaticResource JunctionSymbolStyle}"><Style.Triggers>
                                                             <DataTrigger Binding="{Binding HasShape, Mode=OneWay}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
                                                         </Style.Triggers></Style></ContentControl.Style>
                                                         <ContentControl.RenderTransform><ScaleTransform ScaleX="0.8" ScaleY="0.8"/></ContentControl.RenderTransform>
                                                     </ContentControl>
-                                                    <StackPanel Canvas.Left="{Binding LabelLeft, Mode=OneWay}" Canvas.Top="{Binding LabelTop, Mode=OneWay}">
-                                                        <TextBlock Text="{Binding Item.Name, Mode=OneWay}" FontSize="12" Foreground="{StaticResource MainTextBrush}"/>
-                                                        <TextBlock Text="{Binding Item.Spec, Mode=OneWay}" FontSize="10" Foreground="{StaticResource TextSubBrush}"/>
-                                                    </StackPanel>
                                 </Canvas>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
 
-                                    <!-- 첫 두 수직 부재 사이 간격 치수 -->
-                                    <Canvas>
-                                        <Canvas.Style><Style TargetType="Canvas"><Setter Property="Visibility" Value="Collapsed"/>
-                                            <Style.Triggers><MultiDataTrigger><MultiDataTrigger.Conditions>
-                                                <Condition Binding="{Binding IsPreviewDimVisible, Mode=OneWay}" Value="True"/>
-                                                <Condition Binding="{Binding IsPreviewX, Mode=OneWay}" Value="False"/>
-                                            </MultiDataTrigger.Conditions><Setter Property="Visibility" Value="Visible"/></MultiDataTrigger></Style.Triggers>
-                                        </Style></Canvas.Style>
-                                        <Line X1="520" Y1="{Binding PreviewDimTop, Mode=OneWay}" X2="528" Y2="{Binding PreviewDimTop, Mode=OneWay}" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1"/>
-                                        <Line X1="520" Y1="{Binding PreviewDimBottom, Mode=OneWay}" X2="528" Y2="{Binding PreviewDimBottom, Mode=OneWay}" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1"/>
-                                        <Line X1="524" Y1="{Binding PreviewDimTop, Mode=OneWay}" X2="524" Y2="{Binding PreviewDimBottom, Mode=OneWay}" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1"/>
-                                        <TextBlock Canvas.Left="534" Canvas.Top="{Binding PreviewDimTop, Mode=OneWay}" Foreground="{StaticResource PrimaryBrush}" FontSize="11"
-                                                   Text="{Binding StepPaperMm, Mode=OneWay, StringFormat={}{0:F1}mm}" Margin="0,4,0,0"/>
-                                    </Canvas>
-                                    <Canvas>
-                                        <Canvas.Style><Style TargetType="Canvas"><Setter Property="Visibility" Value="Collapsed"/>
-                                            <Style.Triggers><MultiDataTrigger><MultiDataTrigger.Conditions>
-                                                <Condition Binding="{Binding IsPreviewDimVisible, Mode=OneWay}" Value="True"/>
-                                                <Condition Binding="{Binding IsPreviewX, Mode=OneWay}" Value="True"/>
-                                            </MultiDataTrigger.Conditions><Setter Property="Visibility" Value="Visible"/></MultiDataTrigger></Style.Triggers>
-                                        </Style></Canvas.Style>
-                                        <Line X1="{Binding PreviewDimLeft, Mode=OneWay}" Y1="406" X2="{Binding PreviewDimLeft, Mode=OneWay}" Y2="418" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1"/>
-                                        <Line X1="{Binding PreviewDimRight, Mode=OneWay}" Y1="406" X2="{Binding PreviewDimRight, Mode=OneWay}" Y2="418" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1"/>
-                                        <Line X1="{Binding PreviewDimLeft, Mode=OneWay}" Y1="412" X2="{Binding PreviewDimRight, Mode=OneWay}" Y2="412" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1"/>
-                                        <TextBlock Canvas.Left="{Binding PreviewDimLabelLeft, Mode=OneWay}" Canvas.Top="420" Foreground="{StaticResource PrimaryBrush}" FontSize="11" Text="{Binding StepPaperMm, Mode=OneWay, StringFormat={}{0:F1}mm}"/>
-                                    </Canvas>
-                                    <!-- 시트 위쪽 표시 -->
-                                    <Line X1="735" Y1="350" X2="735" Y2="290" Stroke="{StaticResource TextSubBrush}" StrokeThickness="1"/>
-                                    <Polyline Points="731,298 735,290 739,298" Stroke="{StaticResource TextSubBrush}" StrokeThickness="1"/>
-                                    <TextBlock Canvas.Left="728" Canvas.Top="268" Text="위" FontSize="11" Foreground="{StaticResource TextSubBrush}"/>
+                                    <!-- 세트별 간격 치수(순서 1→2) -->
+                                    <ItemsControl ItemsSource="{Binding PreviewDimensions, Mode=OneWay}" IsHitTestVisible="False">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Canvas>
+                                                    <Path Data="{Binding Geometry, Mode=OneWay}" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="1"/>
+                                                    <TextBlock Canvas.Left="{Binding LabelLeft, Mode=OneWay}" Canvas.Top="{Binding LabelTop, Mode=OneWay}"
+                                                               Text="{Binding Text, Mode=OneWay}" Foreground="{StaticResource PrimaryBrush}" FontSize="11"/>
+                                                </Canvas>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
                                 </Canvas>
                             </Viewbox>
                             </Border>
                             <StackPanel Grid.Row="1" Margin="10,0,10,6">
-                                <TextBlock Style="{StaticResource HintText}"
-                                           Text="개략도입니다. 주관(가로)은 고정 도형이고, 수직분기 부재만 실제 순서·종류·간격을 반영합니다. 낮음(Coarse) 상세수준 기준입니다."/>
-                                <TextBlock Style="{StaticResource HintText}" Foreground="{StaticResource PrimaryBrush}"
-                                           Text="{Binding PreviewExtentMessage, Mode=OneWay}"/>
+                                <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap"
+                                           Text="패밀리 기호선을 실제 평면 위치에 그린 예상도입니다(낮음 상세수준). 기호선 없는 패밀리는 대체 기호, 연결 끊긴 부재는 빨간색입니다. 부재에 마우스를 올리면 명칭이 보입니다."/>
+                                <ItemsControl ItemsSource="{Binding PreviewWarnings, Mode=OneWay}">
+                                    <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding Mode=OneWay, StringFormat=⚠ {0}}" Foreground="#E74C3C" FontSize="11" TextWrapping="Wrap"/></DataTemplate></ItemsControl.ItemTemplate>
+                                </ItemsControl>
                             </StackPanel>
                         </Grid>
                     </TabItem>
@@ -302,6 +299,7 @@
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="번호" Binding="{Binding ItemNumber, Mode=OneWay}" Width="45"/>
                                 <DataGridTextColumn Header="부재" Binding="{Binding Name, Mode=OneWay}" Width="*"/>
+                                <DataGridTextColumn Header="세트" Binding="{Binding Set, Mode=OneWay}" Width="80"/>
                                 <DataGridTextColumn Header="순번" Binding="{Binding Order, Mode=OneWay}" Width="45"/>
                                 <DataGridTextColumn Header="월드 이동(mm)" Binding="{Binding WorldUpMm, Mode=OneWay}" Width="110"/>
                                 <DataGridTextColumn Header="회전" Binding="{Binding Rotation, Mode=OneWay}" Width="55"/>
@@ -310,7 +308,7 @@
                                 <DataGridTextColumn Header="상태" Binding="{Binding Status, Mode=OneWay}" Width="80"/>
                             </DataGrid.Columns>
                         </DataGrid>
-                        <TextBlock Style="{StaticResource HintText}" Text="선택한 펼침 방향을 부재의 로컬 좌표로 바꿔 기록합니다."/>
+                        <TextBlock Style="{StaticResource HintText}" Text="세트별 펼침 방향을 부재의 로컬 좌표로 바꿔 기록합니다."/>
                     </StackPanel>
                 </GroupBox>
 

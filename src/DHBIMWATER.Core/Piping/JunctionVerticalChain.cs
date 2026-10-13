@@ -2,7 +2,8 @@ namespace DHBIMWATER.Core.Piping;
 
 public sealed record JunctionConnector(double Dx, double Dy, double Dz, long? PartnerId);
 public sealed record JunctionNode(long Id, IReadOnlyList<JunctionConnector> Connectors);
-public sealed record VerticalSlot(long ElementId, int Order);
+// SetId = 세트 첫 부재(순서 1) ElementId. 수평 부재에서 위·아래로 이어진 수직 구간 하나가 세트 하나
+public sealed record VerticalSlot(long ElementId, int Order, long SetId = 0);
 public sealed record JunctionVerticalChainResult(IReadOnlyList<VerticalSlot> Slots, IReadOnlyList<string> Warnings,
     IReadOnlyList<long> Orphans);
 
@@ -17,15 +18,18 @@ public static class JunctionVerticalChain
         var warnings = new List<string>();
         var visited = new HashSet<long>();
 
-        foreach (var root in nodes.Where(x => !IsVertical(x)))
+        // 수직 구간 양 끝이 다 수평 부재(T 아래·엘보 위)면 먼저 도는 뿌리가 차지 → 연결자 많은 T 먼저. 주관 쪽부터 순서 매김
+        foreach (var root in nodes.Where(x => !IsVertical(x)).OrderByDescending(x => x.Connectors.Count))
         foreach (var outlet in root.Connectors.Where(IsVertical))
         {
             var previousId = root.Id;
             var nextId = outlet.PartnerId;
             var order = 0;
+            long setId = 0;
             while (nextId is { } id && byId.TryGetValue(id, out var node) && IsVertical(node) && visited.Add(id))
             {
-                slots.Add(new VerticalSlot(id, ++order));
+                if (order == 0) setId = id;
+                slots.Add(new VerticalSlot(id, ++order, setId));
                 if (node.Connectors.Count >= 3)
                 {
                     warnings.Add($"격점 {junctionId}: {order}번째 수직 부재에서 사슬이 갈라져 오프셋을 중단했습니다");

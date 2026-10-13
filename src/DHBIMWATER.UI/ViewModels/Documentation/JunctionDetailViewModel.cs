@@ -19,9 +19,10 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     private JunctionDetailPreview _preview;
     private bool _createSchedule = true, _createDrafting = true, _createPlan = true;
     private bool _backfill, _expandVertical = true, _placeTags = true, _useTypeImage = true, _redrawExistingDrafting;
-    private JunctionExpandAxis _expandAxis = JunctionExpandAxis.Y;
-    private bool _expandPositive = true;
-    private double _stepPaperMm = JunctionDetailParameters.StepPaperMm;
+    // 재실행·재조회해도 세트 설정 유지 (SetId = 세트 첫 부재 ElementId)
+    private readonly Dictionary<long, JunctionSetOffset> _setState = [];
+    private bool _bulkAxisX;
+    private string _bulkStepText = JunctionOffsetSetViewModel.Format(JunctionDetailParameters.StepPaperMm);
     private int _viewScale = JunctionDetailParameters.ViewScale;
     private JunctionDetailTagType? _selectedTagType;
     private string _activeTab = "Plan";
@@ -49,6 +50,8 @@ public sealed class JunctionDetailViewModel : ViewModelBase
         RunCommand = new RelayCommand(_ => Run(), _ => CanRun && !IsRunning);
         ResetOffsetsCommand = new RelayCommand(_ => ResetOffsets(), _ => !IsRunning);
         CancelCommand = new RelayCommand(_ => CloseAction?.Invoke());
+        ApplyAllSetsCommand = new RelayCommand(_ => ApplyAllSets(), _ => OffsetSets.Count > 0);
+        SyncOffsetSets();
         RefreshPreview();
         RefreshSummary();
     }
@@ -57,6 +60,10 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     public RelayCommand RunCommand { get; }
     public RelayCommand ResetOffsetsCommand { get; }
     public RelayCommand CancelCommand { get; }
+    public RelayCommand ApplyAllSetsCommand { get; }
+    public ObservableCollection<JunctionOffsetSetViewModel> OffsetSets { get; } = [];
+    public ObservableCollection<JunctionPreviewDimensionItem> PreviewDimensions { get; } = [];
+    public ObservableCollection<string> PreviewWarnings { get; } = [];
     public ObservableCollection<JunctionDetailTagType> TagTypes { get; }
     public ObservableCollection<JunctionPreviewCanvasItem> PreviewPoints { get; } = [];
     public ObservableCollection<JunctionDetailTableRow> TableRows { get; } = [];
@@ -68,19 +75,19 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     {
         get
         {
-            var items = _preview.Junctions.SelectMany(x => x.VerticalItems).ToList();
-            var shapes = items.Count(x => HasRenderableShape(x.Shape));
+            var items = _preview.Junctions.SelectMany(x => x.Items).ToList();
+            var shapes = items.Count(x => x.Shape is { IsRenderable: true });
             var responsive = ShapeDiagnostics.Count(x => x.OffsetResponse == "반응함");
             return $"기호선을 읽은 부재 {shapes}/{items.Count}개 · 오프셋 반응 {responsive}개";
         }
     }
-    public IReadOnlyList<string> ShapeDiagnosticLines => _preview.Junctions.SelectMany(x => x.VerticalItems)
+    public IReadOnlyList<string> ShapeDiagnosticLines => _preview.Junctions.SelectMany(x => x.Items)
         .Select(item =>
         {
             var diagnostic = ShapeDiagnostics.FirstOrDefault(x => x.ElementId == item.ElementId);
             // 패밀리 로컬 Z가 수평 = 눕혀 그린 패밀리를 세워 배치. 평면 기호선이 평면도에 안 보일 수 있음
-            var rotated = Math.Abs(item.BasisZ.Z) < JunctionVerticalChain.VerticalCosine ? " · 회전 배치(패밀리 로컬 Z 수평) — 패밀리 평면 기호선이 안 보일 수 있음" : "";
-            if (!HasRenderableShape(item.Shape))
+            var rotated = item.IsVertical && Math.Abs(item.BasisZ.Z) < JunctionVerticalChain.VerticalCosine ? " · 회전 배치(패밀리 로컬 Z 수평) — 패밀리 평면 기호선이 안 보일 수 있음" : "";
+            if (item.Shape is not { IsRenderable: true })
                 return $"{item.ItemNumber} · {item.Name} · 개략 도형 사용 · {diagnostic?.Note ?? "기호선 정보 없음"}{rotated}";
             return $"{item.ItemNumber} · {item.Name}{rotated} · 기호선 {diagnostic?.CurveCount ?? 0}개 · 점 {diagnostic?.PointCount ?? 0}개 · 크기 {diagnostic?.WidthMm ?? 0:0.#}×{diagnostic?.HeightMm ?? 0:0.#} mm · 오프셋 {diagnostic?.OffsetResponse ?? "확인 안 함"} · {diagnostic?.Note ?? ""}";
         }).ToList();
@@ -98,30 +105,21 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     public string StatusText { get => _statusText; private set => SetProperty(ref _statusText, value); }
     public string TagTypeMessage => TagTypes.Count == 0 ? "태그 유형이 없습니다" : string.Empty;
     public string BackfillMessage => HasBackfillWork ? (FromSelection ? "선택한 요소 기준" : "") : "재기록할 부재가 없습니다";
-    private double _previewBoxTop = 285, _previewBoxHeight = 145, _previewStackTop = 337, _previewDimTop, _previewDimBottom;
-    private double _previewBoxLeft = 190, _previewBoxWidth = 160, _previewStackRight = 270;
-    private double _previewDimLeft = 524, _previewDimRight = 524, _previewDimLabelLeft = 534;
-    private string _previewExtentMessage = string.Empty;
-    private bool _isPreviewDimVisible;
-    public double PreviewBoxTop { get => _previewBoxTop; private set => SetProperty(ref _previewBoxTop, value); }
-    public double PreviewBoxHeight { get => _previewBoxHeight; private set => SetProperty(ref _previewBoxHeight, value); }
-    public double PreviewBoxLeft { get => _previewBoxLeft; private set => SetProperty(ref _previewBoxLeft, value); }
-    public double PreviewBoxWidth { get => _previewBoxWidth; private set => SetProperty(ref _previewBoxWidth, value); }
-    public double PreviewStackTop { get => _previewStackTop; private set => SetProperty(ref _previewStackTop, value); }
-    public double PreviewStackRight { get => _previewStackRight; private set => SetProperty(ref _previewStackRight, value); }
-    /// <summary>첫 두 수직 부재 사이 간격 치수선(시안의 파란 치수). 펼침이 꺼져 있거나 부재가 1개 이하면 숨긴다.</summary>
-    public double PreviewDimTop { get => _previewDimTop; private set => SetProperty(ref _previewDimTop, value); }
-    public double PreviewDimBottom { get => _previewDimBottom; private set => SetProperty(ref _previewDimBottom, value); }
-    public double PreviewDimLeft { get => _previewDimLeft; private set => SetProperty(ref _previewDimLeft, value); }
-    public double PreviewDimRight { get => _previewDimRight; private set => SetProperty(ref _previewDimRight, value); }
-    public double PreviewDimLabelLeft { get => _previewDimLabelLeft; private set => SetProperty(ref _previewDimLabelLeft, value); }
-    public string PreviewExtentMessage { get => _previewExtentMessage; private set => SetProperty(ref _previewExtentMessage, value); }
-    public bool IsPreviewX => _expandAxis == JunctionExpandAxis.X;
-    public bool IsPreviewDimVisible { get => _isPreviewDimVisible; private set => SetProperty(ref _isPreviewDimVisible, value); }
+    private double _previewCanvasWidth = MinCanvasWidth, _previewCanvasHeight = MinCanvasHeight;
+    private Geometry? _previewCenterGeometry;
+    /// <summary>캔버스 크기 = 그린 내용 범위 + 여백. Viewbox가 창에 맞춰 줄인다.</summary>
+    public double PreviewCanvasWidth { get => _previewCanvasWidth; private set => SetProperty(ref _previewCanvasWidth, value); }
+    public double PreviewCanvasHeight { get => _previewCanvasHeight; private set => SetProperty(ref _previewCanvasHeight, value); }
+    /// <summary>주관(수평 부재 사이) + 세트(뿌리→마지막 부재) 중심선.</summary>
+    public Geometry? PreviewCenterGeometry { get => _previewCenterGeometry; private set => SetProperty(ref _previewCenterGeometry, value); }
+    public bool HasOffsetSets => OffsetSets.Count > 0;
+    public bool BulkAxisX { get => _bulkAxisX; set { if (SetProperty(ref _bulkAxisX, value)) OnPropertyChanged(nameof(BulkAxisY)); } }
+    public bool BulkAxisY { get => !_bulkAxisX; set => BulkAxisX = !value; }
+    public string BulkStepText { get => _bulkStepText; set => SetProperty(ref _bulkStepText, value); }
     public string SummaryLine { get; private set; } = string.Empty;
     public string HeaderSummary => FirstJunction is null
-        ? "격점 없음 · 평면 상세도 대상 부재 0개 · 수직분기 부재 0개"
-        : $"격점 {FirstJunction.JunctionId} · {FirstJunction.RoomType} · 배관 부재 {FirstJunction.PartCount}개 · 수직분기 부재 {FirstJunction.VerticalItems.Count}개"
+        ? "격점 없음 · 평면 상세도 대상 부재 0개 · 수직분기 세트 0개"
+        : $"격점 {FirstJunction.JunctionId} · {FirstJunction.RoomType} · 배관 부재 {FirstJunction.PartCount}개 · 수직분기 세트 {OffsetSets.Count}개(부재 {FirstJunction.Items.Count(x => x.Order is not null)}개)"
           + (_preview.Junctions.Count > 1 ? $" · 외 {_preview.Junctions.Count - 1}개" : "")
           + (FirstJunction.Warnings.Count > 0 ? " · 경고: " + string.Join("; ", FirstJunction.Warnings) : "");
     public int TotalPartCount => _preview.MaterialPartCount;
@@ -136,98 +134,140 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     public bool CreatePlan { get => _createPlan; set { if (SetProperty(ref _createPlan, value)) RefreshSummary(); } }
     public bool Backfill { get => _backfill; set { if (SetProperty(ref _backfill, value)) RefreshSummary(); } }
     public bool ExpandVertical { get => _expandVertical; set { if (SetProperty(ref _expandVertical, value)) { RefreshPreview(); RefreshSummary(); } } }
-    public bool ExpandX { get => _expandAxis == JunctionExpandAxis.X; set { if (value) SetExpandAxis(JunctionExpandAxis.X); } }
-    public bool ExpandY { get => _expandAxis == JunctionExpandAxis.Y; set { if (value) SetExpandAxis(JunctionExpandAxis.Y); } }
-    public bool ExpandPositive { get => _expandPositive; set { if (SetProperty(ref _expandPositive, value)) { OnPropertyChanged(nameof(ExpandNegative)); RefreshPreview(); RefreshSummary(); } } }
-    public bool ExpandNegative { get => !_expandPositive; set { if (value) ExpandPositive = false; } }
-    private void SetExpandAxis(JunctionExpandAxis axis)
+    public int ViewScale
     {
-        if (_expandAxis == axis) return;
-        _expandAxis = axis;
-        OnPropertyChanged(nameof(ExpandX));
-        OnPropertyChanged(nameof(ExpandY));
-        OnPropertyChanged(nameof(IsPreviewX));
-        RefreshPreview();
-        RefreshSummary();
-    }
-    public double StepPaperMm
-    {
-        get => _stepPaperMm;
+        get => _viewScale;
         set
         {
-            var clamped = Math.Clamp(value, 5, 10);
-            if (SetProperty(ref _stepPaperMm, clamped)) { RefreshPreview(); RefreshSummary(); }
-            // 텍스트 박스에 범위 밖 값 입력 시 값이 안 바뀌어도 잘린 값으로 되돌려 보임
-            else if (clamped != value) OnPropertyChanged();
+            if (!SetProperty(ref _viewScale, value)) return;
+            foreach (var set in OffsetSets) set.RefreshScale();
+            RefreshPreview();
         }
     }
-    public int ViewScale { get => _viewScale; set { if (SetProperty(ref _viewScale, value)) RefreshPreview(); } }
     public bool PlaceTags { get => _placeTags; set { if (CanPlaceTags && SetProperty(ref _placeTags, value)) RefreshSummary(); } }
     public bool UseTypeImage { get => _useTypeImage; set { if (SetProperty(ref _useTypeImage, value)) RefreshTableRows(); } }
     public bool RedrawExistingDrafting { get => _redrawExistingDrafting; set { if (SetProperty(ref _redrawExistingDrafting, value)) RefreshSummary(); } }
     public JunctionDetailTagType? SelectedTagType { get => _selectedTagType; set => SetProperty(ref _selectedTagType, value); }
 
+    // 캔버스 배율: 도면 1mm = 8px. 여백·최소 크기는 px
+    private const double PixelsPerPaperMm = 8, CanvasMargin = 40, MinCanvasWidth = 400, MinCanvasHeight = 260;
+    private const double TagRadiusPaperMm = JunctionPreviewLayout.TagRadiusPaperMm, DimensionGapPaperMm = 3;
+
     private void RefreshPreview()
     {
         PreviewPoints.Clear();
+        PreviewDimensions.Clear();
+        PreviewWarnings.Clear();
         OffsetRows.Clear();
         TableRows.Clear();
         if (FirstJunction is null)
         {
             foreach (var row in _preview.UnassignedRows) TableRows.Add(ToTableRow(row));
-            UpdatePreviewFrame();
+            PreviewCanvasWidth = MinCanvasWidth;
+            PreviewCanvasHeight = MinCanvasHeight;
+            PreviewCenterGeometry = null;
             return;
         }
-        foreach (var point in JunctionPreviewLayout.Layout(FirstJunction.VerticalItems, StepPaperMm, ExpandVertical,
-                     _expandAxis, ExpandPositive))
-            PreviewPoints.Add(CreateCanvasItem(point));
-        UpdatePreviewFrame();
+
+        var sets = OffsetSets.Select(x => x.ToOffset()).ToList();
+        var scene = JunctionPreviewLayout.Build(FirstJunction.Items, FirstJunction.Links ?? [], sets, ViewScale, ExpandVertical);
+        var dimensions = scene.Dimensions.Select(DimensionLine).ToList();
+
+        // 내용 범위(기호·번호 원·치수) → 캔버스 원점. Y는 위가 +라 뒤집음
+        var xs = scene.Placements.SelectMany(p => new[] { p.MinX, p.MaxX, p.TagX - TagRadiusPaperMm, p.TagX + TagRadiusPaperMm })
+            .Concat(dimensions.SelectMany(d => new[] { d.X1, d.X2, d.LabelX + 12 })).ToList();
+        var ys = scene.Placements.SelectMany(p => new[] { p.MinY, p.MaxY, p.TagY - TagRadiusPaperMm, p.TagY + TagRadiusPaperMm })
+            .Concat(dimensions.SelectMany(d => new[] { d.Y1, d.Y2, d.LabelY + 2 })).ToList();
+        var minX = xs.Count > 0 ? xs.Min() : 0;
+        var maxY = ys.Count > 0 ? ys.Max() : 0;
+        var width = (xs.Count > 0 ? xs.Max() - minX : 0) * PixelsPerPaperMm + CanvasMargin * 2;
+        var height = (ys.Count > 0 ? maxY - ys.Min() : 0) * PixelsPerPaperMm + CanvasMargin * 2;
+        // 작은 그림은 최소 크기 안에서 가운데
+        var padX = Math.Max(0, (MinCanvasWidth - width) / 2);
+        var padY = Math.Max(0, (MinCanvasHeight - height) / 2);
+        double Cx(double x) => (x - minX) * PixelsPerPaperMm + CanvasMargin + padX;
+        double Cy(double y) => (maxY - y) * PixelsPerPaperMm + CanvasMargin + padY;
+        PreviewCanvasWidth = Math.Max(MinCanvasWidth, width);
+        PreviewCanvasHeight = Math.Max(MinCanvasHeight, height);
+
+        foreach (var placement in scene.Placements) PreviewPoints.Add(CreateCanvasItem(placement, Cx, Cy));
+        PreviewCenterGeometry = BuildSegments(scene.CenterLines.Select(x => (Cx(x.X1), Cy(x.Y1), Cx(x.X2), Cy(x.Y2))));
+        foreach (var dimension in dimensions)
+            PreviewDimensions.Add(new JunctionPreviewDimensionItem(
+                BuildSegments(dimension.Lines.Select(x => (Cx(x.X1), Cy(x.Y1), Cx(x.X2), Cy(x.Y2)))),
+                Cx(dimension.LabelX), Cy(dimension.LabelY) - 8, dimension.Text));
+        foreach (var warning in scene.Warnings) PreviewWarnings.Add(warning);
+
         RefreshTableRows();
-        foreach (var item in FirstJunction.VerticalItems)
+        var setNumber = OffsetSets.ToDictionary(x => x.SetId, x => x.Number);
+        foreach (var item in FirstJunction.Items.Where(x => x.IsVertical))
         {
-            var order = ExpandVertical ? item.Order : null;
-            var world = order is { } n && item.Connected ? n * StepPaperMm * ViewScale : 0;
-            var direction = JunctionExpandDirection.Select(item.ViewRight, item.ViewUp, _expandAxis, ExpandPositive);
+            var set = OffsetSets.FirstOrDefault(x => x.SetId == item.SetId)?.ToOffset();
+            var order = ExpandVertical && item.Connected && set is not null ? item.Order : null;
+            var world = order is { } n ? n * set!.StepPaperMm * ViewScale : 0;
+            var direction = JunctionExpandDirection.Select(item.ViewRight, item.ViewUp, set?.Axis ?? JunctionExpandAxis.Y, true);
             var local = SymbolOffsetMath.ToLocal(new SymbolVector(direction.X * world, direction.Y * world,
                 direction.Z * world), item.BasisX, item.BasisY, item.BasisZ);
             OffsetRows.Add(new JunctionDetailOffsetRow(item.ItemNumber, item.Name, item.Spec,
                 item.Connected && order is { } o ? o.ToString() : "—", world == 0 ? "0" : $"{world:0}",
                 $"{item.RotationDegrees:0}°", $"{(Math.Abs(local.X) < 0.5 ? 0 : local.X):0}",
-                $"{(Math.Abs(local.Y) < 0.5 ? 0 : local.Y):0}", item.Connected ? "" : "연결 끊김"));
+                $"{(Math.Abs(local.Y) < 0.5 ? 0 : local.Y):0}", item.Connected ? "" : "연결 끊김",
+                setNumber.TryGetValue(item.SetId, out var number) ? $"세트 {number} · {set!.Axis}" : "—"));
         }
         OnPropertyChanged(nameof(HeaderSummary));
         OnPropertyChanged(nameof(CanRun));
     }
 
-    private JunctionPreviewCanvasItem CreateCanvasItem(JunctionPreviewPoint point)
+    /// <summary>첫 격점의 세트 목록을 다시 만든다. 같은 SetId면 이전 축·간격 유지.</summary>
+    private void SyncOffsetSets()
     {
-        var shape = HasRenderableShape(point.Item.Shape) ? point.Item.Shape : null;
-        if (shape is null)
-            return new JunctionPreviewCanvasItem(point.Item, point.X, point.Y, null, false,
-                -22, -22, _expandAxis == JunctionExpandAxis.X ? -10 : -52,
-                _expandAxis == JunctionExpandAxis.X ? 22 : -10,
-                _expandAxis == JunctionExpandAxis.X ? -20 : 34,
-                _expandAxis == JunctionExpandAxis.X ? -55 : -15,
-                point.X - 22, point.X + 22, point.Y - 22, point.Y + 22);
-
-        var factor = 8d / ViewScale;
-        var left = point.X + shape.MinX * factor;
-        var right = point.X + shape.MaxX * factor;
-        var top = point.Y - shape.MaxY * factor;
-        var bottom = point.Y - shape.MinY * factor;
-        var middleY = (top + bottom) / 2;
-        var middleX = (left + right) / 2;
-        var numberLeft = _expandAxis == JunctionExpandAxis.Y ? left - 28 : middleX - 10;
-        var numberTop = _expandAxis == JunctionExpandAxis.Y ? middleY - 10 : bottom + 8;
-        var labelLeft = _expandAxis == JunctionExpandAxis.Y ? right + 8 : left;
-        var labelTop = _expandAxis == JunctionExpandAxis.Y ? middleY - 15 : top - 40;
-        return new JunctionPreviewCanvasItem(point.Item, point.X, point.Y, BuildGeometry(shape, factor), true,
-            0, 0, numberLeft - point.X, numberTop - point.Y, labelLeft - point.X, labelTop - point.Y,
-            left, right, top, bottom);
+        foreach (var set in OffsetSets) _setState[set.SetId] = set.ToOffset();
+        OffsetSets.Clear();
+        var items = FirstJunction?.Items ?? [];
+        var setIds = items.Where(x => x.SetId != 0 && x.Order is not null).Select(x => x.SetId).Distinct().ToList();
+        for (var i = 0; i < setIds.Count; i++)
+        {
+            var setId = setIds[i];
+            var state = _setState.GetValueOrDefault(setId)
+                ?? new JunctionSetOffset(setId, JunctionExpandAxis.Y, JunctionDetailParameters.StepPaperMm);
+            var members = string.Join(" → ", items.Where(x => x.SetId == setId).OrderBy(x => x.Order)
+                .Select(x => x.ItemNumber > 0 ? $"{x.ItemNumber} {x.Name}" : x.Name));
+            OffsetSets.Add(new JunctionOffsetSetViewModel(setId, i + 1, members, state.Axis, state.StepPaperMm,
+                () => ViewScale, OnSetChanged));
+        }
+        OnPropertyChanged(nameof(HasOffsetSets));
+        ApplyAllSetsCommand?.RaiseCanExecuteChanged();
     }
 
-    private static bool HasRenderableShape(JunctionSymbolShape? shape)
-        => shape is { Polylines.Count: > 0 } && shape.MaxX - shape.MinX > 0.01 && shape.MaxY - shape.MinY > 0.01;
+    private void OnSetChanged()
+    {
+        RefreshPreview();
+        RefreshSummary();
+    }
+
+    private void ApplyAllSets()
+    {
+        if (!JunctionOffsetSetViewModel.TryParse(BulkStepText, out var step)) return;
+        var axis = BulkAxisX ? JunctionExpandAxis.X : JunctionExpandAxis.Y;
+        foreach (var set in OffsetSets) set.Apply(axis, step);
+        OnSetChanged();
+    }
+
+    private JunctionPreviewCanvasItem CreateCanvasItem(JunctionPreviewPlacement placement,
+        Func<double, double> cx, Func<double, double> cy)
+    {
+        var item = placement.Item;
+        var x = cx(placement.X);
+        var y = cy(placement.Y);
+        var shape = item.Shape is { IsRenderable: true } found ? found : null;
+        var tip = $"{(item.ItemNumber > 0 ? item.ItemNumber + " · " : "")}{item.Name} {item.Spec}"
+                  + (shape is null ? " — 기호선 없음(대체 기호)" : "") + (item.Connected ? "" : " — 연결 끊김");
+        // 번호 원 20px: 중심이 태그 위치
+        return new JunctionPreviewCanvasItem(item, x, y,
+            shape is null ? null : BuildGeometry(shape, PixelsPerPaperMm / ViewScale), shape is not null,
+            -22, -22, cx(placement.TagX) - x - 10, cy(placement.TagY) - y - 10,
+            cx(placement.MinX), cx(placement.MaxX), cy(placement.MaxY), cy(placement.MinY), tip);
+    }
 
     private static Geometry BuildGeometry(JunctionSymbolShape shape, double factor)
     {
@@ -244,44 +284,53 @@ public sealed class JunctionDetailViewModel : ViewModelBase
         return geometry;
     }
 
-    /// <summary>수직 사슬 높이에 맞춰 밸브실 점선 박스와 분기 중심선 길이를 정한다.
-    /// 좌표는 뷰의 760×450 설계 좌표다(주관 y=370, T관 분기 윗면 y=337, 박스 아래 y=430).</summary>
-    private void UpdatePreviewFrame()
+    private static Geometry? BuildSegments(IEnumerable<(double X1, double Y1, double X2, double Y2)> segments)
     {
-        const double branchTopY = 337, boxBottomY = 430, boxDefaultTopY = 285;
-        var topY = PreviewPoints.Count > 0 ? PreviewPoints.Min(p => p.Top) : branchTopY;
-        var bottomY = PreviewPoints.Count > 0 ? PreviewPoints.Max(p => p.Bottom) : branchTopY;
-        var leftX = PreviewPoints.Count > 0 ? PreviewPoints.Min(p => p.Left) : 270;
-        var rightX = PreviewPoints.Count > 0 ? PreviewPoints.Max(p => p.Right) : 270;
-        PreviewStackTop = _expandAxis == JunctionExpandAxis.Y
-            ? (ExpandPositive ? Math.Min(branchTopY, topY - 26) : Math.Max(370, bottomY + 26)) : 370;
-        PreviewStackRight = _expandAxis == JunctionExpandAxis.X
-            ? (ExpandPositive ? rightX : leftX) : 270;
-        PreviewBoxTop = Math.Min(boxDefaultTopY, topY - 44);
-        PreviewBoxHeight = Math.Max(boxBottomY, bottomY + 44) - PreviewBoxTop;
-        PreviewBoxLeft = Math.Min(190, leftX - 80);
-        PreviewBoxWidth = Math.Max(350, rightX + 80) - PreviewBoxLeft;
-        PreviewExtentMessage = PreviewBoxLeft < 0 || PreviewBoxLeft + PreviewBoxWidth > 760 ||
-            PreviewBoxTop < 0 || PreviewBoxTop + PreviewBoxHeight > 450
-            ? "미리보기가 760×450 설계 좌표를 벗어납니다. 간격 또는 방향을 확인하세요." : string.Empty;
-
-        var spread = ExpandVertical && PreviewPoints.Count >= 2 && PreviewPoints[0].Item.Order is not null && PreviewPoints[1].Item.Order is not null;
-        IsPreviewDimVisible = spread;
-        if (spread)
-        {
-            PreviewDimTop = _expandAxis == JunctionExpandAxis.Y ? PreviewPoints[1].Y : 412;
-            PreviewDimBottom = _expandAxis == JunctionExpandAxis.Y ? PreviewPoints[0].Y : 412;
-            PreviewDimLeft = _expandAxis == JunctionExpandAxis.X ? PreviewPoints[0].X : 524;
-            PreviewDimRight = _expandAxis == JunctionExpandAxis.X ? PreviewPoints[1].X : 524;
-            PreviewDimLabelLeft = _expandAxis == JunctionExpandAxis.X
-                ? Math.Min(PreviewDimLeft, PreviewDimRight) + 8 : 534;
-        }
+        var list = segments.ToList();
+        if (list.Count == 0) return null;
+        var geometry = new StreamGeometry();
+        using (var context = geometry.Open())
+            foreach (var (x1, y1, x2, y2) in list)
+            {
+                context.BeginFigure(new Point(x1, y1), false, false);
+                context.LineTo(new Point(x2, y2), true, false);
+            }
+        geometry.Freeze();
+        return geometry;
     }
 
+    /// <summary>세트 순서 1→2 간격 치수. 번호 원 반대편(Y축 = 오른쪽, X축 = 위쪽). 좌표 도면 mm.</summary>
+    private DimensionDraft DimensionLine(JunctionPreviewDimension dimension)
+    {
+        var (a, b) = (dimension.First, dimension.Second);
+        var step = Math.Abs(dimension.StepPaperMm);
+        var text = $"{JunctionOffsetSetViewModel.Format(step)} mm (실제 {step * ViewScale:0.#})";
+        if (dimension.Axis == JunctionExpandAxis.Y)
+        {
+            var x = Math.Max(a.MaxX, b.MaxX) + DimensionGapPaperMm;
+            return new DimensionDraft([(x, a.Y, x, b.Y), (x - 1, a.Y, x + 1, a.Y), (x - 1, b.Y, x + 1, b.Y)],
+                x + 1, (a.Y + b.Y) / 2, text);
+        }
+        var y = Math.Max(a.MaxY, b.MaxY) + DimensionGapPaperMm;
+        return new DimensionDraft([(a.X, y, b.X, y), (a.X, y - 1, a.X, y + 1), (b.X, y - 1, b.X, y + 1)],
+            Math.Min(a.X, b.X), y + 3, text);
+    }
+
+    private sealed record DimensionDraft(IReadOnlyList<(double X1, double Y1, double X2, double Y2)> Lines,
+        double LabelX, double LabelY, string Text)
+    {
+        public double X1 => Lines.Min(x => Math.Min(x.X1, x.X2));
+        public double X2 => Lines.Max(x => Math.Max(x.X1, x.X2));
+        public double Y1 => Lines.Min(x => Math.Min(x.Y1, x.Y2));
+        public double Y2 => Lines.Max(x => Math.Max(x.Y1, x.Y2));
+    }
+
+    /// <summary>캔버스 부재 하나. X·Y = 부재 원점(px). 나머지 Left/Top은 X·Y 기준 상대 위치, Left~Bottom은 절대 범위.</summary>
     public sealed record JunctionPreviewCanvasItem(JunctionPreviewItem Item, double X, double Y,
         Geometry? ShapeGeometry, bool HasShape, double SymbolLeft, double SymbolTop,
-        double NumberLeft, double NumberTop, double LabelLeft, double LabelTop,
-        double Left, double Right, double Top, double Bottom);
+        double NumberLeft, double NumberTop, double Left, double Right, double Top, double Bottom, string ToolTip);
+
+    public sealed record JunctionPreviewDimensionItem(Geometry? Geometry, double LabelLeft, double LabelTop, string Text);
 
     private void RefreshTableRows()
     {
@@ -308,7 +357,7 @@ public sealed class JunctionDetailViewModel : ViewModelBase
                 : "값 재기록 대상이 없습니다.");
         if (UntaggedCount > 0) SummaryLine += $" · 값 없는 배관 부재 {UntaggedCount}개 자동 기록";
         if (CreateDrafting && RedrawExistingDrafting) SummaryLine += " · 기존 도면 뷰의 주석·치수가 지워집니다.";
-        if (CreatePlan && FirstJunction?.VerticalItems.Any(x => !x.Connected) == true)
+        if (CreatePlan && FirstJunction?.Items.Any(x => !x.Connected) == true)
             SummaryLine += " · 뿌리와 이어지지 않은 부재는 오프셋 없이 처리합니다.";
         OnPropertyChanged(nameof(SummaryLine));
         OnPropertyChanged(nameof(CanRun));
@@ -322,8 +371,9 @@ public sealed class JunctionDetailViewModel : ViewModelBase
         try
         {
             var options = new JunctionDetailOptions(CreateSchedule, CreateDrafting, CreatePlan, Backfill,
-                ExpandVertical, StepPaperMm, ViewScale, PlaceTags, SelectedTagType?.Id ?? 0,
-                UseTypeImage, RedrawExistingDrafting, _expandAxis, ExpandPositive);
+                ExpandVertical, JunctionDetailParameters.StepPaperMm, ViewScale, PlaceTags, SelectedTagType?.Id ?? 0,
+                UseTypeImage, RedrawExistingDrafting, JunctionExpandAxis.Y, true,
+                OffsetSets.Select(x => x.ToOffset()).ToList());
             var result = _runUseCase.Execute(options);
             if (result.Backfill is { } backfill)
             {
@@ -358,6 +408,7 @@ public sealed class JunctionDetailViewModel : ViewModelBase
             UntaggedCount = _backfillUseCase.ScanCandidates().CandidateCount;
         }
         catch (Exception ex) { ResultLines.Add("미리보기 갱신 실패: " + ex.Message); return; }
+        SyncOffsetSets();
         RefreshPreview();
         OnPropertyChanged(nameof(UntaggedCount));
         OnPropertyChanged(nameof(Junctions));

@@ -1561,8 +1561,8 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         // 사전순이 아니라 최초 배치 순서로 번호를 매긴다. 도면을 읽는 순서에 가깝다.
         // 같은 격점에 이미 있는 부재의 번호 체계를 이어받는다(docs/180 § C) — 이 조회가 없으면
         // 이어 그릴 때마다 1부터 다시 매겨져 서로 다른 부재가 같은 번호를 받는다.
-        // 이번에 만든 인스턴스는 DH_Addin을 아직 쓰지 않아 AddinInstances에 걸리지 않지만(바로 아래 루프에서 쓴다),
-        // 기록 순서가 바뀌어도 안전하도록 ElementId로 한 번 더 걸러 낸다.
+        // Read는 DH_Addin 무관 전체를 읽음(docs/287) — 이번에 만든 인스턴스도 걸리므로
+        // ElementId로 반드시 걸러 냄. 안 거르면 새 부재(번호 0)가 기존 목록에 섞임.
         var placedIds = parts.Select(x => x.Instance.Id).ToHashSet();
         var existing = PipeMaterialPartCollector.Read(document, placedIds)
             .Where(x => PipeMaterialNumbering.SameJunction(x.JunctionId, junctionId))

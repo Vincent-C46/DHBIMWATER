@@ -13,19 +13,10 @@ internal static class PipeMaterialPartCollector
     public static IEnumerable<FamilyInstance> AllPipingInstances(Document document)
         => PipingInstances(document);
 
-    /// <summary>DHBIMWATER가 만든 배관 밸브류·배관 이음쇠 인스턴스만 고른다.
-    /// 관·곡관·T형은 배관 이음쇠로 배치되므로 한 카테고리만 훑으면 재료표에서 통째로 빠진다(docs/133).
-    /// 사용자가 직접 놓은 부속이나 링크 요소까지 세면 재료표 수량이 틀어진다.</summary>
-    public static IEnumerable<FamilyInstance> AddinInstances(Document document)
-        => PipingInstances(document)
-            .Where(x => string.Equals(
-                Get(x, ValvePipingParameters.Addin)?.AsString(),
-                ValvePipingParameters.AddinValue, StringComparison.Ordinal));
-
     /// <summary><c>DH_Addin</c>이 비어 있는 배관 밸브류·이음쇠 인스턴스(재기록 후보, docs/136).
     /// 매개변수 자체가 없는(바인딩 전에 배치된) 인스턴스도 후보다.
     /// <paramref name="scope"/>가 있으면 그 요소로만 좁힌다 — 사용자가 대상을 직접 고른 경우다.
-    /// <para><see cref="AddinInstances"/>와 같은 모집단을 봐야 "태그된 것 + 태그 안 된 것 = 전체"가 성립한다.</para></summary>
+    /// <para><see cref="AllPipingInstances"/>와 같은 모집단의 부분집합이다.</para></summary>
     public static IEnumerable<FamilyInstance> UntaggedInstances(
         Document document, IReadOnlyCollection<ElementId>? scope = null)
         => PipingInstances(document, scope)
@@ -42,9 +33,11 @@ internal static class PipeMaterialPartCollector
             .OfClass(typeof(FamilyInstance))
             .Cast<FamilyInstance>();
 
+    /// <summary>재료표 원자료. 배관 밸브류·이음쇠 전체 — DH_Addin 무관, 수동 배치 부재도 포함(docs/287 § A1).
+    /// 관·곡관·T형은 배관 이음쇠로 배치되므로 두 카테고리를 함께 훑는다(docs/133).</summary>
     /// <param name="exclude">결과에서 뺄 인스턴스. 채번처럼 "이번에 만든 것 말고 기존 것"만 봐야 할 때 쓴다(docs/180 § C).</param>
     public static IReadOnlyList<PipeMaterialPart> Read(Document document, IReadOnlyCollection<ElementId>? exclude = null)
-        => AddinInstances(document)
+        => PipingInstances(document)
             .Where(x => exclude is not { Count: > 0 } || !exclude.Contains(x.Id))
             .Select(x =>
             {
@@ -57,12 +50,23 @@ internal static class PipeMaterialPartCollector
                 return new PipeMaterialPart(
                     Get(x, ValvePipingParameters.JunctionId)?.AsString() ?? string.Empty,
                     Get(x, ValvePipingParameters.ItemNumber)?.AsInteger() ?? 0,
-                    Get(x, ValvePipingParameters.ItemName)?.AsString() ?? string.Empty,
+                    NameOrFamily(x),
                     Get(x, ValvePipingParameters.ItemSpec)?.AsString() ?? string.Empty,
                     Get(x, ValvePipingParameters.Remark)?.AsString() ?? string.Empty,
                     x.Symbol?.Id.Value ?? 0, imagePath);
             })
             .ToList();
+
+    /// <summary>명칭 빈칸이면 패밀리명 대체(앞 `DH_` 제거). 자동 기록 전 수동 배치 부재 표시용(docs/287 § A1-2).
+    /// 번호 0이라 채번(PipeMaterialNumbering.Assign)은 건너뜀.</summary>
+    // TODO: RevitPipeMaterialBackfillRepo.FittingName과 같은 규칙 — 통합 검토.
+    private static string NameOrFamily(FamilyInstance instance)
+    {
+        var name = Get(instance, ValvePipingParameters.ItemName)?.AsString();
+        if (!string.IsNullOrWhiteSpace(name)) return name;
+        var family = instance.Symbol?.Family?.Name ?? string.Empty;
+        return family.StartsWith("DH_", StringComparison.Ordinal) ? family["DH_".Length..] : family;
+    }
 
     /// <summary>이름 조회는 요소 파라미터 집합을 선형 탐색한다. GUID 조회가 빠르고 동명 외부 파라미터와도 섞이지 않는다(docs/208 § D-2).
     /// GUID가 다른 옛 바인딩을 위해 이름 조회로 폴백한다.</summary>

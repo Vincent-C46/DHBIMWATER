@@ -35,12 +35,12 @@ internal static class PipeJointEndReader
     private static bool IsValveRoom(Document document)
         => !string.IsNullOrWhiteSpace(document.ProjectInformation?.LookupParameter(ValveRoomProjectInfoParameters.RoomType)?.AsString());
 
-    /// <summary>DHBIMWATER가 태깅한 배관 이음쇠·밸브류. 단부 = 물리 배관 End 커넥터, 짝 = <c>AllRefs</c>의 다른 부재 End 커넥터.
+    /// <summary>배관 이음쇠·밸브류 전체(DH_Addin 무관, 수동 배치 포함 — docs/287 § B1). 단부 = 물리 배관 End 커넥터, 짝 = <c>AllRefs</c>의 다른 부재 End 커넥터.
     /// 연결이 없는 단부는 위치만 넘겨 패스가 위치 일치로 짝을 찾는다(연결 실패로 열린 커넥터가 있다, docs/262 § 1-1).</summary>
     private static void ReadPipingFittings(Document document, List<PipeJointMemberInput> members, List<PipeJointEndInput> ends,
         Dictionary<long, Element> elements)
     {
-        var instances = PipeMaterialPartCollector.AddinInstances(document).ToList();
+        var instances = PipeMaterialPartCollector.AllPipingInstances(document).ToList();
         var connectorIndex = new Dictionary<(long Element, int Connector), int>();
         var connectorsById = new Dictionary<long, List<Connector>>();
         foreach (var instance in instances)

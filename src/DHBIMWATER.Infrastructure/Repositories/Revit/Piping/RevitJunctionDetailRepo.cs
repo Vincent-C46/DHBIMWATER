@@ -68,7 +68,10 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
                 JunctionSymbolKindMapper.Map(part, string.IsNullOrWhiteSpace(name) ? familyName : name),
                 order.GetValueOrDefault(instance.Id.Value), ToVector(transform.BasisX), ToVector(transform.BasisY),
                 ToVector(transform.BasisZ), ToVector(upDirection), rotation, !orphans.Contains(instance.Id.Value),
-                ToVector(rightDirection));
+                ToVector(rightDirection), null,
+                // 미리보기 캔버스 배치용 평면 위치(mm). 기호선 읽기와 같은 뷰 오른쪽·위쪽 축
+                new ShapePoint(RevitUnitConverter.FtToMm(transform.Origin.DotProduct(rightDirection)),
+                    RevitUnitConverter.FtToMm(transform.Origin.DotProduct(upDirection))));
         }).ToList();
     }
 
@@ -111,14 +114,13 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
             view.DetailLevel = ViewDetailLevel.Coarse;
             view.Scale = options.ViewScale;
             ConfigureRange(view, level, instances);
-            var direction = ExpandDirection(view, options);
-            ConfigureCrop(view, instances, slots, options.StepPaperMm, direction);
+            ConfigureCrop(view, instances, slots, options);
             ConfigureCategories(document, view);
             RemovePreviousFilter(document, view);
 
             var warnings = ResetInstances(instances);
-            WriteOffsets(instances, slots, view, options.StepPaperMm, direction, warnings);
-            if (options.PlaceTags) PlaceNumberTags(document, view, instances, group.Nodes, slots, options.TagTypeId, options.StepPaperMm, direction, options.ExpandAxis, warnings);
+            WriteOffsets(instances, slots, view, options, warnings);
+            if (options.PlaceTags) PlaceNumberTags(document, view, instances, group.Nodes, slots, options, warnings);
             sub.Commit();
             return new JunctionDetailViewChange(created, warnings);
         }
@@ -175,11 +177,12 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
             .Where(x => x.Elevation <= lowest).OrderByDescending(x => x.Elevation).FirstOrDefault();
     }
 
-    private static XYZ ExpandDirection(ViewPlan view, JunctionDetailViewOptions options)
+    // 세트별 축·부호 간격으로 순서만큼 이동. 음수 간격 = 반대 방향
+    private static XYZ SlotShift(ViewPlan view, VerticalSlot slot, JunctionDetailViewOptions options)
     {
-        var selected = JunctionExpandDirection.Select(ToVector(view.RightDirection), ToVector(view.UpDirection),
-            options.ExpandAxis, options.ExpandPositive);
-        return new XYZ(selected.X, selected.Y, selected.Z);
+        var set = options.For(slot.SetId);
+        var axis = set.Axis == JunctionExpandAxis.X ? view.RightDirection : view.UpDirection;
+        return axis * RevitUnitConverter.MmToFt(slot.Order * set.StepPaperMm * view.Scale);
     }
 
     private static void RemovePreviousFilter(Document document, ViewPlan view)
@@ -217,11 +220,11 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
     }
 
     private static void ConfigureCrop(ViewPlan view, IReadOnlyList<FamilyInstance> instances,
-        IReadOnlyList<VerticalSlot> slots, double stepPaperMm, XYZ direction)
+        IReadOnlyList<VerticalSlot> slots, JunctionDetailViewOptions options)
     {
         var bounds = Bounds(instances);
-        var maxOrder = slots.Count == 0 ? 0 : slots.Max(x => x.Order);
-        var shift = direction * RevitUnitConverter.MmToFt(maxOrder * stepPaperMm * view.Scale);
+        // 세트마다 방향이 달라 모든 이동량을 범위에 넣음
+        var shifts = slots.Select(slot => SlotShift(view, slot, options)).Prepend(XYZ.Zero).ToList();
         var crop = view.CropBox;
         var inverse = crop.Transform.Inverse;
         var corners = new[]
@@ -231,7 +234,7 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
             new XYZ(bounds.Max.X, bounds.Min.Y, bounds.Min.Z),
             new XYZ(bounds.Max.X, bounds.Max.Y, bounds.Min.Z)
         };
-        var local = corners.Concat(corners.Select(x => x + shift)).Select(inverse.OfPoint).ToList();
+        var local = shifts.SelectMany(shift => corners.Select(x => x + shift)).Select(inverse.OfPoint).ToList();
         var margin = RevitUnitConverter.MmToFt(1000);
         crop.Min = new XYZ(local.Min(x => x.X) - margin, local.Min(x => x.Y) - margin, crop.Min.Z);
         crop.Max = new XYZ(local.Max(x => x.X) + margin, local.Max(x => x.Y) + margin, crop.Max.Z);
@@ -308,15 +311,14 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
     }
 
     private static void WriteOffsets(IReadOnlyList<FamilyInstance> instances, IReadOnlyList<VerticalSlot> slots,
-        ViewPlan view, double stepPaperMm, XYZ direction, List<string> warnings)
+        ViewPlan view, JunctionDetailViewOptions options, List<string> warnings)
     {
         var byId = instances.ToDictionary(x => x.Id.Value);
         foreach (var slot in slots)
         {
             if (!byId.TryGetValue(slot.ElementId, out var instance) ||
                 !TryParameters(instance, warnings, out var parameters)) continue;
-            var distance = RevitUnitConverter.MmToFt(slot.Order * stepPaperMm * view.Scale);
-            var world = direction * distance;
+            var world = SlotShift(view, slot, options);
             var transform = instance.GetTransform();
             var local = SymbolOffsetMath.ToLocal(ToVector(world), ToVector(transform.BasisX),
                 ToVector(transform.BasisY), ToVector(transform.BasisZ));
@@ -336,7 +338,7 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
     {
         var names = new[] { JunctionDetailParameters.SymbolOffsetX, JunctionDetailParameters.SymbolOffsetY,
             JunctionDetailParameters.SymbolOffsetZ };
-        var found = names.Select(instance.LookupParameter).ToArray();
+        var found = names.Select(name => JunctionSymbolParameterLookup.Find(instance, name)).ToArray();
         parameters = [];
         if (found.All(x => x is null))
         {
@@ -353,12 +355,12 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
     }
 
     private static void PlaceNumberTags(Document document, ViewPlan view, IReadOnlyList<FamilyInstance> instances,
-        IReadOnlyList<JunctionNode> nodes, IReadOnlyList<VerticalSlot> slots, long tagTypeId, double stepPaperMm,
-        XYZ direction, JunctionExpandAxis axis, List<string> warnings)
+        IReadOnlyList<JunctionNode> nodes, IReadOnlyList<VerticalSlot> slots, JunctionDetailViewOptions options,
+        List<string> warnings)
     {
         var types = new FilteredElementCollector(document).OfCategory(BuiltInCategory.OST_MultiCategoryTags)
             .WhereElementIsElementType().OfType<FamilySymbol>().ToList();
-        var selectedType = tagTypeId > 0 ? types.FirstOrDefault(x => x.Id.Value == tagTypeId) : null;
+        var selectedType = options.TagTypeId > 0 ? types.FirstOrDefault(x => x.Id.Value == options.TagTypeId) : null;
         var type = selectedType ?? (types.Count == 1 ? types[0] : null);
         if (type is null)
             warnings.Add(types.Count == 0 ? "격점 번호 태그 유형이 없어 새 태그를 만들지 않았습니다."
@@ -369,19 +371,24 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
             .Cast<IndependentTag>().Where(tag => tag.GetTaggedLocalElementIds().All(groupIds.Contains))
             .SelectMany(tag => tag.GetTaggedLocalElementIds()
                 .Select(id => (id, tag))).GroupBy(x => x.id).ToDictionary(x => x.Key, x => x.First().tag);
-        var orderById = slots.ToDictionary(x => x.ElementId, x => x.Order);
+        var slotById = slots.ToDictionary(x => x.ElementId);
         var verticalIds = nodes.Where(x => x.Connectors.Count > 0 &&
                 x.Connectors.All(connector => Math.Abs(connector.Dz) >= JunctionVerticalChain.VerticalCosine))
             .Select(x => x.Id).ToHashSet();
-        var gap = RevitUnitConverter.MmToFt(4.5 * view.Scale);
+        var gap = RevitUnitConverter.MmToFt(JunctionPreviewLayout.TagGapPaperMm * view.Scale);
         var moved = 0;
         foreach (var instance in instances)
         {
             if ((instance.LookupParameter(ValvePipingParameters.ItemNumber)?.AsInteger() ?? 0) <= 0) continue;
             var center = instance.GetTransform().Origin;
             var isVertical = verticalIds.Contains(instance.Id.Value);
-            if (isVertical && orderById.TryGetValue(instance.Id.Value, out var order))
-                center += direction * RevitUnitConverter.MmToFt(order * stepPaperMm * view.Scale);
+            var axis = options.ExpandAxis;
+            if (isVertical && slotById.TryGetValue(instance.Id.Value, out var slot))
+            {
+                center += SlotShift(view, slot, options);
+                axis = options.For(slot.SetId).Axis;
+            }
+            // 미리보기(JunctionPreviewLayout.Build)와 같은 규칙
             var side = axis == JunctionExpandAxis.Y ? view.RightDirection : view.UpDirection;
             var position = isVertical ? center - side * gap : center - view.UpDirection * gap;
             try

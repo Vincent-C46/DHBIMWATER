@@ -51,7 +51,7 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
         var document = Document();
         var (candidates, fromSelection) = Candidates(document);
         return new PipeMaterialBackfillScan(candidates.Count, fromSelection,
-            PipeMaterialPartCollector.AddinInstances(document).Count(), AdaptiveCandidates(document).Count);
+            PipeMaterialPartCollector.AllPipingInstances(document).Count(), AdaptiveCandidates(document).Count);
     }
 
     public PipeMaterialBackfillResult Backfill(BendSettings catalog) => Run(catalog, untaggedOnly: false);
@@ -203,12 +203,12 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
         return new PipeMaterialBackfillResult(restored.Count, skipped, Compress(warnings), recounted, adaptiveFilled);
     }
 
-    /// <summary>이미 태깅된 배관 이음쇠·밸브류의 개수 값을 수량 규칙으로 다시 쓴다(docs/267 § 1).
+    /// <summary>배관 이음쇠·밸브류 전체(DH_Addin 무관, docs/287 § B1)의 개수 값을 수량 규칙으로 다시 쓴다(docs/267 § 1).
     /// 명칭·규격·번호는 건드리지 않는다. 압륜 플래그는 기록 전에 읽는다 — 기록이 슬롯을 덮는다(docs/170 § D-3).</summary>
     private int RecountTagged(Document document, IReadOnlySet<ElementId> skip, ICollection<string> failed, JointCountDiagnostics diagnostics)
     {
         var count = 0;
-        foreach (var instance in PipeMaterialPartCollector.AddinInstances(document))
+        foreach (var instance in PipeMaterialPartCollector.AllPipingInstances(document))
         {
             if (skip.Contains(instance.Id)) continue;
             var material = PipeAlignmentParameters.MaterialFromModelValue(instance.LookupParameter(ValvePipingParameters.Material)?.AsString());
@@ -532,8 +532,8 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
         var assigned = new Dictionary<ElementId, int>();
         if (restored.Count == 0) return assigned;
 
-        // 재기록 대상은 DH_Addin이 비어 있는 인스턴스라 tagged에 섞이지 않지만(UntaggedInstances),
-        // 신규 배치 경로와 같은 모양을 유지하려고 제외 목록을 넘긴다(docs/180 § D).
+        // Read는 DH_Addin 무관 전체를 읽음(docs/287) — 재기록 대상도 걸리므로 제외 목록으로 반드시 뺌.
+        // 안 빼면 이번 대상의 옛 번호가 기존 번호로 잡힘(docs/180 § D).
         var tagged = PipeMaterialPartCollector.Read(document, restored.Select(x => x.Instance.Id).ToHashSet());
 
         foreach (var group in restored.GroupBy(x => x.JunctionId, StringComparer.Ordinal))

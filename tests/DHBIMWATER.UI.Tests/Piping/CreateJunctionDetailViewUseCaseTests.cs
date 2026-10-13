@@ -19,7 +19,7 @@ public sealed class CreateJunctionDetailViewUseCaseTests
         Assert.Single(result.Created);
         Assert.Single(result.Skipped);
         Assert.True(transaction.Committed);
-        Assert.Equal([new VerticalSlot(2, 1)], repo.FirstSlots);
+        Assert.Equal([new VerticalSlot(2, 1, 2)], repo.FirstSlots);
     }
 
     [Fact]

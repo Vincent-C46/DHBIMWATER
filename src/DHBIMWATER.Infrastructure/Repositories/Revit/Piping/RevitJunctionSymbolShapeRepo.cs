@@ -69,8 +69,8 @@ internal sealed class RevitJunctionSymbolShapeRepo : IJunctionSymbolShapeRepo
                 if (points.Count > 0)
                 {
                     var shape = JunctionSymbolShape.FromPolylines(polylines);
-                    if (shape.MaxX - shape.MinX > 0.01 && shape.MaxY - shape.MinY > 0.01)
-                        shapes[instance.Id.Value] = shape;
+                    // 직관은 선 한 줄이라 한쪽 폭 0이어도 받음
+                    if (shape.IsRenderable) shapes[instance.Id.Value] = shape;
                     else note += "; 크기가 0인 도형";
                 }
                 if (read.PointCount == 0) note += "; 기호선을 찾지 못함";
@@ -146,7 +146,7 @@ internal sealed class RevitJunctionSymbolShapeRepo : IJunctionSymbolShapeRepo
     {
         double Read(string name)
         {
-            var parameter = instance.LookupParameter(name);
+            var parameter = JunctionSymbolParameterLookup.Find(instance, name);
             return parameter is { StorageType: StorageType.Double } ? parameter.AsDouble() : 0;
         }
         return new SymbolVector(Read(JunctionDetailParameters.SymbolOffsetX), Read(JunctionDetailParameters.SymbolOffsetY),
@@ -157,10 +157,10 @@ internal sealed class RevitJunctionSymbolShapeRepo : IJunctionSymbolShapeRepo
         List<JunctionSymbolShapeDiagnostic> diagnostics)
     {
         var parameters = new[] { JunctionDetailParameters.SymbolOffsetX, JunctionDetailParameters.SymbolOffsetY }
-            .Select(instance.LookupParameter).Where(x => x is { IsReadOnly: false, StorageType: StorageType.Double }).ToList();
+            .Select(name => JunctionSymbolParameterLookup.Find(instance, name)).Where(x => x is { IsReadOnly: false, StorageType: StorageType.Double }).ToList();
         if (parameters.Count == 0)
             return new[] { JunctionDetailParameters.SymbolOffsetX, JunctionDetailParameters.SymbolOffsetY }
-                .Any(name => instance.LookupParameter(name) is not null) ? "확인 안 함" : "매개변수 없음";
+                .Any(name => JunctionSymbolParameterLookup.Find(instance, name) is not null) ? "확인 안 함" : "매개변수 없음";
 
         var parameter = parameters[0];
         var original = parameter.AsDouble();
@@ -172,7 +172,8 @@ internal sealed class RevitJunctionSymbolShapeRepo : IJunctionSymbolShapeRepo
             parameter.Set(original + delta);
             instance.Document.Regenerate();
             var after = AverageWorldPoint(instance, view);
-            var direction = parameter.Definition.Name == JunctionDetailParameters.SymbolOffsetX ? XYZ.BasisX : XYZ.BasisY;
+            var direction = JunctionDetailParameters.NameMatches(parameter.Definition.Name, JunctionDetailParameters.SymbolOffsetX)
+                ? XYZ.BasisX : XYZ.BasisY;
             var expected = instance.GetTransform().OfVector(direction * delta);
             var moved = after is not null && (after - before).DistanceTo(expected) <= RevitUnitConverter.MmToFt(5);
             return moved ? "반응함" : "반응 없음";

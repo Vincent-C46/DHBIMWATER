@@ -19,7 +19,9 @@ public sealed class JunctionDetailViewModelTests
         Assert.True(vm.CreatePlan);
         Assert.False(vm.Backfill);
         Assert.True(vm.ExpandVertical);
-        Assert.Equal(8, vm.StepPaperMm);
+        var set = Assert.Single(vm.OffsetSets);
+        Assert.Equal(8, set.StepPaperMm);
+        Assert.True(set.IsY);
         Assert.Equal(50, vm.ViewScale);
         Assert.True(vm.PlaceTags);
         Assert.False(vm.IsBackfillEnabled);
@@ -30,7 +32,7 @@ public sealed class JunctionDetailViewModelTests
     public void OffsetPreview_RecalculatesScaleAndCollapsesToZero()
     {
         var vm = Create();
-        vm.StepPaperMm = 7.5;
+        vm.OffsetSets[0].StepText = "7.5";
         vm.ViewScale = 20;
         Assert.Equal("150", Assert.Single(vm.OffsetRows).WorldUpMm);
 
@@ -40,31 +42,54 @@ public sealed class JunctionDetailViewModelTests
     }
 
     [Fact]
-    public void StepSlider_MovesPreviewPoint_AndStretchesValveRoomBox()
+    public void StepText_AllowsNegativeAndLargeValues_AndKeepsLastValueWhileTyping()
     {
         var vm = Create();
-        vm.StepPaperMm = 5;
-        var nearY = Assert.Single(vm.PreviewPoints).Y;
-        var nearBoxTop = vm.PreviewBoxTop;
+        var set = vm.OffsetSets[0];
+        set.StepText = "-";
+        Assert.True(set.HasError);
+        Assert.Equal(8, set.StepPaperMm);
 
-        vm.StepPaperMm = 10;
-        var farY = Assert.Single(vm.PreviewPoints).Y;
+        set.StepText = "-8";
+        Assert.False(set.HasError);
+        Assert.Equal("-400", Assert.Single(vm.OffsetRows).WorldUpMm);
+        Assert.Equal("-400", Assert.Single(vm.OffsetRows).LocalYmm);
 
-        Assert.Equal(40, nearY - farY);   // 간격 5mm 차이 × 화면 8px/mm
-        Assert.True(vm.PreviewBoxTop < nearBoxTop);
-        Assert.True(vm.PreviewStackTop < 337);
-        Assert.False(vm.IsPreviewDimVisible);   // 부재 1개면 간격 치수선이 없다
+        set.StepText = "50";
+        Assert.Equal("2500", Assert.Single(vm.OffsetRows).WorldUpMm);
     }
 
     [Fact]
-    public void CollapsedPreview_KeepsAllPointsOnTheMainLine()
+    public void Preview_MovesVerticalPartFromRootBySignedStep()
     {
         var vm = Create();
+        double Dy() => vm.PreviewPoints.Single(x => x.Item.ElementId == 2).Y - vm.PreviewPoints.Single(x => x.Item.ElementId == 1).Y;
+        double Dx() => vm.PreviewPoints.Single(x => x.Item.ElementId == 2).X - vm.PreviewPoints.Single(x => x.Item.ElementId == 1).X;
+        Assert.Equal(-64, Dy(), 6);   // 8mm × 8px, 캔버스 Y 아래가 +
+        vm.OffsetSets[0].StepText = "-5";
+        Assert.Equal(40, Dy(), 6);
+        vm.OffsetSets[0].IsX = true;
+        Assert.Equal(-40, Dx(), 6);
+        Assert.Equal("-250", Assert.Single(vm.OffsetRows).LocalXmm);
         vm.ExpandVertical = false;
-        Assert.Equal(370, Assert.Single(vm.PreviewPoints).Y);
-        Assert.Equal(285, vm.PreviewBoxTop);
-        Assert.False(vm.IsPreviewDimVisible);
+        Assert.Equal(0, Dx(), 6);
+        Assert.True(vm.PreviewCanvasWidth >= 400);
     }
+
+    [Fact]
+    public void ApplyAllSets_SetsAxisAndStepForEverySet()
+    {
+        var vm = Create();
+        vm.BulkAxisX = true;
+        vm.BulkStepText = "-6";
+        vm.ApplyAllSetsCommand.Execute(null);
+        var set = Assert.Single(vm.OffsetSets);
+        Assert.True(set.IsX);
+        Assert.Equal(-6, set.StepPaperMm);
+        Assert.Equal("-6", set.StepText);
+        Assert.Equal("-300", Assert.Single(vm.OffsetRows).LocalXmm);
+    }
+
     [Fact]
     public void DisconnectedVerticalItem_HasNoOrderAndZeroOffset()
     {
@@ -107,42 +132,25 @@ public sealed class JunctionDetailViewModelTests
     }
 
     [Fact]
-    public void ExpandDirection_ChangesPreviewAndLocalOffset()
-    {
-        var vm = Create();
-        Assert.True(vm.ExpandY);
-        Assert.True(vm.ExpandPositive);
-        Assert.Equal(306, Assert.Single(vm.PreviewPoints).Y);
-        vm.ExpandPositive = false;
-        Assert.Equal(434, Assert.Single(vm.PreviewPoints).Y);
-        Assert.Equal("-400", Assert.Single(vm.OffsetRows).LocalYmm);
-        vm.ExpandX = true;
-        Assert.Equal(206, Assert.Single(vm.PreviewPoints).X);
-        Assert.Equal("-400", Assert.Single(vm.OffsetRows).LocalXmm);
-        vm.ExpandVertical = false;
-        Assert.Equal(270, Assert.Single(vm.PreviewPoints).X);
-    }
-
-    [Fact]
     public void ShapePreview_ScalesWithViewScale_AndUsesFallbackWhenMissing()
     {
         var shape = JunctionSymbolShape.FromPolylines([
             (IReadOnlyList<ShapePoint>)[new(-50, -50), new(50, -50), new(50, 50), new(-50, 50), new(-50, -50)]
         ]);
         var vm = Create(shape: shape);
-        var geometry = Assert.Single(vm.PreviewPoints).ShapeGeometry!;
+        var geometry = vm.PreviewPoints.Single(x => x.HasShape).ShapeGeometry!;
         Assert.Equal(16, geometry.Bounds.Width, 6);
-        Assert.Equal("기호선을 읽은 부재 1/1개 · 오프셋 반응 1개", vm.ShapeDiagnosticSummary);
+        Assert.Equal("기호선을 읽은 부재 1/2개 · 오프셋 반응 1개", vm.ShapeDiagnosticSummary);
 
         vm.ViewScale = 100;
-        Assert.Equal(8, Assert.Single(vm.PreviewPoints).ShapeGeometry!.Bounds.Width, 6);
-        Assert.False(Assert.Single(Create().PreviewPoints).HasShape);
+        Assert.Equal(8, vm.PreviewPoints.Single(x => x.HasShape).ShapeGeometry!.Bounds.Width, 6);
+        Assert.All(Create().PreviewPoints, x => Assert.False(x.HasShape));
 
         var shapeRepo = new EmptyShapeRepo(shape);
         var onceVm = Create(shape: shape, shapeRepo: shapeRepo);
         onceVm.ViewScale = 20;
-        onceVm.ExpandX = true;
-        onceVm.ExpandPositive = false;
+        onceVm.OffsetSets[0].IsX = true;
+        onceVm.OffsetSets[0].StepText = "-8";
         Assert.Equal(1, shapeRepo.ReadCount);
     }
 
@@ -167,7 +175,9 @@ public sealed class JunctionDetailViewModelTests
         ];
 
         public IReadOnlyList<JunctionPreviewItem> GetPreviewItems(JunctionDetailGroup group) =>
-        [new(2, 3, "단관", "DN100 L=300", JunctionSymbolKind.Pipe, 1,
+        [new(1, 1, "T관", "DN300×DN100", JunctionSymbolKind.Tee, null,
+            new(1, 0, 0), new(0, 1, 0), new(0, 0, 1), new(0, 1, 0), 0, true, new(1, 0, 0)),
+         new(2, 3, "단관", "DN100 L=300", JunctionSymbolKind.Pipe, 1,
             new(1, 0, 0), new(0, 1, 0), new(0, 0, 1), new(0, 1, 0), 0, connected, new(1, 0, 0))];
         public string GetRoomType() => "공기밸브실";
         public IReadOnlyList<JunctionDetailTagType> GetTagTypes() => [];

@@ -17,7 +17,8 @@ public sealed class BuildJunctionDetailPreviewUseCaseTests
 
         var result = Create(transaction, shapes).Execute();
 
-        Assert.Equal([2L, 3L], shapes.ElementIds);
+        // 수평 부재까지 전부 읽음. 순서 = 수평·고아 먼저(번호순), 그다음 세트 순서
+        Assert.Equal([1L, 3L, 2L], shapes.ElementIds);
         Assert.Equal(["Begin", "Rollback"], transaction.Events);
         Assert.DoesNotContain("Commit", transaction.Events);
         Assert.Single(result.ShapeDiagnostics!);
@@ -30,11 +31,25 @@ public sealed class BuildJunctionDetailPreviewUseCaseTests
         var transaction = new TestTransaction();
         var result = Create(transaction, new TestShapeRepo { Exception = new InvalidOperationException("읽기 실패") }).Execute();
 
-        Assert.All(Assert.Single(result.Junctions).VerticalItems, item => Assert.Null(item.Shape));
-        Assert.Equal(2, result.ShapeDiagnostics!.Count);
+        Assert.All(Assert.Single(result.Junctions).Items, item => Assert.Null(item.Shape));
+        Assert.Equal(3, result.ShapeDiagnostics!.Count);
         Assert.All(result.ShapeDiagnostics, item => Assert.Contains("읽기 실패", item.Note));
         Assert.Contains("Rollback", transaction.Events);
         Assert.DoesNotContain("Commit", transaction.Events);
+    }
+
+    [Fact]
+    public void Execute_MarksHorizontalSetAndOrphan_AndLinksPartners()
+    {
+        var junction = Assert.Single(Create(new TestTransaction(), new TestShapeRepo()).Execute().Junctions);
+        var items = junction.Items.ToDictionary(x => x.ElementId);
+
+        Assert.False(items[1].IsVertical);
+        Assert.Null(items[1].Order);
+        Assert.Equal((1, 2L), (items[2].Order, items[2].SetId));
+        Assert.True(items[2].IsVertical);
+        Assert.False(items[3].Connected);
+        Assert.Equal([new JunctionPreviewLink(1, 2)], junction.Links);
     }
 
     [Fact]

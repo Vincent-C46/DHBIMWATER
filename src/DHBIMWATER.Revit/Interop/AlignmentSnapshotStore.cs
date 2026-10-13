@@ -25,7 +25,7 @@ internal sealed class AlignmentSnapshotStore : IAlignmentSnapshotStore
                 return string.Empty;
             }
 
-            var document = _document();
+            var document = _document(); 
             if (document is null)
             {
                 warning = "활성 Revit 문서가 없어 선형 스냅샷을 기록하지 못했습니다.";

@@ -26,7 +26,8 @@ public static class JunctionSymbolKindMapper
 public sealed record JunctionPreviewItem(long ElementId, int ItemNumber, string Name, string Spec,
     JunctionSymbolKind SymbolKind, int? Order, SymbolVector BasisX, SymbolVector BasisY, SymbolVector BasisZ,
     SymbolVector ViewUp, double RotationDegrees, bool Connected = true,
-    SymbolVector ViewRight = default, JunctionSymbolShape? Shape = null)
+    SymbolVector ViewRight = default, JunctionSymbolShape? Shape = null,
+    ShapePoint Position = default, bool IsVertical = true, long SetId = 0)
 {
     public string SymbolLabel => SymbolKind switch
     {
@@ -51,6 +52,9 @@ public sealed record JunctionSymbolShape(IReadOnlyList<IReadOnlyList<ShapePoint>
             : new JunctionSymbolShape(polylines, points.Min(x => x.X), points.Min(x => x.Y),
                 points.Max(x => x.X), points.Max(x => x.Y));
     }
+
+    // 직관 기호선은 한 줄이라 한쪽 폭 0 → 둘 중 하나만 있으면 그림
+    public bool IsRenderable => Polylines.Count > 0 && Math.Max(MaxX - MinX, MaxY - MinY) > 0.01;
 }
 
 public sealed record JunctionSymbolShapeDiagnostic(long ElementId, string Name, int CurveCount,
@@ -67,28 +71,4 @@ public static class JunctionSymbolShapeMath
         => new(point.X - (basisX.X * localOffset.X + basisY.X * localOffset.Y + basisZ.X * localOffset.Z),
             point.Y - (basisX.Y * localOffset.X + basisY.Y * localOffset.Y + basisZ.Y * localOffset.Z),
             point.Z - (basisX.Z * localOffset.X + basisY.Z * localOffset.Y + basisZ.Z * localOffset.Z));
-}
-
-public sealed record JunctionPreviewPoint(JunctionPreviewItem Item, double X, double Y)
-{
-    public double CanvasLeft => X - 36;
-    public double CanvasTop => Y - 21;
-}
-
-public static class JunctionPreviewLayout
-{
-    public static IReadOnlyList<JunctionPreviewPoint> Layout(IReadOnlyList<JunctionPreviewItem> items,
-        double stepPaperMm, bool expandVertical, JunctionExpandAxis axis = JunctionExpandAxis.Y,
-        bool positive = true)
-    {
-        const double originX = 270;
-        const double originY = 370;
-        return items.Select(item =>
-        {
-            var distance = expandVertical && item.Order is { } order ? order * stepPaperMm * 8 : 0;
-            return new JunctionPreviewPoint(item,
-                axis == JunctionExpandAxis.X ? originX + (positive ? distance : -distance) : originX,
-                axis == JunctionExpandAxis.Y ? originY + (positive ? -distance : distance) : originY);
-        }).ToList();
-    }
 }
