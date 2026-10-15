@@ -105,10 +105,10 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     public string ResultText { get => _resultText; private set => SetProperty(ref _resultText, value); }
     public string ActiveTab { get => _activeTab; set => SetProperty(ref _activeTab, value); }
     public string StatusText { get => _statusText; private set => SetProperty(ref _statusText, value); }
-    // 태그는 다중 카테고리 태그 유형만 씀(RevitJunctionDetailRepo.GetTagTypes)
+    // 태그 후보 = 다중 카테고리·배관 이음쇠·배관 부속류 태그(RevitJunctionDetailRepo.GetTagTypes)
     public string TagTypeMessage => TagTypes.Count == 0
-        ? "다중 카테고리 태그 유형이 없습니다. 프로젝트에 다중 카테고리 태그 패밀리를 로드하면 번호 원을 붙일 수 있습니다."
-        : string.Empty;
+        ? "번호 태그 유형이 없습니다. 다중 카테고리·배관 이음쇠·배관 부속류 태그 패밀리를 로드하면 번호 원을 붙일 수 있습니다."
+        : "범주 태그는 같은 범주 부재에만 붙습니다. 고른 유형이 안 맞는 부재는 맞는 유형이 하나뿐일 때 그 유형을 씁니다.";
     private double _previewCanvasWidth = MinCanvasWidth, _previewCanvasHeight = MinCanvasHeight;
     private Geometry? _previewCenterGeometry, _previewHighlightCenterGeometry;
     // 세트 선택(docs/290). 간격 바꿔 미리보기 다시 그려도 유지

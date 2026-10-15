@@ -25,7 +25,7 @@ public sealed class JunctionDetailViewModelTests
         // 태그 유형 0개 → 체크 해제로 보이고 실행에도 false(docs/291)
         Assert.False(vm.CanPlaceTags);
         Assert.False(vm.PlaceTags);
-        Assert.Contains("다중 카테고리 태그", vm.TagTypeMessage);
+        Assert.Contains("배관 부속류 태그", vm.TagTypeMessage);
     }
 
     [Fact]

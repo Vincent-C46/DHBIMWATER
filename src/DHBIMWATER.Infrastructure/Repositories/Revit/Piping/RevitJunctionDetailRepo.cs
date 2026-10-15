@@ -168,10 +168,30 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
         => Document().ProjectInformation.LookupParameter(ValveRoomProjectInfoParameters.RoomType)?.AsString() ?? string.Empty;
 
     public IReadOnlyList<JunctionDetailTagType> GetTagTypes()
-        => new FilteredElementCollector(Document()).OfCategory(BuiltInCategory.OST_MultiCategoryTags)
-            .WhereElementIsElementType().OfType<FamilySymbol>()
-            .Select(x => new JunctionDetailTagType(x.Id.Value, $"{x.FamilyName} : {x.Name}"))
+        => TagSymbols(Document())
+            .Select(x => new JunctionDetailTagType(x.Id.Value, $"[{x.Category?.Name}] {x.FamilyName} : {x.Name}"))
             .OrderBy(x => x.Name, StringComparer.Ordinal).ToList();
+
+    // 번호 태그 후보 = 다중 카테고리 + 배관 이음쇠 + 배관 부속류 태그. 격점 부재가 이음쇠·부속류뿐이라 이 셋이면 충분
+    private static readonly BuiltInCategory[] TagCategories =
+        [BuiltInCategory.OST_MultiCategoryTags, BuiltInCategory.OST_PipeFittingTags, BuiltInCategory.OST_PipeAccessoryTags];
+
+    private static List<FamilySymbol> TagSymbols(Document document)
+        => new FilteredElementCollector(document).WherePasses(new ElementMulticategoryFilter(TagCategories))
+            .WhereElementIsElementType().OfType<FamilySymbol>().ToList();
+
+    // 태그 유형이 이 부재를 태그할 수 있는지. 다중 카테고리 = 전부, 범주 태그 = 같은 범주 부재만
+    private static bool CanTag(FamilySymbol type, FamilyInstance instance)
+    {
+        var tagCategory = type.Category?.Id.Value;
+        if (tagCategory == (long)BuiltInCategory.OST_MultiCategoryTags) return true;
+        return instance.Category?.Id.Value switch
+        {
+            (long)BuiltInCategory.OST_PipeFitting => tagCategory == (long)BuiltInCategory.OST_PipeFittingTags,
+            (long)BuiltInCategory.OST_PipeAccessory => tagCategory == (long)BuiltInCategory.OST_PipeAccessoryTags,
+            _ => false,
+        };
+    }
 
     public JunctionDetailViewChange CreateOrUpdateView(JunctionDetailGroup group, IReadOnlyList<VerticalSlot> slots, JunctionDetailViewOptions options)
     {
@@ -460,14 +480,17 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
         IReadOnlyList<JunctionNode> nodes, IReadOnlyList<VerticalSlot> slots, JunctionDetailViewOptions options,
         List<string> warnings)
     {
-        var types = new FilteredElementCollector(document).OfCategory(BuiltInCategory.OST_MultiCategoryTags)
-            .WhereElementIsElementType().OfType<FamilySymbol>().ToList();
+        var types = TagSymbols(document);
         var selectedType = options.TagTypeId > 0 ? types.FirstOrDefault(x => x.Id.Value == options.TagTypeId) : null;
-        var type = selectedType ?? (types.Count == 1 ? types[0] : null);
-        if (type is null)
-            warnings.Add(types.Count == 0 ? "격점 번호 태그 유형이 없어 새 태그를 만들지 않았습니다."
-                : "격점 번호 태그 유형이 여러 개라 새 태그 대상을 정할 수 없습니다.");
-        else if (!type.IsActive) type.Activate();
+        if (types.Count == 0) warnings.Add("격점 번호 태그 유형이 없어 새 태그를 만들지 않았습니다.");
+        // 부재별 유형: 고른 유형이 맞으면 그것, 아니면 맞는 유형이 하나뿐일 때 그것(이음쇠 + 부속류 태그 섞어 쓰기)
+        FamilySymbol? TypeFor(FamilyInstance instance)
+        {
+            if (selectedType is not null && CanTag(selectedType, instance)) return selectedType;
+            var compatible = types.Where(x => CanTag(x, instance)).ToList();
+            return compatible.Count == 1 ? compatible[0] : null;
+        }
+        var noType = new List<string>();
         var groupIds = instances.Select(x => x.Id).ToHashSet();
         var existingTags = new FilteredElementCollector(document, view.Id).OfClass(typeof(IndependentTag))
             .Cast<IndependentTag>().Where(tag => tag.GetTaggedLocalElementIds().All(groupIds.Contains))
@@ -521,8 +544,14 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
                     if (!IsAddinPlaced(tag, instance, legacyHead)) { kept++; continue; }
                     ApplyLeader(tag, instance, head, leaderEnd);
                 }
-                else if (type is not null)
+                else if (types.Count > 0 && TypeFor(instance) is null)
                 {
+                    noType.Add(instance.Category?.Name ?? "기타");
+                }
+                else if (types.Count > 0)
+                {
+                    var type = TypeFor(instance)!;
+                    if (!type.IsActive) type.Activate();
                     var created = IndependentTag.Create(document, type.Id, view.Id, new Reference(instance), true,
                         TagOrientation.Horizontal, head);
                     ApplyLeader(created, instance, head, leaderEnd);
@@ -533,6 +562,9 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
                 warnings.Add($"부재 {instance.Id.Value}: 번호 태그를 만들 수 없습니다 ({ex.Message})");
             }
         }
+        if (noType.Count > 0)
+            warnings.Add($"번호 태그 유형을 정할 수 없어 {noType.Count}개 부재({string.Join(", ", noType.Distinct())})는 태그를 만들지 않았습니다. " +
+                "그 범주 태그나 다중 카테고리 태그를 로드하거나, 맞는 유형을 고르세요.");
         if (kept > 0) warnings.Add($"사용자가 옮긴 번호 태그 {kept}개는 그대로 두었습니다");
     }
 
