@@ -4,26 +4,26 @@ using DHBIMWATER.UI.Base;
 
 namespace DHBIMWATER.UI.ViewModels.Documentation;
 
-/// <summary>수직분기 세트 하나의 펼침 축·간격. 간격은 도면 mm, 음수 = 반대 방향, 0 = 펼치지 않음, 상한 없음.</summary>
+/// <summary>수직분기 세트 하나의 펼침 축·간격. 간격은 실제 mm(심볼오프셋 값), 음수 = 반대 방향, 0 = 펼치지 않음, 상한 없음.</summary>
 public sealed class JunctionOffsetSetViewModel : ViewModelBase
 {
     private readonly Action _changed;
     private readonly Func<int> _viewScale;
     private JunctionExpandAxis _axis;
-    private double _stepPaperMm;
+    private double _stepMm;
     private string _stepText;
     private bool _hasError;
     private bool _isSelected;
 
     public JunctionOffsetSetViewModel(long setId, int number, string members, JunctionExpandAxis axis,
-        double stepPaperMm, Func<int> viewScale, Action changed)
+        double stepMm, Func<int> viewScale, Action changed)
     {
         SetId = setId;
         Number = number;
         Members = members;
         _axis = axis;
-        _stepPaperMm = stepPaperMm;
-        _stepText = Format(stepPaperMm);
+        _stepMm = stepMm;
+        _stepText = Format(stepMm);
         _viewScale = viewScale;
         _changed = changed;
     }
@@ -35,7 +35,7 @@ public sealed class JunctionOffsetSetViewModel : ViewModelBase
     public string AxisGroupName => $"JunctionSetAxis{SetId}";
     public string Members { get; }
     public JunctionExpandAxis Axis => _axis;
-    public double StepPaperMm => _stepPaperMm;
+    public double StepMm => _stepMm;
     public bool IsX { get => _axis == JunctionExpandAxis.X; set { if (value) SetAxis(JunctionExpandAxis.X); } }
     public bool IsY { get => _axis == JunctionExpandAxis.Y; set { if (value) SetAxis(JunctionExpandAxis.Y); } }
     public bool HasError { get => _hasError; private set => SetProperty(ref _hasError, value); }
@@ -51,27 +51,27 @@ public sealed class JunctionOffsetSetViewModel : ViewModelBase
             if (!SetProperty(ref _stepText, value)) return;
             if (!TryParse(value, out var step)) { HasError = true; return; }
             HasError = false;
-            if (step == _stepPaperMm) return;
-            _stepPaperMm = step;
-            OnPropertyChanged(nameof(StepPaperMm));
+            if (step == _stepMm) return;
+            _stepMm = step;
+            OnPropertyChanged(nameof(StepMm));
             OnPropertyChanged(nameof(DirectionText));
             _changed();
         }
     }
 
-    public string DirectionText => _stepPaperMm == 0 ? "0 — 펼치지 않음"
-        : $"{(_axis == JunctionExpandAxis.X ? "X" : "Y")}{(_stepPaperMm > 0 ? "+" : "−")} 방향 · 실제 {Math.Abs(_stepPaperMm) * _viewScale():0.#} mm씩";
+    public string DirectionText => _stepMm == 0 ? "0 — 펼치지 않음"
+        : $"{(_axis == JunctionExpandAxis.X ? "X" : "Y")}{(_stepMm > 0 ? "+" : "−")} 방향 · {Math.Abs(_stepMm):0.#} mm씩 (도면 {Math.Abs(_stepMm) / _viewScale():0.#} mm)";
 
-    public JunctionSetOffset ToOffset() => new(SetId, _axis, _stepPaperMm);
+    public JunctionSetOffset ToOffset() => new(SetId, _axis, _stepMm);
 
     /// <summary>일괄 적용. 호출한 쪽이 미리보기를 한 번만 다시 그림.</summary>
-    public void Apply(JunctionExpandAxis axis, double stepPaperMm)
+    public void Apply(JunctionExpandAxis axis, double stepMm)
     {
         _axis = axis;
-        _stepPaperMm = stepPaperMm;
-        _stepText = Format(stepPaperMm);
+        _stepMm = stepMm;
+        _stepText = Format(stepMm);
         HasError = false;
-        foreach (var name in new[] { nameof(IsX), nameof(IsY), nameof(StepText), nameof(StepPaperMm), nameof(DirectionText) })
+        foreach (var name in new[] { nameof(IsX), nameof(IsY), nameof(StepText), nameof(StepMm), nameof(DirectionText) })
             OnPropertyChanged(name);
     }
 

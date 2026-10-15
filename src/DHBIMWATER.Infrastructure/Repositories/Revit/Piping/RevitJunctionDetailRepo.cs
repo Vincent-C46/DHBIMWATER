@@ -47,9 +47,7 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
         var chain = JunctionVerticalChain.Resolve(group.JunctionId, group.Nodes);
         var order = chain.Slots.ToDictionary(x => x.ElementId, x => x.Order);
         var orphans = chain.Orphans.ToHashSet();
-        var viewName = ViewName(group.JunctionId);
-        var plan = new FilteredElementCollector(document).OfClass(typeof(ViewPlan)).Cast<ViewPlan>()
-            .FirstOrDefault(x => !x.IsTemplate && x.ViewType == ViewType.FloorPlan && x.Name == viewName);
+        var plan = FindPlan(document, group.JunctionId);
         var upDirection = plan?.UpDirection ?? XYZ.BasisY;
         var rightDirection = plan?.RightDirection ?? XYZ.BasisX;
         return Instances(document, group).Select(instance =>
@@ -73,6 +71,97 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
                 new ShapePoint(RevitUnitConverter.FtToMm(transform.Origin.DotProduct(rightDirection)),
                     RevitUnitConverter.FtToMm(transform.Origin.DotProduct(upDirection))));
         }).ToList();
+    }
+
+    public JunctionValveRoom? GetValveRoom(JunctionDetailGroup group)
+    {
+        var document = Document();
+        var instances = Instances(document, group);
+        if (instances.Count == 0) return null;
+        var plan = FindPlan(document, group.JunctionId);
+        return FindValveRoom(document, instances, plan?.RightDirection ?? XYZ.BasisX, plan?.UpDirection ?? XYZ.BasisY);
+    }
+
+    private static ViewPlan? FindPlan(Document document, string junctionId)
+    {
+        var viewName = ViewName(junctionId);
+        return new FilteredElementCollector(document).OfClass(typeof(ViewPlan)).Cast<ViewPlan>()
+            .FirstOrDefault(x => !x.IsTemplate && x.ViewType == ViewType.FloorPlan && x.Name == viewName);
+    }
+
+    // 부재 범위 XY ±10m, Z 뷰 범위(아래 500·위 1000)와 겹치는 직선 벽 → 4면 판정 (docs/293)
+    internal static JunctionValveRoom? FindValveRoom(Document document, IReadOnlyList<FamilyInstance> instances,
+        XYZ right, XYZ up)
+    {
+        var bounds = Bounds(instances);
+        var reach = RevitUnitConverter.MmToFt(10000);
+        var outline = new Outline(
+            new XYZ(bounds.Min.X - reach, bounds.Min.Y - reach, bounds.Min.Z - RevitUnitConverter.MmToFt(500)),
+            new XYZ(bounds.Max.X + reach, bounds.Max.Y + reach, bounds.Max.Z + RevitUnitConverter.MmToFt(1000)));
+        var walls = new FilteredElementCollector(document).OfClass(typeof(Wall))
+            .WherePasses(new BoundingBoxIntersectsFilter(outline)).Cast<Wall>()
+            .Where(x => x.WallType.Kind != WallKind.Curtain && x.Location is LocationCurve { Curve: Line })
+            .Select(x => Footprint(x, right, up)).OfType<JunctionWallFootprint>().ToList();
+        var center = (bounds.Min + bounds.Max) / 2;
+        return JunctionValveRoom.Resolve(walls, new ShapePoint(PlanMm(center, right), PlanMm(center, up)));
+    }
+
+    // 벽 솔리드 꼭짓점을 벽 방향·법선으로 투영한 범위 → 위치선(중심선·마감면) 설정과 무관한 평면 사각형
+    private static JunctionWallFootprint? Footprint(Wall wall, XYZ right, XYZ up)
+    {
+        var line = (Line)((LocationCurve)wall.Location).Curve;
+        var along = new XYZ(line.Direction.X, line.Direction.Y, 0);
+        if (along.IsZeroLength()) return null;
+        along = along.Normalize();
+        var normal = XYZ.BasisZ.CrossProduct(along);
+        var points = new List<XYZ>();
+        if (wall.get_Geometry(new Options { DetailLevel = ViewDetailLevel.Coarse }) is { } geometry)
+            foreach (var item in geometry)
+                if (item is Solid { Volume: > 0 } solid)
+                    foreach (Edge edge in solid.Edges) points.AddRange(edge.Tessellate());
+        if (points.Count == 0) return null;
+        var a = points.Select(x => x.DotProduct(along)).ToList();
+        var n = points.Select(x => x.DotProduct(normal)).ToList();
+        var corners = new[] { (a.Min(), n.Min()), (a.Max(), n.Min()), (a.Max(), n.Max()), (a.Min(), n.Max()) }
+            .Select(c => along * c.Item1 + normal * c.Item2)
+            .Select(x => new ShapePoint(PlanMm(x, right), PlanMm(x, up))).ToList();
+        return new JunctionWallFootprint(wall.Id.Value, corners);
+    }
+
+    private static double PlanMm(XYZ point, XYZ axis) => RevitUnitConverter.FtToMm(point.DotProduct(axis));
+
+    private static XYZ PlanPoint(ViewPlan view, double rightMm, double upMm)
+        => view.RightDirection * RevitUnitConverter.MmToFt(rightMm) + view.UpDirection * RevitUnitConverter.MmToFt(upMm);
+
+    // 이전 치수 문자 = 이 뷰 문자 중 "숫자 x 숫자" 형식. 사용자가 같은 형식 문자 넣으면 같이 지워짐
+    private static readonly System.Text.RegularExpressions.Regex RoomLabelPattern =
+        new(@"^\d+(\.\d+)? x \d+(\.\d+)?$");
+
+    // 밸브실 안쪽 치수 문자. 바깥 우측 상단 모서리 위, 오른쪽 정렬 (docs/293)
+    private static void PlaceRoomLabel(Document document, ViewPlan view, JunctionValveRoom? room, List<string> warnings)
+    {
+        var previous = new FilteredElementCollector(document, view.Id).OfClass(typeof(TextNote)).Cast<TextNote>()
+            .Where(x => RoomLabelPattern.IsMatch(x.Text.Trim())).Select(x => x.Id).ToList();
+        if (previous.Count > 0) document.Delete(previous);
+        if (room is null)
+        {
+            warnings.Add($"{view.Name}: 부재를 둘러싼 4면 벽을 찾지 못해 내부 치수 문자를 넣지 않았습니다.");
+            return;
+        }
+        var typeId = document.GetDefaultElementTypeId(ElementTypeGroup.TextNoteType);
+        if (typeId == ElementId.InvalidElementId)
+        {
+            warnings.Add($"{view.Name}: 기본 문자 유형이 없어 내부 치수 문자를 넣지 않았습니다.");
+            return;
+        }
+        // 문자 기준점 = 위쪽 끝 → 글자 높이 + 1.5mm(도면)만큼 올려 벽 위에 얹음
+        var size = document.GetElement(typeId)?.get_Parameter(BuiltInParameter.TEXT_SIZE)?.AsDouble()
+            ?? RevitUnitConverter.MmToFt(2.5);
+        var lift = (size + RevitUnitConverter.MmToFt(1.5)) * view.Scale;
+        var corner = PlanPoint(view, room.OuterMaxX, room.OuterMaxY) + view.UpDirection * lift;
+        var anchor = new XYZ(corner.X, corner.Y, view.GenLevel?.Elevation ?? 0);
+        TextNote.Create(document, view.Id, anchor, room.Label,
+            new TextNoteOptions(typeId) { HorizontalAlignment = HorizontalTextAlignment.Right });
     }
 
     public string GetRoomType()
@@ -112,13 +201,17 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
             }
 
             view.DetailLevel = ViewDetailLevel.Coarse;
+            // 벽 뒤 심볼도 보이게 와이어프레임 (docs/292)
+            view.DisplayStyle = DisplayStyle.Wireframe;
             view.Scale = options.ViewScale;
             ConfigureRange(view, level, instances);
-            ConfigureCrop(view, instances, slots, options);
+            var room = FindValveRoom(document, instances, view.RightDirection, view.UpDirection);
+            ConfigureCrop(view, instances, slots, options, room);
             ConfigureCategories(document, view);
             RemovePreviousFilter(document, view);
 
             var warnings = ResetInstances(instances);
+            PlaceRoomLabel(document, view, room, warnings);
             WriteOffsets(instances, slots, view, options, warnings);
             if (options.PlaceTags) PlaceNumberTags(document, view, instances, group.Nodes, slots, options, warnings);
             sub.Commit();
@@ -182,7 +275,7 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
     {
         var set = options.For(slot.SetId);
         var axis = set.Axis == JunctionExpandAxis.X ? view.RightDirection : view.UpDirection;
-        return axis * RevitUnitConverter.MmToFt(slot.Order * set.StepPaperMm * view.Scale);
+        return axis * RevitUnitConverter.MmToFt(slot.Order * set.StepMm);
     }
 
     private static void RemovePreviousFilter(Document document, ViewPlan view)
@@ -220,7 +313,7 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
     }
 
     private static void ConfigureCrop(ViewPlan view, IReadOnlyList<FamilyInstance> instances,
-        IReadOnlyList<VerticalSlot> slots, JunctionDetailViewOptions options)
+        IReadOnlyList<VerticalSlot> slots, JunctionDetailViewOptions options, JunctionValveRoom? room)
     {
         var bounds = Bounds(instances);
         // 세트마다 방향이 달라 모든 이동량을 범위에 넣음
@@ -235,6 +328,13 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
             new XYZ(bounds.Max.X, bounds.Max.Y, bounds.Min.Z)
         };
         var local = shifts.SelectMany(shift => corners.Select(x => x + shift)).Select(inverse.OfPoint).ToList();
+        // 밸브실 벽 전체 포함 (docs/293)
+        if (room is not null)
+            local.AddRange(new[]
+            {
+                PlanPoint(view, room.OuterMinX, room.OuterMinY), PlanPoint(view, room.OuterMaxX, room.OuterMaxY),
+                PlanPoint(view, room.OuterMinX, room.OuterMaxY), PlanPoint(view, room.OuterMaxX, room.OuterMinY)
+            }.Select(inverse.OfPoint));
         var margin = RevitUnitConverter.MmToFt(1000);
         crop.Min = new XYZ(local.Min(x => x.X) - margin, local.Min(x => x.Y) - margin, crop.Min.Z);
         crop.Max = new XYZ(local.Max(x => x.X) + margin, local.Max(x => x.Y) + margin, crop.Max.Z);
@@ -262,9 +362,11 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
         {
             if (category.CategoryType != CategoryType.Model || !view.CanCategoryBeHidden(category.Id)) continue;
             // 심볼 .rfa = 일반 모델. 공유 중첩이면 자기 카테고리로 가시성 판정 → 같이 켬 (docs/284)
+            // 벽 = 밸브실 위치 파악용 (docs/292)
             var keep = category.Id.Value == (long)BuiltInCategory.OST_PipeFitting ||
                 category.Id.Value == (long)BuiltInCategory.OST_PipeAccessory ||
-                category.Id.Value == (long)BuiltInCategory.OST_GenericModel;
+                category.Id.Value == (long)BuiltInCategory.OST_GenericModel ||
+                category.Id.Value == (long)BuiltInCategory.OST_Walls;
             view.SetCategoryHidden(category.Id, !keep);
             if (keep) ShowSubCategories(view, category);
         }
@@ -375,12 +477,16 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
         var verticalIds = nodes.Where(x => x.Connectors.Count > 0 &&
                 x.Connectors.All(connector => Math.Abs(connector.Dz) >= JunctionVerticalChain.VerticalCosine))
             .Select(x => x.Id).ToHashSet();
+        // 미리보기가 정한 머리·지시선 끝(docs/296). 도면 mm × 축척 = 실제 mm
+        var planned = (options.TagPlacements ?? []).GroupBy(x => x.ElementId).ToDictionary(x => x.Key, x => x.First());
+        var paperToFt = RevitUnitConverter.MmToFt(view.Scale);
         var gap = RevitUnitConverter.MmToFt(JunctionPreviewLayout.TagGapPaperMm * view.Scale);
-        var moved = 0;
+        var kept = 0;
         foreach (var instance in instances)
         {
             if ((instance.LookupParameter(ValvePipingParameters.ItemNumber)?.AsInteger() ?? 0) <= 0) continue;
-            var center = instance.GetTransform().Origin;
+            var origin = instance.GetTransform().Origin;
+            var center = origin;
             var isVertical = verticalIds.Contains(instance.Id.Value);
             var axis = options.ExpandAxis;
             if (isVertical && slotById.TryGetValue(instance.Id.Value, out var slot))
@@ -388,24 +494,78 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
                 center += SlotShift(view, slot, options);
                 axis = options.For(slot.SetId).Axis;
             }
-            // 미리보기(JunctionPreviewLayout.Build)와 같은 규칙
+            // 종전 규칙 머리. 이전 버전 태그 소유 판정 + 배치 정보 없을 때 대체
             var side = axis == JunctionExpandAxis.Y ? view.RightDirection : view.UpDirection;
-            var position = isVertical ? center - side * gap : center - view.UpDirection * gap;
+            var legacyHead = isVertical ? center - side * gap : center - view.UpDirection * gap;
+            XYZ head, leaderEnd;
+            if (planned.TryGetValue(instance.Id.Value, out var plan))
+            {
+                // 미리보기 좌표 = 원점·뷰 축 내적(mm) → 뷰 축 합성. 높이는 부재 원점 Z
+                XYZ ToModel(double x, double y)
+                {
+                    var v = view.RightDirection * (x * paperToFt) + view.UpDirection * (y * paperToFt);
+                    return new XYZ(v.X, v.Y, origin.Z);
+                }
+                head = ToModel(plan.HeadX, plan.HeadY);
+                leaderEnd = ToModel(plan.LeaderX, plan.LeaderY);
+            }
+            else
+            {
+                head = legacyHead;
+                leaderEnd = center;
+            }
             try
             {
                 if (existingTags.TryGetValue(instance.Id, out var tag))
                 {
-                    tag.TagHeadPosition = position;
-                    moved++;
+                    if (!IsAddinPlaced(tag, instance, legacyHead)) { kept++; continue; }
+                    ApplyLeader(tag, instance, head, leaderEnd);
                 }
-                else if (type is not null) IndependentTag.Create(document, type.Id, view.Id, new Reference(instance), false,
-                    TagOrientation.Horizontal, position);
+                else if (type is not null)
+                {
+                    var created = IndependentTag.Create(document, type.Id, view.Id, new Reference(instance), true,
+                        TagOrientation.Horizontal, head);
+                    ApplyLeader(created, instance, head, leaderEnd);
+                }
             }
             catch (Exception ex)
             {
                 warnings.Add($"부재 {instance.Id.Value}: 번호 태그를 만들 수 없습니다 ({ex.Message})");
             }
         }
-        if (moved > 0) warnings.Add($"번호 태그 {moved}개를 다시 배치했습니다");
+        if (kept > 0) warnings.Add($"사용자가 옮긴 번호 태그 {kept}개는 그대로 두었습니다");
+    }
+
+    // 위치 같음 허용 오차: 실제 0.5mm
+    private static readonly double SamePositionFt = RevitUnitConverter.MmToFt(0.5);
+
+    /// <summary>애드인이 둔 자리 그대로인지(docs/296 § C). 기록 있으면 기록과 비교(머리·지시선 끝),
+    /// 없으면(이전 버전 태그) 종전 규칙 머리와 비교. 평면 위치만 비교(Z 무시).</summary>
+    private static bool IsAddinPlaced(IndependentTag tag, FamilyInstance instance, XYZ legacyHead)
+    {
+        if (JunctionTagStorageSchema.Read(tag) is { } record)
+        {
+            if (!SamePlan(tag.TagHeadPosition, record.Head)) return false;
+            if (record.LeaderEnd is null || !tag.HasLeader || tag.LeaderEndCondition != LeaderEndCondition.Free) return true;
+            return SamePlan(tag.GetLeaderEnd(new Reference(instance)), record.LeaderEnd);
+        }
+        return SamePlan(tag.TagHeadPosition, legacyHead);
+    }
+
+    private static bool SamePlan(XYZ a, XYZ b)
+        => Math.Abs(a.X - b.X) < SamePositionFt && Math.Abs(a.Y - b.Y) < SamePositionFt;
+
+    /// <summary>지시선 켬 · 자유 끝 · 끝 = 부재 중심선 위 · 꺾임점 = 끝과 머리 중점 → 직선 지시선(docs/296).
+    /// 머리 먼저 → 끝 → 꺾임점 순서(꺾임점 뒤에 머리 옮기면 Revit이 꺾임점 다시 잡을 수 있음).
+    /// 끝나면 소유 기록 = Revit이 실제로 둔 값. 보정되면 다음 실행에서 사용자 이동으로 잘못 판정하므로 넘긴 값 말고 다시 읽음.</summary>
+    private static void ApplyLeader(IndependentTag tag, FamilyInstance instance, XYZ head, XYZ leaderEnd)
+    {
+        var reference = new Reference(instance);
+        tag.HasLeader = true;
+        tag.LeaderEndCondition = LeaderEndCondition.Free;
+        tag.TagHeadPosition = head;
+        tag.SetLeaderEnd(reference, leaderEnd);
+        tag.SetLeaderElbow(reference, (head + leaderEnd) / 2);
+        JunctionTagStorageSchema.Write(tag, tag.TagHeadPosition, tag.GetLeaderEnd(reference));
     }
 }

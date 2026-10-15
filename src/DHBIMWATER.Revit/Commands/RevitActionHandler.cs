@@ -15,6 +15,9 @@ internal sealed class RevitActionHandler : IExternalEventHandler
 
     public void Enqueue(Action action) => _actions.Enqueue(action);
 
+    /// <summary>Raise 거부(Denied/TimedOut) 시 큐 비움 — 다음 Raise 때 묵은 요청이 돌지 않게(docs/295 § A).</summary>
+    public void Clear() => _actions.Clear();
+
     public void Execute(UIApplication app)
     {
         while (_actions.TryDequeue(out var action))

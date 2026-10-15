@@ -19,7 +19,7 @@ public sealed class CreateJunctionDetailViewUseCase
     }
 
     public JunctionDetailResult Execute(bool resetOnly = false)
-        => Execute(new JunctionDetailViewOptions(true, JunctionDetailParameters.StepPaperMm,
+        => Execute(new JunctionDetailViewOptions(true, JunctionDetailParameters.StepMm,
             JunctionDetailParameters.ViewScale, true, 0), resetOnly);
 
     public JunctionDetailResult Execute(JunctionDetailViewOptions options, bool resetOnly = false)

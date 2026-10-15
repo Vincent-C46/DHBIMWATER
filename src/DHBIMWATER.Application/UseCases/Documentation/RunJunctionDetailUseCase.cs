@@ -61,9 +61,9 @@ public sealed class RunJunctionDetailUseCase
 
         if (options.CreatePlan)
         {
-            var viewOptions = new JunctionDetailViewOptions(options.ExpandVertical, options.StepPaperMm,
+            var viewOptions = new JunctionDetailViewOptions(options.ExpandVertical, options.StepMm,
                 options.ViewScale, options.PlaceTags, options.TagTypeId, options.ExpandAxis, options.ExpandPositive,
-                options.SetOffsets);
+                options.SetOffsets, options.TagPlacements);
             try { plan = _plan.Execute(viewOptions); }
             catch (DhbimwaterException ex) when (ex.Code == ErrorCodes.NoActiveDocument) { throw; }
             catch (Exception ex) { warnings.Add($"평면 상세도 생성 실패: {ex.Message}"); }

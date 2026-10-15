@@ -47,7 +47,7 @@ public sealed class BuildJunctionDetailPreviewUseCase
                     .Distinct().ToList();
                 return new JunctionDetailPreviewJunction(group.JunctionId, _junctions.GetRoomType(),
                     group.Nodes.Count, items, PipeMaterialTable.Build(parts, group.JunctionId),
-                    chain.Warnings.Concat(group.Warnings ?? []).ToList(), links);
+                    chain.Warnings.Concat(group.Warnings ?? []).ToList(), links, _junctions.GetValveRoom(group));
             }).ToList();
         var diagnostics = new List<JunctionSymbolShapeDiagnostic>();
         var elementNames = previews.SelectMany(x => x.Items).ToDictionary(x => x.ElementId, x => x.Name);

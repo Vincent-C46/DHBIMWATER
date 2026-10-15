@@ -19,7 +19,7 @@ public sealed class JunctionDetailViewModelTests
         Assert.True(vm.CreatePlan);
         Assert.True(vm.ExpandVertical);
         var set = Assert.Single(vm.OffsetSets);
-        Assert.Equal(8, set.StepPaperMm);
+        Assert.Equal(400, set.StepMm);
         Assert.True(set.IsY);
         Assert.Equal(50, vm.ViewScale);
         // 태그 유형 0개 → 체크 해제로 보이고 실행에도 false(docs/291)
@@ -29,10 +29,10 @@ public sealed class JunctionDetailViewModelTests
     }
 
     [Fact]
-    public void OffsetPreview_RecalculatesScaleAndCollapsesToZero()
+    public void OffsetPreview_IgnoresScaleAndCollapsesToZero()
     {
         var vm = Create();
-        vm.OffsetSets[0].StepText = "7.5";
+        vm.OffsetSets[0].StepText = "150";
         vm.ViewScale = 20;
         Assert.Equal("150", Assert.Single(vm.OffsetRows).WorldUpMm);
 
@@ -48,14 +48,14 @@ public sealed class JunctionDetailViewModelTests
         var set = vm.OffsetSets[0];
         set.StepText = "-";
         Assert.True(set.HasError);
-        Assert.Equal(8, set.StepPaperMm);
+        Assert.Equal(400, set.StepMm);
 
-        set.StepText = "-8";
+        set.StepText = "-400";
         Assert.False(set.HasError);
         Assert.Equal("-400", Assert.Single(vm.OffsetRows).WorldUpMm);
         Assert.Equal("-400", Assert.Single(vm.OffsetRows).LocalYmm);
 
-        set.StepText = "50";
+        set.StepText = "2500";
         Assert.Equal("2500", Assert.Single(vm.OffsetRows).WorldUpMm);
     }
 
@@ -65,8 +65,8 @@ public sealed class JunctionDetailViewModelTests
         var vm = Create();
         double Dy() => vm.PreviewPoints.Single(x => x.Item.ElementId == 2).Y - vm.PreviewPoints.Single(x => x.Item.ElementId == 1).Y;
         double Dx() => vm.PreviewPoints.Single(x => x.Item.ElementId == 2).X - vm.PreviewPoints.Single(x => x.Item.ElementId == 1).X;
-        Assert.Equal(-64, Dy(), 6);   // 8mm × 8px, 캔버스 Y 아래가 +
-        vm.OffsetSets[0].StepText = "-5";
+        Assert.Equal(-64, Dy(), 6);   // 400mm ÷ 50 = 도면 8mm × 8px, 캔버스 Y 아래가 +
+        vm.OffsetSets[0].StepText = "-250";
         Assert.Equal(40, Dy(), 6);
         vm.OffsetSets[0].IsX = true;
         Assert.Equal(-40, Dx(), 6);
@@ -81,12 +81,12 @@ public sealed class JunctionDetailViewModelTests
     {
         var vm = Create();
         vm.BulkAxisX = true;
-        vm.BulkStepText = "-6";
+        vm.BulkStepText = "-300";
         vm.ApplyAllSetsCommand.Execute(null);
         var set = Assert.Single(vm.OffsetSets);
         Assert.True(set.IsX);
-        Assert.Equal(-6, set.StepPaperMm);
-        Assert.Equal("-6", set.StepText);
+        Assert.Equal(-300, set.StepMm);
+        Assert.Equal("-300", set.StepText);
         Assert.Equal("-300", Assert.Single(vm.OffsetRows).LocalXmm);
     }
 
@@ -104,7 +104,7 @@ public sealed class JunctionDetailViewModelTests
         Assert.NotNull(vm.PreviewHighlightCenterGeometry);
         Assert.True(vm.IsPreviewDimmed);
 
-        set.StepText = "-5";   // 미리보기 재생성 후에도 선택 유지
+        set.StepText = "-250";   // 미리보기 재생성 후에도 선택 유지
         Assert.True(set.IsSelected);
         Assert.Equal(SetHighlight.Highlighted, vm.PreviewPoints.Single(x => x.Item.ElementId == 2).Highlight);
 
@@ -125,6 +125,74 @@ public sealed class JunctionDetailViewModelTests
         vm.ClearSetSelection();
         vm.SelectSet(-12345);
         Assert.False(vm.HasSelectedSet);
+    }
+
+    // 모델리스(docs/295 § C): 새 세트 선택 때만 그 세트 부재 Id로 Revit 선택 요청
+    [Fact]
+    public void SelectSet_RequestsRevitSelectionWithSetMemberIds()
+    {
+        var vm = Create();
+        var calls = new List<IReadOnlyList<long>>();
+        vm.SelectInRevit = calls.Add;
+        var set = vm.OffsetSets[0];
+
+        vm.SelectSet(set, toggle: true);
+        Assert.Equal([2L], Assert.Single(calls));
+
+        vm.SelectSet(set, toggle: false);   // 같은 세트 입력칸 클릭 → 재요청 없음
+        vm.SelectSet(set, toggle: true);    // 해제 → 요청 없음
+        vm.ClearSetSelection();
+        vm.SelectSet(set.SetId);            // 더블클릭 복원 → 요청 없음
+        Assert.Single(calls);
+    }
+
+    // 태그 방향 콤보 → 번호 원·지시선 위치 바뀜, 지시선은 부재 중심에서 원 가장자리까지 직선(docs/296)
+    [Fact]
+    public void TagSide_MovesNumberCircleAndLeader()
+    {
+        var vm = Create();
+        vm.TagSide = JunctionTagSide.Right;
+        var right = vm.PreviewPoints.Single(x => x.Item.ElementId == 2);
+        Assert.Equal(0, right.LeaderX1, 6);
+        Assert.Equal(0, right.LeaderY1, 6);
+        Assert.True(right.LeaderX2 > 0);
+        Assert.Equal(right.LeaderY1, right.LeaderY2, 6);
+        Assert.Equal(right.NumberLeft + 10, right.LeaderX2 + 10, 6);   // 끝 = 원 왼쪽 가장자리
+
+        vm.TagSide = JunctionTagSide.Bottom;
+        var bottom = vm.PreviewPoints.Single(x => x.Item.ElementId == 2);
+        Assert.True(bottom.LeaderY2 > 0);   // 캔버스 Y 아래 = +
+        Assert.Equal(bottom.LeaderX1, bottom.LeaderX2, 6);
+    }
+
+    // 세트 선택 시 캔버스 맞춤 요청: 새 세트일 때만, 범위는 세트 부재 기호 포함
+    [Fact]
+    public void SelectSet_RequestsCanvasFitToSetBounds()
+    {
+        var vm = Create();
+        var fits = new List<System.Windows.Rect>();
+        vm.SetFocusRequested += fits.Add;
+        var set = vm.OffsetSets[0];
+
+        vm.SelectSet(set, toggle: true);
+        var bounds = Assert.Single(fits);
+        var member = vm.PreviewPoints.Single(x => x.Item.ElementId == 2);
+        Assert.True(bounds.Contains(new System.Windows.Point(member.X, member.Y)));
+
+        vm.SelectSet(set, toggle: false);
+        vm.SelectSet(set, toggle: true);
+        Assert.Single(fits);
+    }
+
+    // 모델리스(docs/295 § B): Revit이 요청 거부하면 실행 중 상태 해제
+    [Fact]
+    public void Run_RejectedByRevit_ClearsRunningState()
+    {
+        var vm = Create();
+        vm.RunInRevitContext = _ => false;
+        vm.RunCommand.Execute(null);
+        Assert.False(vm.IsRunning);
+        Assert.Equal("실패", vm.StatusText);
     }
 
     // XAML 스모크: 하이라이트 트리거(x:Static vm:SetHighlight)·카드 스타일이 실제 로드되는지(docs/290)
@@ -215,14 +283,33 @@ public sealed class JunctionDetailViewModelTests
         var onceVm = Create(shape: shape, shapeRepo: shapeRepo);
         onceVm.ViewScale = 20;
         onceVm.OffsetSets[0].IsX = true;
-        onceVm.OffsetSets[0].StepText = "-8";
+        onceVm.OffsetSets[0].StepText = "-400";
         Assert.Equal(1, shapeRepo.ReadCount);
     }
 
-    private static JunctionDetailViewModel Create(bool connected = true, bool material = true,
-        JunctionSymbolShape? shape = null, EmptyShapeRepo? shapeRepo = null)
+    [Fact]
+    public void Preview_DrawsValveRoomWalls_AndInnerSizeLabel()
     {
-        var repo = new PreviewRepo(connected);
+        JunctionWallFootprint Wall(long id, double minX, double minY, double maxX, double maxY)
+            => new(id, [new(minX, minY), new(maxX, minY), new(maxX, maxY), new(minX, maxY)]);
+        var room = JunctionValveRoom.Resolve(
+            [Wall(10, -1500, -1000, -1200, 1000), Wall(11, 1200, -1000, 1500, 1000),
+             Wall(12, -1500, -1000, 1500, -700), Wall(13, -1500, 700, 1500, 1000)], new ShapePoint(0, 0));
+
+        var vm = Create(room: room);
+
+        Assert.Equal("2.4 x 1.4", vm.RoomLabel);
+        Assert.NotNull(vm.PreviewWallGeometry);
+        // 벽 바깥 범위(3000 ÷ 50 = 도면 60mm × 8px)가 캔버스에 들어감
+        Assert.True(vm.PreviewCanvasWidth >= 60 * 8);
+        Assert.Equal("", Create().RoomLabel);
+        Assert.Null(Create().PreviewWallGeometry);
+    }
+
+    private static JunctionDetailViewModel Create(bool connected = true, bool material = true,
+        JunctionSymbolShape? shape = null, EmptyShapeRepo? shapeRepo = null, JunctionValveRoom? room = null)
+    {
+        var repo = new PreviewRepo(connected, room);
         var useCase = new BuildJunctionDetailPreviewUseCase(repo, new PartsRepo(material), new PreviewTransaction(),
             shapeRepo ?? new EmptyShapeRepo(shape));
         var backfill = new BackfillPipeMaterialParametersUseCase(null!, new BackfillRepo(), null!, null!);
@@ -230,7 +317,7 @@ public sealed class JunctionDetailViewModelTests
             new CreateJunctionDetailViewUseCase(null!, repo), backfill);
     }
 
-    private sealed class PreviewRepo(bool connected) : IJunctionDetailRepo
+    private sealed class PreviewRepo(bool connected, JunctionValveRoom? room = null) : IJunctionDetailRepo
     {
         public IReadOnlyList<JunctionDetailGroup> GetJunctions() =>
         [
@@ -249,6 +336,7 @@ public sealed class JunctionDetailViewModelTests
         public JunctionDetailViewChange CreateOrUpdateView(JunctionDetailGroup group, IReadOnlyList<VerticalSlot> slots,
             JunctionDetailViewOptions options) => new(true, []);
         public IReadOnlyList<string> ResetOffsets(JunctionDetailGroup group) => [];
+        public JunctionValveRoom? GetValveRoom(JunctionDetailGroup group) => room;
     }
 
     private sealed class PartsRepo(bool material) : IPipeMaterialDraftingRepo
