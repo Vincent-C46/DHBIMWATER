@@ -151,8 +151,10 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         var bypassLayouts = new Dictionary<Guid, BypassLayout>();
         var bypassLayoutCache = new Dictionary<BypassLayoutKey, BypassLayout>();
         // 중심이 본관 T 절점에 놓여 두 엣지에 걸치는 세트(docs/273 § C). 반대편 엣지의 A 구간을 그 엣지를 처리하기 전에 알아야 하므로 루프 전에 계획한다.
+        // T형관 중심 세트 안 본관 밸브 고정 구간(docs/297 § B-4). 캔버스 점 대신 이 자리.
+        var forcedValveSpans = new Dictionary<Guid, OccupiedSpan>();
         var teeCenteredSets = PlanTeeCenteredSets(document, symbols, network, families, skipPlan, legAnchors,
-            unusableValves, skipped, droppedFittings, bypassLayouts, bypassLayoutCache, warnings);
+            unusableValves, skipped, droppedFittings, bypassLayouts, bypassLayoutCache, warnings, spanCache, forcedValveSpans);
         var straightCount = 0;
         var shortCount = 0;
         for (var edgeIndex = 0; edgeIndex < network.Edges.Count; edgeIndex++)
@@ -198,7 +200,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             occupied.AddRange(InlineFittingSpans(document, symbols, edge, network, families, spanCache, startAnchor, direction,
                 lengthMm, startAnchored, endAnchored, teePairs,
                 unusableValves, skipped, inlineAxisCenters, droppedFittings, reservedWidths,
-                teeCenteredHere.Select(x => x.Span).ToList()));
+                teeCenteredHere.Select(x => x.Span).ToList(), forcedValveSpans));
 
             // 위치 오류(배관 밖·겹침·짧은 틈)는 그 부속만 건너뛴다(docs/251 § B). 종전에는 아래 PL-301로 전체가 롤백됐다.
             var filtered = InlineSpanFilter.Filter(lengthMm, occupied.Select(x => new InlineSpanCandidate(x.Id, x.Span, SpanPriority(network, x.Id))));
@@ -988,7 +990,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         double edgeLengthMm, bool startAnchored, bool endAnchored, IReadOnlyList<BypassTeePair> teePairs,
         IDictionary<string, string> unusableValves, ICollection<PipeConnectionFailure> skipped,
         IDictionary<Guid, double> axisCenters, ISet<Guid> droppedFittings, IDictionary<Guid, double> reservedWidths,
-        IReadOnlyList<OccupiedSpan> extraTeeSpans)
+        IReadOnlyList<OccupiedSpan> extraTeeSpans, IReadOnlyDictionary<Guid, OccupiedSpan> forcedValveSpans)
     {
         var axis = new EdgeAxis(startAnchor, direction);
         // 이 엣지 세트의 A 구간 전부. 밸브·이음관이 A 주관 커넥터에 밀착하는 후보다(docs/257 § B-2).
@@ -1025,7 +1027,9 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                 // "T 바로 옆"을 찍으면 T 몸통 안쪽이 된다. 밸브끼리는 밀착하지 않는다.
                 // 바이패스 세트 A도 같은 이유로 밀착 대상이다(docs/257) — 두 A 사이면 가까운 A 안쪽 커넥터에 거리 제한 없이,
                 // A 바깥이면 A 구간을 밸브 스팬 후보로 넘겨 절점 부속과 같은 허용 거리 규칙을 따른다.
-                var span = BypassTeeSnap.InsideSet(center, widthMm.Value, teePairs)
+                // T형관 중심 세트 안 밸브는 계획한 자리 그대로(docs/297 § B-4).
+                var span = (forcedValveSpans.TryGetValue(fitting.Id, out var forced) ? forced : (OccupiedSpan?)null)
+                           ?? BypassTeeSnap.InsideSet(center, widthMm.Value, teePairs)
                            ?? InlineJointSnap.Resolve(center, widthMm.Value, teeSpans, edgeLengthMm, startAnchored, endAnchored, JointSnapToleranceMm)
                            ?? new OccupiedSpan(center - widthMm.Value / 2, center + widthMm.Value / 2);
                 axisCenters[fitting.Id] = (span.StartMm + span.EndMm) / 2;

@@ -150,7 +150,8 @@ internal sealed partial class RevitPipeSegmentCommandRepo
         Document document, FamilySymbolCache symbols, PipeNetworkDefinition network, PipeSegmentFamilySelection families, SkipPlan skipPlan,
         IReadOnlyDictionary<(Guid NodeId, Guid EdgeId), NodeLegAnchor> legAnchors,
         IDictionary<string, string> unusableValves, ICollection<PipeConnectionFailure> skipped, ISet<Guid> droppedFittings,
-        IDictionary<Guid, BypassLayout> layouts, IDictionary<BypassLayoutKey, BypassLayout> cache, ICollection<string> warnings)
+        IDictionary<Guid, BypassLayout> layouts, IDictionary<BypassLayoutKey, BypassLayout> cache, ICollection<string> warnings,
+        Dictionary<(ElementId SymbolId, double DiameterMm), InlineSpan> spanCache, IDictionary<Guid, OccupiedSpan> forcedValveSpans)
     {
         var result = new Dictionary<Guid, TeeCenteredSet>();
         const double nodeToleranceMm = 1.0;
@@ -176,13 +177,59 @@ internal sealed partial class RevitPipeSegmentCommandRepo
             var center = AxisDistanceMm(canvasPoint, ownerFrame.Axis);
             // T 절점이 엣지 끝이면 소속 엣지 쪽 A는 시작 방향(−1)이고 반대편 A는 +1이다. 시작이면 반대다.
             var ownerSign = atEnd ? -1 : 1;
+            var otherNodeAtStart = other.Start.DistanceTo(nodePosition) <= 0.01;
+
+            // docs/297 — 세트 안 본관 밸브 폭만큼 A 오프셋 다시 잡음. 차이는 V1–V2 단관이 흡수. 밸브 2개 세트만 자리 고정.
+            var ownerForced = new List<(Guid Id, OccupiedSpan Span)>();
+            var otherForced = new List<(Guid Id, OccupiedSpan Span)>();
+            string? spoolWarning = null;
+            if (legAnchors.ContainsKey((node.Id, owner.Id)) && legAnchors.ContainsKey((node.Id, other.Id)))
+            {
+                var ownerValves = InsideSetValves(document, symbols, network, families, spanCache, unusableValves, droppedFittings,
+                    owner, nodePosition, layout);
+                var otherValves = InsideSetValves(document, symbols, network, families, spanCache, unusableValves, droppedFittings,
+                    other, nodePosition, layout);
+                if (ownerValves.Count + otherValves.Count > 0)
+                {
+                    // T 절점 중심 → 그 엣지 T 커넥터(축 0 또는 길이).
+                    var ownerLeg = atEnd ? center - ownerFrame.LengthMm : -center;
+                    var nodeOnOther = AxisDistanceMm(canvasPoint, otherFrame.Axis);
+                    var otherLeg = otherNodeAtStart ? -nodeOnOther : nodeOnOther - otherFrame.LengthMm;
+                    var halves = new[]
+                    {
+                        ownerLeg + ownerValves.Sum(x => x.WidthMm) + layout.TeeMainHalfMm,
+                        otherLeg + otherValves.Sum(x => x.WidthMm) + layout.TeeMainHalfMm,
+                    };
+                    if (layout.SecondValveSymbol is not null)
+                    {
+                        var solution = BypassSpoolSolver.Solve(new BypassSpoolInput(layout.TeeCenterOffsetMm, halves,
+                            layout.BendValveLegMm, layout.BypassValveWidthMm + layout.SecondValveWidthMm));
+                        if (solution.Adjusted)
+                        {
+                            // 경고는 세트가 살아남은 뒤에 — 건너뛴 세트에 "늘렸다"가 남지 않게.
+                            spoolWarning = FormattableString.Invariant(
+                                $"바이패스 세트: 본관 부품 폭에 맞춰 바이패스 밸브 사이 단관을 {layout.SpoolLengthMm:N0}→{solution.SpoolMm:N0}mm로 늘렸습니다.");
+                            // 캐시는 사용자 단관 기준 그대로 — 보정값은 이 세트만.
+                            layout = layout with { SpoolLengthMm = solution.SpoolMm, TeeCenterOffsetMm = solution.OffsetMm };
+                            layouts[fitting.Id] = layout;
+                        }
+                        ownerForced = StackFromNode(ownerValves, ownerFrame.LengthMm, !atEnd);
+                        otherForced = StackFromNode(otherValves, otherFrame.LengthMm, otherNodeAtStart);
+                    }
+                    else if (halves.Max() > layout.TeeCenterOffsetMm + ConnectionToleranceMm)
+                        warnings.Add("바이패스 세트: 밸브 1개 세트는 단관 보정을 할 수 없습니다 — 본관 밸브·T형관이 밸브부관 A와 겹칠 수 있습니다. 밸브 2개 세트로 바꾸세요.");
+                }
+            }
+
             var ownerRaw = layout.TeeSpan(center, ownerSign);
             var otherCenter = AxisDistanceMm(ownerFrame.Axis.PointAt(center - ownerSign * layout.TeeCenterOffsetMm), otherFrame.Axis);
             var otherRaw = new OccupiedSpan(otherCenter - layout.TeeMainHalfMm, otherCenter + layout.TeeMainHalfMm);
 
-            var otherNodeAtStart = other.Start.DistanceTo(nodePosition) <= 0.01;
-            var ownerSpan = CloseTinyNodeGap(ownerRaw, ownerFrame.LengthMm, !atEnd, out var ownerGap);
-            var otherSpan = CloseTinyNodeGap(otherRaw, otherFrame.LengthMm, otherNodeAtStart, out var otherGap);
+            // 밸브 고정한 쪽은 A–T 사이를 밸브가 차지 — 틈 닫기 안 함.
+            var ownerGap = 0.0;
+            var otherGap = 0.0;
+            var ownerSpan = ownerForced.Count > 0 ? ownerRaw : CloseTinyNodeGap(ownerRaw, ownerFrame.LengthMm, !atEnd, out ownerGap);
+            var otherSpan = otherForced.Count > 0 ? otherRaw : CloseTinyNodeGap(otherRaw, otherFrame.LengthMm, otherNodeAtStart, out otherGap);
 
             var dropReason = DropReasonOf(fitting.Id, ownerSpan, ownerFrame.LengthMm) ?? DropReasonOf(fitting.Id, otherSpan, otherFrame.LengthMm);
             if (dropReason is not null)
@@ -205,12 +252,58 @@ internal sealed partial class RevitPipeSegmentCommandRepo
                         "두 부재는 연결되지 않은 채로 남습니다.");
             }
             result[fitting.Id] = new TeeCenteredSet(owner.Id, other.Id, ownerSpan, otherSpan, gapPoints);
+            foreach (var (id, span) in ownerForced.Concat(otherForced)) forcedValveSpans[id] = span;
+            if (spoolWarning is not null) warnings.Add(spoolWarning);
         }
         return result;
 
         static string? DropReasonOf(Guid id, OccupiedSpan span, double lengthMm)
             => InlineSpanFilter.Filter(lengthMm, [new InlineSpanCandidate(id, span, InlineSpanFilter.BypassSetPriority)])
                 .Dropped.TryGetValue(id, out var reason) ? reason : null;
+    }
+
+    /// <summary>T형관 중심 세트 안 본관 밸브(docs/297 § B-1). T 절점에서 캔버스 A 그림(<see cref="BypassSet.EstimatedHalfSpanMm"/>) 안쪽에 찍은
+    /// 2포트 밸브, T에 가까운 순. 실측 실패는 <paramref name="unusableValves"/>에만 남김 — 건너뛰기 기록은 <see cref="InlineFittingSpans"/> 몫.</summary>
+    private static List<(Guid Id, double WidthMm)> InsideSetValves(
+        Document document, FamilySymbolCache symbols, PipeNetworkDefinition network, PipeSegmentFamilySelection families,
+        Dictionary<(ElementId SymbolId, double DiameterMm), InlineSpan> spanCache, IDictionary<string, string> unusableValves,
+        ISet<Guid> droppedFittings, PipeEdgeDefinition edge, DHBIMWATER.Core.Geometry.Point2D nodePosition, BypassLayout layout)
+    {
+        var reach = BypassSet.EstimatedHalfSpanMm(edge.DiameterMm, layout.BypassDiameterMm);
+        var valves = new List<(Guid Id, double WidthMm, double DistanceMm)>();
+        foreach (var fitting in network.InlineFittings.Where(x => x.EdgeId == edge.Id && !x.IsJoint && !x.IsBypassSet
+                     && !string.IsNullOrWhiteSpace(x.FamilyTypeName) && !droppedFittings.Contains(x.Id)))
+        {
+            var distance = fitting.Position.DistanceTo(nodePosition);
+            if (distance > reach || unusableValves.ContainsKey(fitting.FamilyTypeName)) continue;
+            try
+            {
+                // InlineFittingSpans와 같은 키·같은 실측 — 거기서 다시 안 잼.
+                var symbol = symbols.Resolve(fitting.FamilyTypeName, "배관부속");
+                var cacheKey = (symbol.Id, edge.DiameterMm);
+                if (!spanCache.TryGetValue(cacheKey, out var measured))
+                    spanCache[cacheKey] = measured = InlineConnectorSpanMm(
+                        document, symbol, ValveDiameterParameterNameFor(families, symbol), edge.DiameterMm, "배관부속");
+                if (measured.WidthMm is { } width) valves.Add((fitting.Id, width, distance));
+            }
+            catch (Exception ex) { unusableValves[fitting.FamilyTypeName] = ex.Message; }
+        }
+        return valves.OrderBy(x => x.DistanceMm).Select(x => (x.Id, x.WidthMm)).ToList();
+    }
+
+    /// <summary>세트 안 밸브를 T 커넥터부터 바깥쪽으로 차례로 붙인 엣지 축 구간(docs/297 § B-4). <paramref name="nodeAtStart"/> = T가 축 0 쪽.</summary>
+    private static List<(Guid Id, OccupiedSpan Span)> StackFromNode(
+        IReadOnlyList<(Guid Id, double WidthMm)> valves, double lengthMm, bool nodeAtStart)
+    {
+        var spans = new List<(Guid Id, OccupiedSpan Span)>();
+        var cursor = nodeAtStart ? 0 : lengthMm;
+        foreach (var (id, width) in valves)
+        {
+            var next = nodeAtStart ? cursor + width : cursor - width;
+            spans.Add((id, nodeAtStart ? new OccupiedSpan(cursor, next) : new OccupiedSpan(next, cursor)));
+            cursor = next;
+        }
+        return spans;
     }
 
     /// <summary>엣지 위 바이패스 세트의 본관 점유 구간을 예약한다. 실측에 실패한 세트는 건너뛰기로 기록하고 예약하지 않는다 —
