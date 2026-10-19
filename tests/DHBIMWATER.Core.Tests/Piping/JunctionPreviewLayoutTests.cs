@@ -87,6 +87,31 @@ public sealed class JunctionPreviewLayoutTests
         Assert.All(scene.Placements, x => Assert.True(x.TagX == x.LeaderX || x.TagY == x.LeaderY));
     }
 
+    // 같은 세트·같은 열 좌측 태그 = 가장 넓은 기호 기준 한 줄. 다른 열·다른 세트·주관은 따로(docs/298)
+    [Fact]
+    public void Build_AlignsTagHeadsInSameSetColumn()
+    {
+        static JunctionPreviewItem Wide(long id, long setId, double x, double y, double half) =>
+            Item(id, setId == 0 ? null : 1, setId, x, y, vertical: setId != 0) with
+            {
+                Shape = new JunctionSymbolShape([[new ShapePoint(-half, -50), new ShapePoint(half, 50)]],
+                    -half, -50, half, 50)
+            };
+        var scene = JunctionPreviewLayout.Build(
+            [Wide(1, 2, 0, 0, 100), Wide(2, 2, 0, 1000, 300), Wide(3, 2, 20, 2000, 200), Wide(4, 2, 2000, 0, 100),
+             Wide(5, 0, 0, -1000, 1500), Wide(6, 3, 0, 3000, 100)],
+            [], [], 50, true, JunctionTagSide.Left);
+        var byId = scene.Placements.ToDictionary(x => x.Item.ElementId);
+        // 세트 2 열 1~3(X 0·0·0.4mm): 가장 넓은 2번 MinX −6 − 4.25
+        foreach (var id in new long[] { 1, 2, 3 }) Assert.Equal(-10.25, byId[id].TagX, 6);
+        Assert.Equal((0d, 20d, 40d), (byId[1].TagY, byId[2].TagY, byId[3].TagY));
+        // 다른 열 4번: 자기 기호 기준 40 − 2 − 4.25
+        Assert.Equal(33.75, byId[4].TagX, 6);
+        // 주관 넓은 단관 5번은 정렬 안 함 → 세트 태그도 안 끌려감. 다른 세트 6번은 자기 기호 기준
+        Assert.Equal(-34.25, byId[5].TagX, 6);
+        Assert.Equal(-6.25, byId[6].TagX, 6);
+    }
+
     [Fact]
     public void Build_WarnsWhenSetsOverlap_ButNotWithOwnRoot()
     {

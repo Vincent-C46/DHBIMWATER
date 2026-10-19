@@ -66,6 +66,17 @@ public sealed record JunctionSymbolShapeReadResult(
 
 public static class JunctionSymbolShapeMath
 {
+    // 평면 투영 길이 이 미만 선 = 세로 방향 선(평면에서 점) → 기호선 아님. 캔버스 점·범위 부풀림 원인(docs/299)
+    public const double MinPlanLengthMm = 1;
+
+    public static bool IsVisibleInPlan(IReadOnlyList<ShapePoint> line)
+    {
+        var length = 0d;
+        for (var i = 1; i < line.Count; i++)
+            length += Math.Sqrt(Math.Pow(line[i].X - line[i - 1].X, 2) + Math.Pow(line[i].Y - line[i - 1].Y, 2));
+        return length >= MinPlanLengthMm;
+    }
+
     public static SymbolVector RestoreOffset(SymbolVector point, SymbolVector localOffset,
         SymbolVector basisX, SymbolVector basisY, SymbolVector basisZ)
         => new(point.X - (basisX.X * localOffset.X + basisY.X * localOffset.Y + basisZ.X * localOffset.Z),

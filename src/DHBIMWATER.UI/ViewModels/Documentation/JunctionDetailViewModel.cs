@@ -14,7 +14,6 @@ public sealed class JunctionDetailViewModel : ViewModelBase
 {
     private readonly BuildJunctionDetailPreviewUseCase _previewUseCase;
     private readonly RunJunctionDetailUseCase _runUseCase;
-    private readonly CreateJunctionDetailViewUseCase _detailUseCase;
     private readonly BackfillPipeMaterialParametersUseCase _backfillUseCase;
     private JunctionDetailPreview _preview;
     private bool _createSchedule = true, _createDrafting = true, _createPlan = true;
@@ -32,12 +31,10 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     private string _statusText = string.Empty;
 
     public JunctionDetailViewModel(BuildJunctionDetailPreviewUseCase previewUseCase,
-        RunJunctionDetailUseCase runUseCase, CreateJunctionDetailViewUseCase detailUseCase,
-        BackfillPipeMaterialParametersUseCase backfillUseCase)
+        RunJunctionDetailUseCase runUseCase, BackfillPipeMaterialParametersUseCase backfillUseCase)
     {
         _previewUseCase = previewUseCase;
         _runUseCase = runUseCase;
-        _detailUseCase = detailUseCase;
         _backfillUseCase = backfillUseCase;
         _preview = previewUseCase.Execute();
         TagTypes = new ObservableCollection<JunctionDetailTagType>(_preview.TagTypes);
@@ -45,7 +42,6 @@ public sealed class JunctionDetailViewModel : ViewModelBase
         // 값 빈 부재 수 = 실행 시 자동 기록 대상. 문서 전체 재산정 체크는 제거(docs/291)
         UntaggedCount = backfillUseCase.ScanCandidates().CandidateCount;
         RunCommand = new RelayCommand(_ => Run(), _ => CanRun && !IsRunning);
-        ResetOffsetsCommand = new RelayCommand(_ => ResetOffsets(), _ => !IsRunning);
         CancelCommand = new RelayCommand(_ => CloseAction?.Invoke());
         ApplyAllSetsCommand = new RelayCommand(_ => ApplyAllSets(), _ => OffsetSets.Count > 0);
         SyncOffsetSets();
@@ -64,7 +60,6 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     /// <summary>새 세트 선택 시 캔버스 맞춤 요청. 인자 = 세트 범위(캔버스 좌표). View가 확대·이동(docs/295 후속)</summary>
     public event Action<Rect>? SetFocusRequested;
     public RelayCommand RunCommand { get; }
-    public RelayCommand ResetOffsetsCommand { get; }
     public RelayCommand CancelCommand { get; }
     public RelayCommand ApplyAllSetsCommand { get; }
     public ObservableCollection<JunctionOffsetSetViewModel> OffsetSets { get; } = [];
@@ -140,6 +135,8 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     public bool BulkAxisY { get => !_bulkAxisX; set => BulkAxisX = !value; }
     public string BulkStepText { get => _bulkStepText; set => SetProperty(ref _bulkStepText, value); }
     public string SummaryLine { get; private set; } = string.Empty;
+    /// <summary>요약 줄 툴팁 = 줄인 단어의 긴 설명. 없으면 null → 빈 툴팁 안 뜸</summary>
+    public string? SummaryToolTip { get; private set; }
     public string HeaderSummary => FirstJunction is null
         ? "격점 없음 · 평면 상세도 대상 부재 0개 · 수직분기 세트 0개"
         : $"격점 {FirstJunction.JunctionId} · {FirstJunction.RoomType} · 배관 부재 {FirstJunction.PartCount}개 · 수직분기 세트 {OffsetSets.Count}개(부재 {FirstJunction.Items.Count(x => x.Order is not null)}개)"
@@ -412,8 +409,10 @@ public sealed class JunctionDetailViewModel : ViewModelBase
         var x = cx(placement.X);
         var y = cy(placement.Y);
         var shape = item.Shape is { IsRenderable: true } found ? found : null;
-        var tip = $"{(item.ItemNumber > 0 ? item.ItemNumber + " · " : "")}{item.Name} {item.Spec}"
-                  + (shape is null ? " — 기호선 없음(대체 기호)" : "") + (item.Connected ? "" : " — 연결 끊김");
+        // 기호선 없으면 "심볼 없음"을 앞에(빨강 X 상자 툴팁)
+        var tip = (shape is null ? "심볼 없음 — " : "")
+                  + $"{(item.ItemNumber > 0 ? item.ItemNumber + " · " : "")}{item.Name} {item.Spec}"
+                  + (item.Connected ? "" : " — 연결 끊김");
         // 번호 원 20px: 중심이 태그 위치. 지시선 = 끝점 → 원 가장자리(docs/296). 번호 없으면 길이 0 → 안 그림
         var (headX, headY) = (cx(placement.TagX) - x, cy(placement.TagY) - y);
         var (startX, startY) = (cx(placement.LeaderX) - x, cy(placement.LeaderY) - y);
@@ -511,17 +510,37 @@ public sealed class JunctionDetailViewModel : ViewModelBase
         var outputs = new List<string>();
         if (CreateSchedule) outputs.Add("일람표");
         if (CreateDrafting) outputs.Add("도면");
-        if (CreatePlan) outputs.Add("평면 상세도");
-        SummaryLine = outputs.Count == 0 ? "작성 항목을 하나 이상 체크하세요."
-            : CanRun ? "만들 것: " + string.Join(" · ", outputs)
-              + (CreatePlan && ExpandVertical ? $" · 모델에 심볼오프셋 {OffsetRows.Count(x => x.WorldUpMm != "0" && x.Status.Length == 0)}개 기록" : "")
-            : (CreatePlan && !HasJunctionTargets ? "평면 상세도 대상 배관 이음쇠·밸브류가 없습니다."
-                : (CreateSchedule || CreateDrafting) && TotalPartCount == 0 ? "재료표 값이 있는 배관 부재가 없습니다."
-                : "작성할 대상이 없습니다.");
-        if (UntaggedCount > 0) SummaryLine += $" · 값 없는 배관 부재 {UntaggedCount}개 자동 기록";
-        if (CreatePlan && FirstJunction?.Items.Any(x => !x.Connected) == true)
-            SummaryLine += " · 뿌리와 이어지지 않은 부재는 오프셋 없이 처리합니다.";
+        if (CreatePlan) outputs.Add("평면");
+        // 단어 위주 요약. 0인 항목은 뺌, 긴 설명은 툴팁
+        var head = outputs.Count == 0 ? "작성 항목 선택"
+            : CanRun ? string.Join(" · ", outputs)
+            : CreatePlan && !HasJunctionTargets ? "평면 대상 없음"
+            : (CreateSchedule || CreateDrafting) && TotalPartCount == 0 ? "재료표 값 없음"
+            : "대상 없음";
+        var counts = new List<string>();
+        var tips = new List<string>();
+        var offsetCount = CanRun && CreatePlan && ExpandVertical
+            ? OffsetRows.Count(x => x.WorldUpMm != "0" && x.Status.Length == 0) : 0;
+        if (offsetCount > 0)
+        {
+            counts.Add($"오프셋 {offsetCount}");
+            tips.Add($"오프셋 {offsetCount}: 모델에 심볼오프셋 {offsetCount}개 기록");
+        }
+        if (UntaggedCount > 0)
+        {
+            counts.Add($"값 기록 {UntaggedCount}");
+            tips.Add($"값 기록 {UntaggedCount}: 값 없는 배관 부재 {UntaggedCount}개 자동 기록");
+        }
+        var orphanCount = CreatePlan ? FirstJunction?.Items.Count(x => !x.Connected) ?? 0 : 0;
+        if (orphanCount > 0)
+        {
+            counts.Add($"미연결 {orphanCount}");
+            tips.Add($"미연결 {orphanCount}: 뿌리와 이어지지 않은 부재는 오프셋 없이 처리");
+        }
+        SummaryLine = counts.Count == 0 ? head : head + " │ " + string.Join(" · ", counts);
+        SummaryToolTip = tips.Count == 0 ? null : string.Join(Environment.NewLine, tips);
         OnPropertyChanged(nameof(SummaryLine));
+        OnPropertyChanged(nameof(SummaryToolTip));
         OnPropertyChanged(nameof(CanRun));
         RaiseCommands();
     }
@@ -588,28 +607,6 @@ public sealed class JunctionDetailViewModel : ViewModelBase
         RefreshSummary();
     }
 
-    private void ResetOffsets()
-    {
-        IsRunning = true;
-        if (!InRevit(ResetOffsetsCore)) OnRevitRejected();
-    }
-
-    private void ResetOffsetsCore()
-    {
-        try
-        {
-            EnsureDocument?.Invoke();
-            var result = _detailUseCase.Execute(resetOnly: true);
-            ResultLines.Clear();
-            ResultLines.Add($"오프셋 초기화: {result.Reset.Count}개 격점");
-            foreach (var warning in result.Warnings) ResultLines.Add(warning);
-            ResultText = string.Join(Environment.NewLine, ResultLines);
-            StatusText = "초기화 완료";
-        }
-        catch (Exception ex) { ResultText = "초기화 실패: " + ex.Message; StatusText = "실패"; }
-        finally { IsRunning = false; }
-    }
-
     private void AppendResult(string label, PipeMaterialScheduleResult? result)
     {
         if (result is null) return;
@@ -641,5 +638,5 @@ public sealed class JunctionDetailViewModel : ViewModelBase
             .Select(x => new JunctionTagPlacement(x.Item.ElementId, x.TagX, x.TagY, x.LeaderX, x.LeaderY)).ToList();
     }
 
-    private void RaiseCommands() { RunCommand?.RaiseCanExecuteChanged(); ResetOffsetsCommand?.RaiseCanExecuteChanged(); }
+    private void RaiseCommands() => RunCommand?.RaiseCanExecuteChanged();
 }

@@ -43,6 +43,8 @@ public static class JunctionPreviewLayout
     // 번호 원 반지름(미리보기 20px ÷ 8px/mm). 원끼리 겹침 판정에 씀
     public const double TagRadiusPaperMm = 1.25;
     private const double OverlapTolerance = 0.1;
+    // 같은 열·행 판정 허용 오차(도면 mm). 이웃 간격이 이 안이면 같은 무리(docs/298)
+    private const double AlignTolerancePaperMm = 1;
 
     public static JunctionPreviewScene Build(IReadOnlyList<JunctionPreviewItem> items,
         IReadOnlyList<JunctionPreviewLink> links, IReadOnlyList<JunctionSetOffset> sets, int viewScale,
@@ -125,17 +127,55 @@ public static class JunctionPreviewLayout
         var centerY = placements.Average(x => x.Y);
         var heads = new List<(double X, double Y)>();
         var result = new List<JunctionPreviewPlacement>(placements.Count);
+        var sides = new Dictionary<int, JunctionTagSide>();
         foreach (var p in placements)
         {
             if (p.Item.ItemNumber <= 0) { result.Add(p); continue; }
             var candidates = side == JunctionTagSide.Auto ? AutoOrder(p, centerX, centerY) : [side];
-            var head = candidates.Select(s => Head(p, s))
-                .Select((h, i) => (Head: h, Cost: Cost(p, h, placements, heads), Index: i))
-                .OrderBy(x => x.Cost).ThenBy(x => x.Index).First().Head;
-            heads.Add(head);
-            result.Add(p with { TagX = head.X, TagY = head.Y, LeaderX = p.X, LeaderY = p.Y });
+            var best = candidates.Select(s => (Side: s, Head: Head(p, s)))
+                .Select((h, i) => (h.Side, h.Head, Cost: Cost(p, h.Head, placements, heads), Index: i))
+                .OrderBy(x => x.Cost).ThenBy(x => x.Index).First();
+            heads.Add(best.Head);
+            sides[result.Count] = best.Side;
+            result.Add(p with { TagX = best.Head.X, TagY = best.Head.Y, LeaderX = p.X, LeaderY = p.Y });
         }
+        AlignTags(result, sides);
         return result;
+    }
+
+    /// <summary>같은 세트·같은 방향·같은 열(좌우) 또는 행(상하) 태그끼리 머리를 가장 바깥 값으로 맞춤(docs/298).
+    /// 지시선 방향으로만 밀어냄 → 직선 유지, 원은 여전히 자기 기호 밖.
+    /// 주관 부재(세트 0)는 정렬 안 함 → 긴 수평 단관 하나가 열 전체 태그를 멀리 밀어내지 않게.</summary>
+    private static void AlignTags(List<JunctionPreviewPlacement> result, IReadOnlyDictionary<int, JunctionTagSide> sides)
+    {
+        foreach (var group in sides.Where(x => result[x.Key].Item.SetId != 0)
+                     .GroupBy(x => (Side: x.Value, result[x.Key].Item.SetId)))
+        {
+            var side = group.Key.Side;
+            var horizontal = side is JunctionTagSide.Left or JunctionTagSide.Right;
+            // 열 = 부재 X, 행 = 부재 Y 기준 정렬 후 이웃 간격으로 무리 나눔
+            var ordered = group.Select(x => x.Key).OrderBy(i => horizontal ? result[i].X : result[i].Y).ToList();
+            var cluster = new List<int>();
+            for (var k = 0; k <= ordered.Count; k++)
+            {
+                if (k < ordered.Count && (cluster.Count == 0 || Math.Abs(Key(ordered[k]) - Key(cluster[^1])) <= AlignTolerancePaperMm))
+                {
+                    cluster.Add(ordered[k]);
+                    continue;
+                }
+                if (cluster.Count > 1)
+                {
+                    var values = cluster.Select(i => horizontal ? result[i].TagX : result[i].TagY).ToList();
+                    var target = side is JunctionTagSide.Left or JunctionTagSide.Bottom ? values.Min() : values.Max();
+                    foreach (var i in cluster)
+                        result[i] = horizontal ? result[i] with { TagX = target } : result[i] with { TagY = target };
+                }
+                cluster.Clear();
+                if (k < ordered.Count) cluster.Add(ordered[k]);
+            }
+
+            double Key(int i) => horizontal ? result[i].X : result[i].Y;
+        }
     }
 
     private static readonly JunctionTagSide[] SideOrder =

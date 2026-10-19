@@ -26,15 +26,37 @@ public sealed record JunctionValveRoom(IReadOnlyList<JunctionWallFootprint> Wall
     // 중심 좌·우·아래·위에서 중심을 가로지르는 벽 중 가장 가까운 것. 한 면이라도 없으면 null
     public static JunctionValveRoom? Resolve(IReadOnlyList<JunctionWallFootprint> walls, ShapePoint center)
     {
-        bool CrossesY(JunctionWallFootprint w) => w.MinY <= center.Y && center.Y <= w.MaxY;
-        bool CrossesX(JunctionWallFootprint w) => w.MinX <= center.X && center.X <= w.MaxX;
-        var left = walls.Where(w => w.MaxX <= center.X && CrossesY(w)).MaxBy(w => w.MaxX);
-        var right = walls.Where(w => w.MinX >= center.X && CrossesY(w)).MinBy(w => w.MinX);
-        var bottom = walls.Where(w => w.MaxY <= center.Y && CrossesX(w)).MaxBy(w => w.MaxY);
-        var top = walls.Where(w => w.MinY >= center.Y && CrossesX(w)).MinBy(w => w.MinY);
+        var (left, right, bottom, top) = Sides(walls, center);
         if (left is null || right is null || bottom is null || top is null) return null;
         return new JunctionValveRoom(new[] { left, right, bottom, top }.DistinctBy(x => x.Id).ToList(),
             left.MaxX, bottom.MaxY, right.MinX, top.MinY,
             left.MinX, bottom.MinY, right.MaxX, top.MaxY);
     }
+
+    /// <summary>4면 못 찾은 이유(미리보기 경고, docs/299). 찾았으면 null</summary>
+    public static string? Explain(IReadOnlyList<JunctionWallFootprint> walls, ShapePoint center)
+    {
+        if (walls.Count == 0) return "밸브실 벽 없음: 부재 주변 10m 안에 직선 벽이 없습니다.";
+        var (left, right, bottom, top) = Sides(walls, center);
+        var missing = new[] { (left, "좌측"), (right, "우측"), (bottom, "하단"), (top, "상단") }
+            .Where(x => x.Item1 is null).Select(x => x.Item2).ToList();
+        return missing.Count == 0 ? null
+            : $"밸브실 벽 없음: 주변 벽 {walls.Count}개 중 {string.Join("·", missing)} 벽이 부재 중심" +
+              $"(X {center.X:0}, Y {center.Y:0} mm)을 가로지르지 않습니다.";
+    }
+
+    // 중심 좌·우·아래·위에서 중심을 가로지르는 벽 중 가장 가까운 것
+    private static (JunctionWallFootprint? Left, JunctionWallFootprint? Right, JunctionWallFootprint? Bottom,
+        JunctionWallFootprint? Top) Sides(IReadOnlyList<JunctionWallFootprint> walls, ShapePoint center)
+    {
+        bool CrossesY(JunctionWallFootprint w) => w.MinY <= center.Y && center.Y <= w.MaxY;
+        bool CrossesX(JunctionWallFootprint w) => w.MinX <= center.X && center.X <= w.MaxX;
+        return (walls.Where(w => w.MaxX <= center.X && CrossesY(w)).MaxBy(w => w.MaxX),
+            walls.Where(w => w.MinX >= center.X && CrossesY(w)).MinBy(w => w.MinX),
+            walls.Where(w => w.MaxY <= center.Y && CrossesX(w)).MaxBy(w => w.MaxY),
+            walls.Where(w => w.MinY >= center.Y && CrossesX(w)).MinBy(w => w.MinY));
+    }
 }
+
+// 밸브실 찾기 결과. Room null이면 Problem = 이유
+public sealed record JunctionValveRoomLookup(JunctionValveRoom? Room, string? Problem);

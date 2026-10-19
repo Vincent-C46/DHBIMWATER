@@ -73,11 +73,11 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
         }).ToList();
     }
 
-    public JunctionValveRoom? GetValveRoom(JunctionDetailGroup group)
+    public JunctionValveRoomLookup GetValveRoom(JunctionDetailGroup group)
     {
         var document = Document();
         var instances = Instances(document, group);
-        if (instances.Count == 0) return null;
+        if (instances.Count == 0) return new(null, null);
         var plan = FindPlan(document, group.JunctionId);
         return FindValveRoom(document, instances, plan?.RightDirection ?? XYZ.BasisX, plan?.UpDirection ?? XYZ.BasisY);
     }
@@ -90,7 +90,7 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
     }
 
     // 부재 범위 XY ±10m, Z 뷰 범위(아래 500·위 1000)와 겹치는 직선 벽 → 4면 판정 (docs/293)
-    internal static JunctionValveRoom? FindValveRoom(Document document, IReadOnlyList<FamilyInstance> instances,
+    internal static JunctionValveRoomLookup FindValveRoom(Document document, IReadOnlyList<FamilyInstance> instances,
         XYZ right, XYZ up)
     {
         var bounds = Bounds(instances);
@@ -102,8 +102,13 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
             .WherePasses(new BoundingBoxIntersectsFilter(outline)).Cast<Wall>()
             .Where(x => x.WallType.Kind != WallKind.Curtain && x.Location is LocationCurve { Curve: Line })
             .Select(x => Footprint(x, right, up)).OfType<JunctionWallFootprint>().ToList();
-        var center = (bounds.Min + bounds.Max) / 2;
-        return JunctionValveRoom.Resolve(walls, new ShapePoint(PlanMm(center, right), PlanMm(center, up)));
+        // 중심 = 부재 원점 범위 중심. 바운딩 박스는 패밀리 안 보조 형상(치수 기준 등)으로 부풀어 중심이 실 밖으로 갈 수 있음(docs/299)
+        var origins = instances.Select(x => x.GetTransform().Origin).ToList();
+        var planCenter = new ShapePoint(
+            (origins.Min(x => PlanMm(x, right)) + origins.Max(x => PlanMm(x, right))) / 2,
+            (origins.Min(x => PlanMm(x, up)) + origins.Max(x => PlanMm(x, up))) / 2);
+        var room = JunctionValveRoom.Resolve(walls, planCenter);
+        return new(room, room is null ? JunctionValveRoom.Explain(walls, planCenter) : null);
     }
 
     // 벽 솔리드 꼭짓점을 벽 방향·법선으로 투영한 범위 → 위치선(중심선·마감면) 설정과 무관한 평면 사각형
@@ -225,7 +230,7 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
             view.DisplayStyle = DisplayStyle.Wireframe;
             view.Scale = options.ViewScale;
             ConfigureRange(view, level, instances);
-            var room = FindValveRoom(document, instances, view.RightDirection, view.UpDirection);
+            var room = FindValveRoom(document, instances, view.RightDirection, view.UpDirection).Room;
             ConfigureCrop(view, instances, slots, options, room);
             ConfigureCategories(document, view);
             RemovePreviousFilter(document, view);

@@ -313,8 +313,7 @@ public sealed class JunctionDetailViewModelTests
         var useCase = new BuildJunctionDetailPreviewUseCase(repo, new PartsRepo(material), new PreviewTransaction(),
             shapeRepo ?? new EmptyShapeRepo(shape));
         var backfill = new BackfillPipeMaterialParametersUseCase(null!, new BackfillRepo(), null!, null!);
-        return new JunctionDetailViewModel(useCase, null!,
-            new CreateJunctionDetailViewUseCase(null!, repo), backfill);
+        return new JunctionDetailViewModel(useCase, null!, backfill);
     }
 
     private sealed class PreviewRepo(bool connected, JunctionValveRoom? room = null) : IJunctionDetailRepo
@@ -336,7 +335,7 @@ public sealed class JunctionDetailViewModelTests
         public JunctionDetailViewChange CreateOrUpdateView(JunctionDetailGroup group, IReadOnlyList<VerticalSlot> slots,
             JunctionDetailViewOptions options) => new(true, []);
         public IReadOnlyList<string> ResetOffsets(JunctionDetailGroup group) => [];
-        public JunctionValveRoom? GetValveRoom(JunctionDetailGroup group) => room;
+        public JunctionValveRoomLookup GetValveRoom(JunctionDetailGroup group) => new(room, null);
     }
 
     private sealed class PartsRepo(bool material) : IPipeMaterialDraftingRepo

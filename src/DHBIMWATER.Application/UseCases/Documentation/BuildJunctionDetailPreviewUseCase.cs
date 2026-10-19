@@ -45,9 +45,11 @@ public sealed class BuildJunctionDetailPreviewUseCase
                         .Where(c => c.PartnerId is { } partner && partner != node.Id)
                         .Select(c => new JunctionPreviewLink(Math.Min(node.Id, c.PartnerId!.Value), Math.Max(node.Id, c.PartnerId!.Value))))
                     .Distinct().ToList();
+                var room = _junctions.GetValveRoom(group);
                 return new JunctionDetailPreviewJunction(group.JunctionId, _junctions.GetRoomType(),
                     group.Nodes.Count, items, PipeMaterialTable.Build(parts, group.JunctionId),
-                    chain.Warnings.Concat(group.Warnings ?? []).ToList(), links, _junctions.GetValveRoom(group));
+                    chain.Warnings.Concat(group.Warnings ?? []).Concat(room.Problem is { } problem ? [problem] : [])
+                        .ToList(), links, room.Room);
             }).ToList();
         var diagnostics = new List<JunctionSymbolShapeDiagnostic>();
         var elementNames = previews.SelectMany(x => x.Items).ToDictionary(x => x.ElementId, x => x.Name);

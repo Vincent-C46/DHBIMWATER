@@ -16,6 +16,6 @@ public interface IJunctionDetailRepo
     IReadOnlyList<JunctionDetailTagType> GetTagTypes();
     JunctionDetailViewChange CreateOrUpdateView(JunctionDetailGroup group, IReadOnlyList<VerticalSlot> slots, JunctionDetailViewOptions options);
     IReadOnlyList<string> ResetOffsets(JunctionDetailGroup group);
-    // 부재 둘러싼 밸브실 4면 벽(미리보기 축). 못 찾으면 null (docs/293)
-    JunctionValveRoom? GetValveRoom(JunctionDetailGroup group) => null;
+    // 부재 둘러싼 밸브실 4면 벽(미리보기 축). 못 찾으면 Room null + 이유 (docs/293, docs/299)
+    JunctionValveRoomLookup GetValveRoom(JunctionDetailGroup group) => new(null, null);
 }

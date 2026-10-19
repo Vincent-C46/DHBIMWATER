@@ -3,7 +3,6 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:DHBIMWATER.UI.Views.Documentation"
         xmlns:controls="clr-namespace:DHBIMWATER.UI.Controls"
-        xmlns:core="clr-namespace:DHBIMWATER.Core.Piping;assembly=DHBIMWATER.Core"
         xmlns:vm="clr-namespace:DHBIMWATER.UI.ViewModels.Documentation"
         xmlns:sys="clr-namespace:System;assembly=mscorlib"
         Title="격점상세도" Width="1260" Height="850" MinWidth="1080" MinHeight="700"
@@ -38,41 +37,6 @@
             <Setter Property="Stroke" Value="{StaticResource MainTextBrush}"/>
             <Setter Property="StrokeThickness" Value="{DynamicResource Stroke.Symbol}"/>
             <Setter Property="StrokeLineJoin" Value="Round"/>
-        </Style>
-        <!-- 심볼은 44×44 칸의 중심(22,22)이 부재 위치다. 세로축 부재를 평면에서 본 개략 기호이며 플랜지는 별도 부재가 아니라 단관·밸브에 포함해 그린다. -->
-        <DataTemplate x:Key="GenericSymbol"><Canvas Width="44" Height="44">
-            <Rectangle Canvas.Left="10" Canvas.Top="10" Width="24" Height="24" Style="{StaticResource SymbolLine}" Fill="{StaticResource WhiteBrush}"/>
-        </Canvas></DataTemplate>
-        <DataTemplate x:Key="PipeSymbol"><Canvas Width="44" Height="44">
-            <Rectangle Canvas.Left="14" Canvas.Top="6" Width="16" Height="32" Style="{StaticResource SymbolLine}" Fill="{StaticResource WhiteBrush}"/>
-            <Rectangle Canvas.Left="8" Canvas.Top="3" Width="28" Height="4" Fill="{StaticResource MainTextBrush}"/>
-            <Rectangle Canvas.Left="8" Canvas.Top="37" Width="28" Height="4" Fill="{StaticResource MainTextBrush}"/>
-        </Canvas></DataTemplate>
-        <DataTemplate x:Key="TeeSymbol"><Canvas Width="44" Height="44">
-            <Rectangle Canvas.Left="2" Canvas.Top="22" Width="40" Height="16" Style="{StaticResource SymbolLine}" Fill="{StaticResource WhiteBrush}"/>
-            <Rectangle Canvas.Left="14" Canvas.Top="6" Width="16" Height="16" Style="{StaticResource SymbolLine}" Fill="{StaticResource WhiteBrush}"/>
-        </Canvas></DataTemplate>
-        <DataTemplate x:Key="GateSymbol"><Canvas Width="44" Height="44">
-            <Polygon Points="9,6 35,6 22,22" Style="{StaticResource SymbolLine}" Fill="{StaticResource WhiteBrush}"/>
-            <Polygon Points="9,38 35,38 22,22" Style="{StaticResource SymbolLine}" Fill="{StaticResource WhiteBrush}"/>
-            <Rectangle Canvas.Left="8" Canvas.Top="3" Width="28" Height="3" Fill="{StaticResource MainTextBrush}"/>
-            <Rectangle Canvas.Left="8" Canvas.Top="38" Width="28" Height="3" Fill="{StaticResource MainTextBrush}"/>
-            <Line X1="22" Y1="22" X2="42" Y2="22" Style="{StaticResource SymbolLine}" StrokeThickness="{DynamicResource Stroke.Thin}"/>
-            <Line X1="42" Y1="17" X2="42" Y2="27" Style="{StaticResource SymbolLine}" StrokeThickness="{DynamicResource Stroke.Thin}"/>
-        </Canvas></DataTemplate>
-        <DataTemplate x:Key="AirSymbol"><Canvas Width="44" Height="44">
-            <Rectangle Canvas.Left="17" Canvas.Top="26" Width="10" Height="12" Style="{StaticResource SymbolLine}" Fill="{StaticResource WhiteBrush}"/>
-            <Ellipse Canvas.Left="8" Canvas.Top="4" Width="28" Height="28" Style="{StaticResource SymbolLine}" Fill="{StaticResource WhiteBrush}"/>
-            <Rectangle Canvas.Left="8" Canvas.Top="38" Width="28" Height="3" Fill="{StaticResource MainTextBrush}"/>
-            <Line X1="22" Y1="4" X2="22" Y2="-2" Style="{StaticResource SymbolLine}" StrokeThickness="{DynamicResource Stroke.Thin}"/>
-        </Canvas></DataTemplate>        <Style x:Key="JunctionSymbolStyle" TargetType="ContentControl">
-            <Setter Property="ContentTemplate" Value="{StaticResource GenericSymbol}"/>
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding Content, RelativeSource={RelativeSource Self}, Mode=OneWay}" Value="{x:Static core:JunctionSymbolKind.Pipe}"><Setter Property="ContentTemplate" Value="{StaticResource PipeSymbol}"/></DataTrigger>
-                <DataTrigger Binding="{Binding Content, RelativeSource={RelativeSource Self}, Mode=OneWay}" Value="{x:Static core:JunctionSymbolKind.Tee}"><Setter Property="ContentTemplate" Value="{StaticResource TeeSymbol}"/></DataTrigger>
-                <DataTrigger Binding="{Binding Content, RelativeSource={RelativeSource Self}, Mode=OneWay}" Value="{x:Static core:JunctionSymbolKind.Gate}"><Setter Property="ContentTemplate" Value="{StaticResource GateSymbol}"/></DataTrigger>
-                <DataTrigger Binding="{Binding Content, RelativeSource={RelativeSource Self}, Mode=OneWay}" Value="{x:Static core:JunctionSymbolKind.Air}"><Setter Property="ContentTemplate" Value="{StaticResource AirSymbol}"/></DataTrigger>
-            </Style.Triggers>
         </Style>
         <Style TargetType="GroupBox" BasedOn="{StaticResource PrimaryGroupBox}">
             <Setter Property="Margin" Value="0,0,0,10"/>
@@ -313,15 +277,14 @@
                                                             <DataTrigger Binding="{Binding Item.Connected, Mode=OneWay}" Value="False"><Setter Property="Stroke" Value="#E74C3C"/></DataTrigger>
                                                         </Style.Triggers></Style></Path.Style>
                                                     </Path>
-                                                    <!-- 기호선 없는 패밀리: 종류별 대체 기호(흐리게) -->
-                                                    <ContentControl Canvas.Left="{Binding SymbolLeft, Mode=OneWay}" Canvas.Top="{Binding SymbolTop, Mode=OneWay}" Width="44" Height="44" RenderTransformOrigin="0.5,0.5"
-                                                                    Content="{Binding Item.SymbolKind, Mode=OneWay}" ToolTip="{Binding ToolTip, Mode=OneWay}">
-                                                        <ContentControl.Style><Style TargetType="ContentControl" BasedOn="{StaticResource JunctionSymbolStyle}"><Setter Property="Opacity" Value="0.55"/><Style.Triggers>
-                                                            <DataTrigger Binding="{Binding Highlight, Mode=OneWay}" Value="{x:Static vm:SetHighlight.Highlighted}"><Setter Property="Opacity" Value="1"/></DataTrigger>
+                                                    <!-- 기호선 없는 패밀리: 빨강 사각형 + X(심볼 없음 표시). 35px = 대체 범위(도면 ±2.2mm) -->
+                                                    <Canvas Canvas.Left="-17.6" Canvas.Top="-17.6" Width="35.2" Height="35.2" Background="Transparent" ToolTip="{Binding ToolTip, Mode=OneWay}">
+                                                        <Canvas.Style><Style TargetType="Canvas"><Style.Triggers>
                                                             <DataTrigger Binding="{Binding HasShape, Mode=OneWay}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
-                                                        </Style.Triggers></Style></ContentControl.Style>
-                                                        <ContentControl.RenderTransform><ScaleTransform ScaleX="0.8" ScaleY="0.8"/></ContentControl.RenderTransform>
-                                                    </ContentControl>
+                                                        </Style.Triggers></Style></Canvas.Style>
+                                                        <Rectangle Width="35.2" Height="35.2" Stroke="#E74C3C" StrokeThickness="{DynamicResource Stroke.Symbol}"/>
+                                                        <Path Data="M0,0 L35.2,35.2 M35.2,0 L0,35.2" Stroke="#E74C3C" StrokeThickness="{DynamicResource Stroke.Thin}"/>
+                                                    </Canvas>
                                 </Canvas>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
@@ -445,9 +408,9 @@
         <Border Grid.Row="2" BorderBrush="{StaticResource CommonBorderBrush}" BorderThickness="0,1,0,0" Background="{StaticResource WhiteBrush}" Padding="14,10">
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <TextBlock Text="{Binding SummaryLine, Mode=OneWay}" TextWrapping="Wrap" VerticalAlignment="Center" FontSize="13" Margin="0,0,16,0"/>
+                <TextBlock Text="{Binding SummaryLine, Mode=OneWay}" ToolTip="{Binding SummaryToolTip, Mode=OneWay}"
+                           TextWrapping="Wrap" VerticalAlignment="Center" FontSize="13" Margin="0,0,16,0"/>
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
-                    <Button Content="오프셋만 0으로 되돌리기" Command="{Binding ResetOffsetsCommand, Mode=OneWay}" Style="{StaticResource CancelButtonStyle}" Margin="4,0"/>
                     <Button Content="취소" Command="{Binding CancelCommand, Mode=OneWay}" Style="{StaticResource CancelButtonStyle}" Margin="4,0"/>
                     <Button Content="실행" Command="{Binding RunCommand, Mode=OneWay}" Style="{StaticResource PrimaryButtonStyle}" Margin="4,0" MinWidth="90"/>
                 </StackPanel>

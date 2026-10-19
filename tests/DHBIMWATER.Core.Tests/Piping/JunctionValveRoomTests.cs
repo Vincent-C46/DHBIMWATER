@@ -41,6 +41,24 @@ public sealed class JunctionValveRoomTests
     public void Resolve_MissingSide_ReturnsNull()
         => Assert.Null(JunctionValveRoom.Resolve(Room.Take(3).ToList(), new ShapePoint(1200, 900)));
 
+    // 못 찾은 면을 이유로 알려줌, 찾으면 null (docs/299)
+    [Fact]
+    public void Explain_NamesMissingSides()
+    {
+        Assert.Null(JunctionValveRoom.Explain(Room, new ShapePoint(1200, 900)));
+        Assert.Contains("벽 없음", JunctionValveRoom.Explain([], new ShapePoint(0, 0)));
+        // 중심이 실 밖 왼쪽 → 좌측 벽 없음
+        Assert.Contains("좌측", JunctionValveRoom.Explain(Room, new ShapePoint(-5000, 900)));
+    }
+
+    // 세로 선 = 평면에서 점 → 기호선에서 제외 (docs/299)
+    [Fact]
+    public void IsVisibleInPlan_DropsZeroLengthLines()
+    {
+        Assert.False(JunctionSymbolShapeMath.IsVisibleInPlan([new ShapePoint(5, 5), new ShapePoint(5, 5)]));
+        Assert.True(JunctionSymbolShapeMath.IsVisibleInPlan([new ShapePoint(0, 0), new ShapePoint(10, 0)]));
+    }
+
     [Fact]
     public void Label_RoundsToCentimeters()
     {

@@ -56,7 +56,7 @@ internal sealed class RevitJunctionSymbolShapeRepo : IJunctionSymbolShapeRepo
                     .Select(point => Project(JunctionSymbolShapeMath.RestoreOffset(ToVector(point - transform.Origin),
                         offset, ToVector(transform.BasisX), ToVector(transform.BasisY), ToVector(transform.BasisZ)),
                         view.RightDirection, view.UpDirection))
-                    .ToList()).Where(line => line.Count >= 2).ToList();
+                    .ToList()).Where(line => line.Count >= 2 && JunctionSymbolShapeMath.IsVisibleInPlan(line)).ToList();
                 var points = polylines.SelectMany(x => x).ToList();
                 var response = VerifyOffset(instance, view, diagnostics);
                 string note = read.UsedSymbolGeometry ? "GetSymbolGeometry + GetTransform" : "GetInstanceGeometry";
