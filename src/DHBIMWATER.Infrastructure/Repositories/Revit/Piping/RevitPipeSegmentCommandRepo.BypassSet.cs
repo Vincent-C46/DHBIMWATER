@@ -32,18 +32,26 @@ internal sealed partial class RevitPipeSegmentCommandRepo
     /// <param name="SecondValveSymbol">밸브 2개 세트의 V2(엣지 끝 쪽) 유형. V1과 같은 규칙으로 고른다(docs/255). 1개 세트면 null.</param>
     /// <param name="SecondValveWidthMm">V2 커넥터 간 폭(mm). 1개 세트면 0.</param>
     /// <param name="SpoolLengthMm">V1–V2 사이 단관 길이(mm). 0 = 직결. 1개 세트면 0.</param>
+    /// <param name="TeeMainSkewMm">A 주관 비대칭(mm) = (분기 기준 시계쪽 반폭 − 반시계쪽 반폭) / 2. 대칭 A면 0(docs/297 § G).</param>
     private sealed record BypassLayout(
         double TeeCenterOffsetMm, double TeeMainHalfMm, double TeeBranchMm,
         double BendTeeLegMm, double BendValveLegMm, double BypassValveWidthMm,
         double BypassDiameterMm, FamilySymbol BypassValveSymbol,
-        FamilySymbol? SecondValveSymbol = null, double SecondValveWidthMm = 0, double SpoolLengthMm = 0)
+        FamilySymbol? SecondValveSymbol = null, double SecondValveWidthMm = 0, double SpoolLengthMm = 0,
+        double TeeMainSkewMm = 0)
     {
         /// <summary>B–B 사이 밸브 묶음 폭(mm, docs/255 § B-2). 1개 = W1, 2개 = W1 + 단관 + W2.</summary>
         public double ValveRunWidthMm => SecondValveSymbol is null ? BypassValveWidthMm : BypassValveWidthMm + SpoolLengthMm + SecondValveWidthMm;
 
-        /// <summary>본관에서 A 하나가 차지하는 구간(세트 중심 기준 축 거리). <paramref name="sign"/> -1 = 엣지 시작 쪽 A.</summary>
-        public OccupiedSpan TeeSpan(double centerMm, int sign)
-            => new(centerMm + sign * TeeCenterOffsetMm - TeeMainHalfMm, centerMm + sign * TeeCenterOffsetMm + TeeMainHalfMm);
+        /// <summary>본관에서 A 하나가 차지하는 구간(세트 중심 기준 축 거리). <paramref name="sign"/> -1 = 엣지 시작 쪽 A.
+        /// <paramref name="side"/> = 세트 바이패스 방향(<see cref="BypassSetSpec.NormalizedSide"/>) — A 비대칭이 축 어느 쪽으로 가는지 정함.</summary>
+        public OccupiedSpan TeeSpan(double centerMm, int sign, int side)
+            => new(centerMm + sign * TeeCenterOffsetMm - TeeMainHalfMm + TeeSkew(side),
+                centerMm + sign * TeeCenterOffsetMm + TeeMainHalfMm + TeeSkew(side));
+
+        /// <summary>A 중심에서 본 주관 구간 치우침(축 + 방향, mm). 두 A가 Z 회전만으로 같은 방향 놓임 → 둘 다 같은 값.
+        /// 축 + 방향 = 분기의 시계쪽(side +1) / 반시계쪽(side −1).</summary>
+        public double TeeSkew(int side) => side * TeeMainSkewMm;
 
         /// <summary>두 A 안쪽 주관 커넥터 사이 틈(mm). 사용자가 밸브를 놓지 않으면 관 분할이 이 구간을 관으로 채운다.</summary>
         public double InnerGapMm => 2 * (TeeCenterOffsetMm - TeeMainHalfMm);
@@ -54,7 +62,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo
 
     /// <summary>밸브부관 A 실측 결과(월드 좌표).</summary>
     private sealed record TeeGeometry(XYZ Center, XYZ MainAxis, XYZ BranchDirection, double MainHalfMm, double BranchMm,
-        XYZ Main1, XYZ Main2, XYZ Branch, IReadOnlyList<XYZ> Verticals);
+        XYZ Main1, XYZ Main2, XYZ Branch, IReadOnlyList<XYZ> Verticals, double MainSkewMm = 0);
 
     /// <summary>밸브부관 B 실측 결과(월드 좌표). [0] = 밸브 쪽(긴 레그), [1] = A 쪽(짧은 레그) — docs/247.</summary>
     private sealed record BendGeometry(XYZ Corner, XYZ ValveSide, XYZ TeeSide, XYZ ValveDirection, XYZ TeeDirection,
@@ -114,8 +122,10 @@ internal sealed partial class RevitPipeSegmentCommandRepo
     /// <summary>중심이 T 절점에 놓여 두 본관 엣지에 걸치는 세트. 세트는 한 엣지(<paramref name="OwnerEdgeId"/>) 소속이지만
     /// 밸브부관 A 하나는 반대편 본관 엣지(<paramref name="OtherEdgeId"/>)에 놓인다. 구간은 각 엣지 배치 축(mm) 기준이다.</summary>
     /// <param name="GapOpenPoints">A와 T 절점 부속 사이 틈이 관 최소 조각보다 짧아 단관을 넣지 않은 자리의 커넥터 점(연결 실패로 보고하지 않는다).</param>
+    /// <param name="CenterMm">세트 중심(소속 엣지 축, mm). 커넥터 사슬로 잡으면 캔버스 점(T 절점)에서 조금 비켜날 수 있음(docs/297 § G).</param>
     private sealed record TeeCenteredSet(
-        Guid OwnerEdgeId, Guid OtherEdgeId, OccupiedSpan OwnerSpan, OccupiedSpan OtherSpan, IReadOnlyList<XYZ> GapOpenPoints);
+        Guid OwnerEdgeId, Guid OtherEdgeId, OccupiedSpan OwnerSpan, OccupiedSpan OtherSpan, IReadOnlyList<XYZ> GapOpenPoints,
+        double CenterMm);
 
     private readonly record struct EdgeFrame(EdgeAxis Axis, double LengthMm);
 
@@ -179,9 +189,15 @@ internal sealed partial class RevitPipeSegmentCommandRepo
             var ownerSign = atEnd ? -1 : 1;
             var otherNodeAtStart = other.Start.DistanceTo(nodePosition) <= 0.01;
 
-            // docs/297 — 세트 안 본관 밸브 폭만큼 A 오프셋 다시 잡음. 차이는 V1–V2 단관이 흡수. 밸브 2개 세트만 자리 고정.
+            var side = fitting.Bypass!.NormalizedSide;
+            // 소속 축 x → 반대편 축 거리. 본관 두 엣지는 한 직선.
+            double ToOther(double x) => AxisDistanceMm(ownerFrame.Axis.PointAt(x), otherFrame.Axis);
+
+            // docs/297 § G — 커넥터 사슬: T 커넥터 ─ 세트 안 밸브 ─ A 안쪽 커넥터. 캔버스 점·A 평균 반폭 안 씀.
+            // 차이는 V1–V2 단관이 흡수. 밸브 2개 세트만 적용.
             var ownerForced = new List<(Guid Id, OccupiedSpan Span)>();
             var otherForced = new List<(Guid Id, OccupiedSpan Span)>();
+            var chained = false;
             string? spoolWarning = null;
             if (legAnchors.ContainsKey((node.Id, owner.Id)) && legAnchors.ContainsKey((node.Id, other.Id)))
             {
@@ -191,45 +207,48 @@ internal sealed partial class RevitPipeSegmentCommandRepo
                     other, nodePosition, layout);
                 if (ownerValves.Count + otherValves.Count > 0)
                 {
-                    // T 절점 중심 → 그 엣지 T 커넥터(축 0 또는 길이).
-                    var ownerLeg = atEnd ? center - ownerFrame.LengthMm : -center;
-                    var nodeOnOther = AxisDistanceMm(canvasPoint, otherFrame.Axis);
-                    var otherLeg = otherNodeAtStart ? -nodeOnOther : nodeOnOther - otherFrame.LengthMm;
-                    var halves = new[]
-                    {
-                        ownerLeg + ownerValves.Sum(x => x.WidthMm) + layout.TeeMainHalfMm,
-                        otherLeg + otherValves.Sum(x => x.WidthMm) + layout.TeeMainHalfMm,
-                    };
+                    // 소속 축 위 T 커넥터 두 개(실측 앵커). 반대편은 소속 축에 투영.
+                    var ownerTee = atEnd ? ownerFrame.LengthMm : 0;
+                    var otherTee = AxisDistanceMm(otherFrame.Axis.PointAt(otherNodeAtStart ? 0 : otherFrame.LengthMm), ownerFrame.Axis);
+                    // A 안쪽 커넥터 = T 커넥터에서 밸브 폭 합만큼 바깥. A 중심 = 거기서 안쪽 반폭만큼 더(비대칭 반영).
+                    var (chainCenter, needOffset) = BypassTeeChain.Solve(ownerTee, otherTee, ownerSign,
+                        ownerValves.Sum(x => x.WidthMm), otherValves.Sum(x => x.WidthMm), layout.TeeMainHalfMm, layout.TeeSkew(side));
                     if (layout.SecondValveSymbol is not null)
                     {
-                        var solution = BypassSpoolSolver.Solve(new BypassSpoolInput(layout.TeeCenterOffsetMm, halves,
+                        var solution = BypassSpoolSolver.Solve(new BypassSpoolInput(layout.TeeCenterOffsetMm, [needOffset],
                             layout.BendValveLegMm, layout.BypassValveWidthMm + layout.SecondValveWidthMm));
                         if (solution.Adjusted)
                         {
                             // 경고는 세트가 살아남은 뒤에 — 건너뛴 세트에 "늘렸다"가 남지 않게.
                             spoolWarning = FormattableString.Invariant(
-                                $"바이패스 세트: 본관 부품 폭에 맞춰 바이패스 밸브 사이 단관을 {layout.SpoolLengthMm:N0}→{solution.SpoolMm:N0}mm로 늘렸습니다.");
+                                $"바이패스 세트: 본관 부품 폭에 맞춰 바이패스 밸브 사이 단관을 {layout.SpoolLengthMm:N0}→{solution.SpoolMm:N1}mm로 늘렸습니다.");
                             // 캐시는 사용자 단관 기준 그대로 — 보정값은 이 세트만.
                             layout = layout with { SpoolLengthMm = solution.SpoolMm, TeeCenterOffsetMm = solution.OffsetMm };
                             layouts[fitting.Id] = layout;
                         }
+                        // 오프셋이 필요값보다 크면(사용자 단관 충분) 남는 길이 양쪽 같음 → 중심 = 사슬 중점.
+                        center = chainCenter;
+                        chained = true;
                         ownerForced = StackFromNode(ownerValves, ownerFrame.LengthMm, !atEnd);
                         otherForced = StackFromNode(otherValves, otherFrame.LengthMm, otherNodeAtStart);
                     }
-                    else if (halves.Max() > layout.TeeCenterOffsetMm + ConnectionToleranceMm)
+                    else if (needOffset > layout.TeeCenterOffsetMm + ConnectionToleranceMm)
                         warnings.Add("바이패스 세트: 밸브 1개 세트는 단관 보정을 할 수 없습니다 — 본관 밸브·T형관이 밸브부관 A와 겹칠 수 있습니다. 밸브 2개 세트로 바꾸세요.");
                 }
             }
 
-            var ownerRaw = layout.TeeSpan(center, ownerSign);
-            var otherCenter = AxisDistanceMm(ownerFrame.Axis.PointAt(center - ownerSign * layout.TeeCenterOffsetMm), otherFrame.Axis);
-            var otherRaw = new OccupiedSpan(otherCenter - layout.TeeMainHalfMm, otherCenter + layout.TeeMainHalfMm);
+            var ownerRaw = layout.TeeSpan(center, ownerSign, side);
+            // 반대편 A — 소속 축 구간을 반대편 축으로 옮김(방향 반대일 수 있어 정렬).
+            var otherOnOwner = layout.TeeSpan(center, -ownerSign, side);
+            var otherStart = ToOther(otherOnOwner.StartMm);
+            var otherEnd = ToOther(otherOnOwner.EndMm);
+            var otherRaw = new OccupiedSpan(Math.Min(otherStart, otherEnd), Math.Max(otherStart, otherEnd));
 
-            // 밸브 고정한 쪽은 A–T 사이를 밸브가 차지 — 틈 닫기 안 함.
+            // 사슬로 잡으면 A–T 사이를 밸브·단관이 정확히 채움 — 틈 닫기 안 함.
             var ownerGap = 0.0;
             var otherGap = 0.0;
-            var ownerSpan = ownerForced.Count > 0 ? ownerRaw : CloseTinyNodeGap(ownerRaw, ownerFrame.LengthMm, !atEnd, out ownerGap);
-            var otherSpan = otherForced.Count > 0 ? otherRaw : CloseTinyNodeGap(otherRaw, otherFrame.LengthMm, otherNodeAtStart, out otherGap);
+            var ownerSpan = chained ? ownerRaw : CloseTinyNodeGap(ownerRaw, ownerFrame.LengthMm, !atEnd, out ownerGap);
+            var otherSpan = chained ? otherRaw : CloseTinyNodeGap(otherRaw, otherFrame.LengthMm, otherNodeAtStart, out otherGap);
 
             var dropReason = DropReasonOf(fitting.Id, ownerSpan, ownerFrame.LengthMm) ?? DropReasonOf(fitting.Id, otherSpan, otherFrame.LengthMm);
             if (dropReason is not null)
@@ -251,7 +270,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo
                         $"바이패스 세트: 밸브부관 A와 T형관 사이 틈이 {gap:N1}mm라 관을 넣지 않았습니다(관 최소 {PipeSegmentPlan.MinSegmentMm:N0}mm). ") +
                         "두 부재는 연결되지 않은 채로 남습니다.");
             }
-            result[fitting.Id] = new TeeCenteredSet(owner.Id, other.Id, ownerSpan, otherSpan, gapPoints);
+            result[fitting.Id] = new TeeCenteredSet(owner.Id, other.Id, ownerSpan, otherSpan, gapPoints, center);
             foreach (var (id, span) in ownerForced.Concat(otherForced)) forcedValveSpans[id] = span;
             if (spoolWarning is not null) warnings.Add(spoolWarning);
         }
@@ -331,21 +350,25 @@ internal sealed partial class RevitPipeSegmentCommandRepo
             try
             {
                 var center = AxisDistanceMm(canvasPoint, axis);
-                axisCenters[fitting.Id] = center;
                 layouts[fitting.Id] = layout;
                 if (teeCentered.TryGetValue(fitting.Id, out var teeSet))
                 {
+                    // 사전 계획이 정한 중심 — 배치(PlaceBypassSet)도 이 값으로 A를 놓음.
+                    axisCenters[fitting.Id] = teeSet.CenterMm;
                     spans.Add((fitting.Id, teeSet.OwnerSpan));
                     continue;
                 }
+                axisCenters[fitting.Id] = center;
                 // A 두 구간만 예약한다 — 그 사이는 관 분할이 관·일반 밸브로 채운다(docs/230 § A).
-                spans.Add((fitting.Id, layout.TeeSpan(center, -1)));
-                spans.Add((fitting.Id, layout.TeeSpan(center, 1)));
+                var side = fitting.Bypass!.NormalizedSide;
+                spans.Add((fitting.Id, layout.TeeSpan(center, -1, side)));
+                spans.Add((fitting.Id, layout.TeeSpan(center, 1, side)));
                 if (layout.HasTinyInnerGap && layout.InnerGapMm > 0)
                 {
                     // 관 최소 조각보다 짧은 틈에는 관을 넣지 않는다(2026-09-28 사용자 결정, docs/230 § E) — 틈을 비워 두는 구간으로 잡아
                     // 관 분할이 "관 조각이 너무 짧다"로 모델 생성 전체를 멈추지 않게 하고, 1mm를 넘으면 경고만 남긴다.
-                    spans.Add((fitting.Id, new OccupiedSpan(center - layout.InnerGapMm / 2, center + layout.InnerGapMm / 2)));
+                    var gapCenter = center + layout.TeeSkew(side);
+                    spans.Add((fitting.Id, new OccupiedSpan(gapCenter - layout.InnerGapMm / 2, gapCenter + layout.InnerGapMm / 2)));
                     if (layout.InnerGapMm > ConnectionToleranceMm)
                         warnings.Add(FormattableString.Invariant(
                             $"바이패스 세트: 밸브부관 A 사이 틈이 {layout.InnerGapMm:N1}mm라 관을 넣지 않았습니다(관 최소 {PipeSegmentPlan.MinSegmentMm:N0}mm). ") +
@@ -435,7 +458,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo
         }
 
         var layout = new BypassLayout(0, tee.MainHalfMm, tee.BranchMm, bend.TeeLegMm, bend.ValveLegMm, bypassWidth, bypassMm, bypassValveSymbol,
-            secondSymbol, secondWidth, secondSymbol is null ? 0 : key.SpoolLengthMm);
+            secondSymbol, secondWidth, secondSymbol is null ? 0 : key.SpoolLengthMm, tee.MainSkewMm);
         // 1개 세트면 밸브 묶음 폭 = 밸브 폭이라 종전 식(bypassWidth / 2 + B 레그)과 같다.
         return layout with { TeeCenterOffsetMm = Math.Max(layout.ValveRunWidthMm / 2 + bend.ValveLegMm, tee.MainHalfMm) };
     }
@@ -516,9 +539,16 @@ internal sealed partial class RevitPipeSegmentCommandRepo
         if (branchVector.GetLength() < 1e-9)
             throw new DhbimwaterException(ErrorCodes.PL_ConnectorSpanMismatch,
                 $"{PipeValveBend.PartNameA}의 분기 커넥터가 주관 축 위에 있어 분기 방향을 알 수 없습니다.");
-        var mainHalf = (UC.FtToMm(Flat(main1 - center).GetLength()) + UC.FtToMm(Flat(main2 - center).GetLength())) / 2;
-        return new TeeGeometry(center, mainAxis, branchVector.Normalize(), mainHalf, UC.FtToMm(branchVector.GetLength()),
-            main1, main2, branch, all.Where(IsVerticalConnector).Select(x => x.Origin).ToList());
+        var half1 = UC.FtToMm(Flat(main1 - center).GetLength());
+        var half2 = UC.FtToMm(Flat(main2 - center).GetLength());
+        var mainHalf = (half1 + half2) / 2;
+        // 비대칭 — 분기 기준 시계쪽(cw) 반폭 − 반시계쪽 반폭, 절반. 평균만 쓰면 두 A 위치가 반씩 어긋남(docs/297 § G).
+        var branchUnit = branchVector.Normalize();
+        var cw = new XYZ(branchUnit.Y, -branchUnit.X, 0);
+        var main1IsCw = Flat(main1 - center).DotProduct(cw) > 0;
+        var skew = ((main1IsCw ? half1 : half2) - (main1IsCw ? half2 : half1)) / 2;
+        return new TeeGeometry(center, mainAxis, branchUnit, mainHalf, UC.FtToMm(branchVector.GetLength()),
+            main1, main2, branch, all.Where(IsVerticalConnector).Select(x => x.Origin).ToList(), skew);
     }
 
     /// <summary>B의 두 커넥터 축 교점(코너)과 레그 길이를 구한다. [0] = 긴 레그 = 밸브 쪽(docs/247).</summary>
@@ -802,7 +832,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo
             // 본관에 예약한 A 두 구간의 양 끝 — 관 끝이 서로 물리지 않게 열어 둔다(밸브 건너뛰기와 같은 규칙, docs/145 § 4-6).
             foreach (var sign in new[] { -1, 1 })
             {
-                var span = layout.TeeSpan(centerMm, sign);
+                var span = layout.TeeSpan(centerMm, sign, spec.NormalizedSide);
                 openPoints.Add(axis.PointAt(span.StartMm));
                 openPoints.Add(axis.PointAt(span.EndMm));
             }

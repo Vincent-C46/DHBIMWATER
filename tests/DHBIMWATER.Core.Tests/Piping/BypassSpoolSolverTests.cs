@@ -88,3 +88,38 @@ public sealed class BypassSpoolSolverTests
     public void NoHalves_NotAdjusted()
         => Assert.False(Solve().Adjusted);
 }
+
+/// <summary>커넥터 사슬(docs/297 § G). 결과 A 구간 안쪽 끝이 밸브 끝과 정확히 닿는지 확인.</summary>
+public sealed class BypassTeeChainTests
+{
+    private const double Half = 250;
+
+    // A 구간 = [중심 − 반폭 + 치우침, 중심 + 반폭 + 치우침].
+    private static (double Start, double End) Span(double center, double offset, int sign, double skew)
+        => (center + sign * offset - Half + skew, center + sign * offset + Half + skew);
+
+    [Theory]
+    [InlineData(-1, 0, 0)]     // T가 소속 엣지 끝, 대칭 A
+    [InlineData(1, 0, 0)]      // T가 소속 엣지 시작
+    [InlineData(-1, 0.3, 0)]   // T 레그 0.3mm 비대칭
+    [InlineData(-1, 0, 7.5)]   // A 비대칭
+    [InlineData(1, 0.3, -7.5)]
+    public void InnerConnectorsTouchValveEnds(int ownerSign, double legSkew, double teeSkew)
+    {
+        // T 중심 5000, 레그 300(소속 쪽만 legSkew 더). 밸브 폭 소속 400 / 반대 380.
+        // 소속 T 커넥터는 T 중심에서 소속 A 쪽(ownerSign)으로 레그만큼.
+        var ownerTee = 5000 + ownerSign * (300 + legSkew);
+        var otherTee = 5000 - ownerSign * 300;
+        var (center, offset) = BypassTeeChain.Solve(ownerTee, otherTee, ownerSign, 400, 380, Half, teeSkew);
+
+        var owner = Span(center, offset, ownerSign, teeSkew);
+        var other = Span(center, offset, -ownerSign, teeSkew);
+        // 소속 쪽 밸브 바깥 끝 = T 커넥터에서 A 방향으로 400.
+        var ownerValveEnd = ownerTee + ownerSign * 400;
+        var otherValveEnd = otherTee - ownerSign * 380;
+        Assert.Equal(ownerValveEnd, ownerSign < 0 ? owner.End : owner.Start, 6);
+        Assert.Equal(otherValveEnd, ownerSign < 0 ? other.Start : other.End, 6);
+        // 오프셋 = T 중심 → A 중심 근사(레그 300 + 밸브 + 반폭).
+        Assert.InRange(offset, 300 + 380 + Half - 1, 300 + 400 + Half + 1);
+    }
+}

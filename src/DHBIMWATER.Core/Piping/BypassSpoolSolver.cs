@@ -52,3 +52,24 @@ public static class BypassSpoolSolver
     private static bool IsPieceLength(BypassSpoolInput input, double lengthMm)
         => lengthMm >= -input.ToleranceMm && (lengthMm <= input.ToleranceMm || lengthMm >= input.MinSegmentMm - 1e-6);
 }
+
+/// <summary>T형관 중심 세트 커넥터 사슬(docs/297 § G). 모든 값 = 소속 엣지 축(mm).
+/// T 커넥터 ─ 세트 안 밸브 ─ A 안쪽 커넥터 직결이 되는 세트 중심·A 오프셋.</summary>
+public static class BypassTeeChain
+{
+    /// <param name="ownerTeeMm">소속 엣지 쪽 T 커넥터 위치.</param>
+    /// <param name="otherTeeMm">반대편 엣지 쪽 T 커넥터 위치(소속 축 투영).</param>
+    /// <param name="ownerSign">소속 쪽 A 방향(세트 중심 기준 ±1). 반대편 A = −ownerSign.</param>
+    /// <param name="ownerValvesMm">소속 쪽 세트 안 밸브 폭 합.</param>
+    /// <param name="otherValvesMm">반대편 쪽 세트 안 밸브 폭 합.</param>
+    /// <param name="teeHalfMm">A 주관 평균 반폭.</param>
+    /// <param name="teeSkewMm">A 주관 구간 치우침(축 + 방향). A 구간 = [중심 − 반폭 + 치우침, 중심 + 반폭 + 치우침].</param>
+    public static (double CenterMm, double OffsetMm) Solve(
+        double ownerTeeMm, double otherTeeMm, int ownerSign, double ownerValvesMm, double otherValvesMm,
+        double teeHalfMm, double teeSkewMm)
+    {
+        var ownerA = ownerTeeMm + ownerSign * (ownerValvesMm + teeHalfMm) - teeSkewMm;
+        var otherA = otherTeeMm - ownerSign * (otherValvesMm + teeHalfMm) - teeSkewMm;
+        return ((ownerA + otherA) / 2, ownerSign * (ownerA - otherA) / 2);
+    }
+}

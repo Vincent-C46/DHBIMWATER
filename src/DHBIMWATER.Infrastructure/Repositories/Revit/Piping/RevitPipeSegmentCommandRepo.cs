@@ -189,8 +189,8 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                 .Where(x => x.EdgeId == edge.Id && x.IsBypassSet && !droppedFittings.Contains(x.Id) && !teeCenteredSets.ContainsKey(x.Id)
                             && bypassLayouts.ContainsKey(x.Id) && inlineAxisCenters.ContainsKey(x.Id))
                 .Select(x => new BypassTeePair(
-                    bypassLayouts[x.Id].TeeSpan(inlineAxisCenters[x.Id], -1),
-                    bypassLayouts[x.Id].TeeSpan(inlineAxisCenters[x.Id], 1)))
+                    bypassLayouts[x.Id].TeeSpan(inlineAxisCenters[x.Id], -1, x.Bypass!.NormalizedSide),
+                    bypassLayouts[x.Id].TeeSpan(inlineAxisCenters[x.Id], 1, x.Bypass!.NormalizedSide)))
                 .ToList();
             var teeCenteredHere = teeCenteredSets.Where(x => x.Value.OwnerEdgeId == edge.Id || x.Value.OtherEdgeId == edge.Id)
                 .Select(x => (Id: x.Key, Span: x.Value.OwnerEdgeId == edge.Id ? x.Value.OwnerSpan : x.Value.OtherSpan))
