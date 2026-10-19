@@ -32,7 +32,8 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
     private readonly IDialogService _dialog;
     private int _headerRow = 1, _dataStartRow = 2;
     private ExcelSheetPickItem? _previewSheet;
-    private ExcelColumnOption? _xColumn, _yColumn, _zColumn, _stationColumn, _bendKindColumn, _vertexDiameterColumn;
+    private ExcelColumnOption? _xColumn, _yColumn, _zColumn, _stationColumn, _bendKindColumn, _vertexDiameterColumn, _groundElColumn;
+    private bool _isGroundElColumnVisible;
     private StationParseMode _stationMode = StationParseMode.Station;
     private double _numberChainIntervalM = 20d;
     private DataTable _previewTable = new();
@@ -64,6 +65,7 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
         StationColumn = FindOptionalColumn(existingMapping.StationColumnIndex);
         BendKindColumn = FindOptionalColumn(existingMapping.BendKindColumnIndex);
         VertexDiameterColumn = FindOptionalColumn(existingMapping.VertexDiameterColumnIndex);
+        GroundElColumn = FindOptionalColumn(existingMapping.GroundElColumnIndex);
     }
 
     public string FilePath { get; }
@@ -97,22 +99,31 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
     public ExcelColumnOption? YColumn { get => _yColumn; set { if (SetProperty(ref _yColumn, value)) OnPropertyChanged(nameof(CanConfirm)); } }
     public ExcelColumnOption? ZColumn { get => _zColumn; set { if (SetProperty(ref _zColumn, value)) OnPropertyChanged(nameof(CanConfirm)); } }
     /// <summary>선택 사항. null이면 "(사용 안 함)".</summary>
-    public ExcelColumnOption? StationColumn { get => _stationColumn; set => SetProperty(ref _stationColumn, value); }
+    public ExcelColumnOption? StationColumn { get => _stationColumn; set { if (SetProperty(ref _stationColumn, value)) NotifyConfirmState(); } }
     public ExcelColumnOption? BendKindColumn { get => _bendKindColumn; set => SetProperty(ref _bendKindColumn, value); }
     public ExcelColumnOption? VertexDiameterColumn { get => _vertexDiameterColumn; set => SetProperty(ref _vertexDiameterColumn, value); }
+    /// <summary>지표 EL 열. 밸브실 위치 자동지정에서만 보이고 필수다(docs/300 § C-1).</summary>
+    public ExcelColumnOption? GroundElColumn { get => _groundElColumn; set { if (SetProperty(ref _groundElColumn, value)) NotifyConfirmState(); } }
+    /// <summary>true = 밸브실 경로. 지표EL 열을 보이고 측점·지표EL 열을 필수로 본다. 관로 모델링은 false.</summary>
+    public bool IsGroundElColumnVisible { get => _isGroundElColumnVisible; set { if (SetProperty(ref _isGroundElColumnVisible, value)) NotifyConfirmState(); } }
     public StationParseMode StationMode { get => _stationMode; set { if (SetProperty(ref _stationMode, value)) { OnPropertyChanged(nameof(IsStationMode)); OnPropertyChanged(nameof(IsNumberChainMode)); } } }
     public bool IsStationMode { get => StationMode == StationParseMode.Station; set { if (value) StationMode = StationParseMode.Station; } }
     public bool IsNumberChainMode { get => StationMode == StationParseMode.NumberChain; set { if (value) StationMode = StationParseMode.NumberChain; } }
     public double NumberChainIntervalM { get => _numberChainIntervalM; set => SetProperty(ref _numberChainIntervalM, value); }
 
     public int CheckedCount => Sheets.Count(x => x.IsChecked);
-    public bool CanConfirm => CheckedCount > 0 && XColumn is not null && YColumn is not null && ZColumn is not null;
-    public string StatusText => $"시트 {CheckedCount}개" + (CanConfirm ? " · X·Y·Z 지정 완료" : " · X·Y·Z 미지정");
+    public bool CanConfirm => CheckedCount > 0 && XColumn is not null && YColumn is not null && ZColumn is not null
+        && (!IsGroundElColumnVisible || (UsedIndex(StationColumn) is not null && UsedIndex(GroundElColumn) is not null));
+    public string StatusText => $"시트 {CheckedCount}개" + (IsGroundElColumnVisible
+        ? (CanConfirm ? " · X·Y·Z·측점·지표EL 지정 완료" : " · X·Y·Z·측점·지표EL 미지정")
+        : (CanConfirm ? " · X·Y·Z 지정 완료" : " · X·Y·Z 미지정"));
 
     public ICommand OkCommand { get; }
     public ICommand CancelCommand { get; }
     public Action? CloseAction { get; set; }
     public IReadOnlyList<ExcelAlignmentMapping>? Result { get; private set; }
+
+    private void NotifyConfirmState() { OnPropertyChanged(nameof(CanConfirm)); OnPropertyChanged(nameof(StatusText)); }
 
     private void OnSheetCheckedChanged()
     {
@@ -127,8 +138,9 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
         // 선택 열이 "(사용 안 함)"(-1)이면 이전 값이 없는 것으로 보고 다시 추정한다. 헤더가 4행인 코리더 점 보고서는
         // 처음(헤더 1행) 추정이 실패해 -1로 굳고, 헤더 행을 4로 바꿔도 Station·곡관유형·호칭지름이 매핑되지 않았다.
         var previousStation = UsedIndex(StationColumn); var previousBendKind = UsedIndex(BendKindColumn); var previousVertexDiameter = UsedIndex(VertexDiameterColumn);
+        var previousGroundEl = UsedIndex(GroundElColumn);
         ColumnOptions.Clear(); OptionalColumnOptions.Clear();
-        if (PreviewSheet is null || HeaderRow < 1) { _previewTable = new DataTable(); OnPropertyChanged(nameof(PreviewView)); XColumn = YColumn = ZColumn = StationColumn = BendKindColumn = VertexDiameterColumn = null; return; }
+        if (PreviewSheet is null || HeaderRow < 1) { _previewTable = new DataTable(); OnPropertyChanged(nameof(PreviewView)); XColumn = YColumn = ZColumn = StationColumn = BendKindColumn = VertexDiameterColumn = GroundElColumn = null; return; }
 
         IReadOnlyList<IReadOnlyList<string?>> rows;
         try { rows = _reader.PreviewRows(FilePath, PreviewSheet.Name, Math.Max(HeaderRow, DataStartRow) + 3); }
@@ -175,6 +187,9 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
         VertexDiameterColumn = previousVertexDiameter is null
             ? OptionalMatch(GuessColumn(headers, VertexDiameterKeywords))
             : OptionalColumnOptions.FirstOrDefault(x => x.Index == previousVertexDiameter) ?? OptionalColumnOptions.First();
+        GroundElColumn = previousGroundEl is null
+            ? OptionalMatch(GuessColumn(headers, GroundElKeywords))
+            : OptionalColumnOptions.FirstOrDefault(x => x.Index == previousGroundEl) ?? OptionalColumnOptions.First();
         OnPropertyChanged(nameof(CanConfirm)); OnPropertyChanged(nameof(StatusText));
     }
 
@@ -188,8 +203,10 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
         if (StationMode == StationParseMode.NumberChain && NumberChainIntervalM <= 0) { _dialog.Warn("입력 확인", "NumberChain 간격은 0보다 커야 합니다."); return; }
         var bendKind = BendKindColumn is { Index: >= 0 } ? BendKindColumn.Index : (int?)null;
         var vertexDiameter = VertexDiameterColumn is { Index: >= 0 } ? VertexDiameterColumn.Index : (int?)null;
+        var groundEl = GroundElColumn is { Index: >= 0 } ? GroundElColumn.Index : (int?)null;
+        if (IsGroundElColumnVisible && (station is null || groundEl is null)) { _dialog.Warn("입력 확인", "밸브실 위치 자동지정은 측점 열과 지표 EL 열이 필수입니다."); return; }
         Result = Sheets.Where(x => x.IsChecked)
-            .Select(x => new ExcelAlignmentMapping(x.Name, HeaderRow, DataStartRow, XColumn.Index, YColumn.Index, ZColumn.Index, station, StationMode, NumberChainIntervalM, bendKind, vertexDiameter))
+            .Select(x => new ExcelAlignmentMapping(x.Name, HeaderRow, DataStartRow, XColumn.Index, YColumn.Index, ZColumn.Index, station, StationMode, NumberChainIntervalM, bendKind, vertexDiameter, groundEl))
             .ToList();
         CloseAction?.Invoke();
     }
@@ -206,6 +223,7 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
     private static readonly string[] ZKeywords = ["Z", "표고", "고도", "EL", "ELEV", "LEVEL", "높이"];
     private static readonly string[] StationKeywords = ["STA", "STATION", "측점", "측점번호", "측점명", "누가거리", "CHAINAGE", "NO"];
     private static readonly string[] BendKindKeywords = ["곡관유형", "곡관종류", "곡관", "BEND"];
+    private static readonly string[] GroundElKeywords = ["지표EL", "지표고", "지표표고", "지반고", "지반EL", "계획지반고", "현지반고", "GL", "GROUND", "EG"];
     private static readonly string[] VertexDiameterKeywords = ["호칭지름(DN)", "호칭지름\n(DN)", "호칭지름", "DN", "직경", "관경", "구경", "호구경"];
 
     private ExcelColumnOption OptionalMatch(ExcelColumnOption? option)

@@ -18,6 +18,7 @@ public partial class ValveRoomView : Window
         DataContext = viewModel;
         viewModel.CloseAction = Close;
         viewModel.ConcreteLauncher.ShowDialog = vm => ConcreteSettingsView.Show(this, vm);   // docs/249 § E
+        viewModel.ShowExcelMappingDialog = ShowExcelMappingDialog;                            // docs/300 § D-5
         // Revit 위의 모델리스 WPF 창은 떠도 WPF 키보드 포커스가 비어 있어, 사용자가 처음 클릭한 TextBox가
         // IME(TSF) 컨텍스트를 못 받는다 → 한글 조합이 깨지고 백스페이스가 텍스트 전체를 지운다(docs/182 § 2).
         // 포커스를 한 번 옮겼다 돌아오면 정상화되는 것이 확인됐으므로, 그 왕복을 창이 뜰 때 자동으로 한 번 한다.
@@ -68,6 +69,15 @@ public partial class ValveRoomView : Window
         // (첫 표시 전에는 Left가 NaN — CenterScreen이 자리를 잡는다.)
         if (!double.IsNaN(Left) && Left + Width > workArea.Right)
             Left = Math.Max(workArea.Left, workArea.Right - Width);
+    }
+
+    /// <summary>모델리스 창 위 모달. 닫힌 뒤 이 창을 다시 활성화해 포커스를 돌려준다.</summary>
+    private bool ShowExcelMappingDialog(ExcelAlignmentMappingViewModel mappingVm)
+    {
+        var dialog = new ExcelAlignmentMappingView(mappingVm) { Owner = this };
+        dialog.ShowDialog();
+        Activate();
+        return mappingVm.Result is { Count: > 0 };
     }
 
     private void OnContentRenderedPrimeIme(object? sender, EventArgs e)

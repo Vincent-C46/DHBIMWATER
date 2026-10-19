@@ -237,6 +237,41 @@
                             <StackPanel Margin="8">
                                 <Border Background="#EEF2F7" CornerRadius="8" Padding="14" Margin="0,0,0,12">
                                     <StackPanel>
+                                        <!-- 위치 자동지정(docs/300): 엑셀 선형 + 밸브실측점 → 아래 X·Y·EL·θ와 내부 높이를 채운다. 채운 뒤에도 직접 고칠 수 있다. -->
+                                        <DockPanel Margin="0,0,0,8">
+                                            <Button DockPanel.Dock="Left" Style="{StaticResource PrimaryButtonStyle}" Content="위치 자동지정" Command="{Binding AutoPlaceCommand}" Margin="0,0,8,0"
+                                                    ToolTip="엑셀 선형 좌표표와 밸브실측점으로 좌표·도북각·기초 상부 EL·내부 높이를 계산합니다."/>
+                                            <Button DockPanel.Dock="Left" Style="{StaticResource CancelButtonStyle}" Content="엑셀 다시 지정" Command="{Binding RemapPlacementExcelCommand}" Margin="0,0,8,0"/>
+                                            <TextBlock Text="{Binding PlacementSourceText}" Foreground="#7F8C8D" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                        </DockPanel>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="45"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="110"/>
+                                                <ColumnDefinition Width="35"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Hc"/>
+                                            <TextBlock Grid.Column="1" Text="토피고 (지표→상부슬래브 상면)"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding CoverDepth, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
+                                            <TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
+                                        </Grid>
+                                        <Grid Margin="0,8,0,0" Visibility="{Binding PipeCenterGapVisibility}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="45"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="110"/>
+                                                <ColumnDefinition Width="35"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Hg"/>
+                                            <TextBlock Grid.Column="1" Text="관 중심→기초 상면 이격 (아래로)"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding PipeCenterToFoundationTopGap, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
+                                            <TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
+                                        </Grid>
+                                        <TextBlock Margin="0,8,0,0" Text="※ 공기밸브실은 '기초 상부~본관 중심 깊이(Hp)'로 기초 상부 EL을 계산합니다." FontSize="11" Foreground="#7F8C8D"
+                                                   TextWrapping="Wrap" Visibility="{Binding AirValveVisibility}"/>
+                                        <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" Content="90° 회전 (관 방향 = 내부 폭 W)" IsChecked="{Binding IsPlacementRotated, Mode=TwoWay}" Margin="0,8,0,0"/>
+                                        <Separator Margin="0,10,0,10"/>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="45"/>

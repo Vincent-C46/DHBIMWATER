@@ -1,10 +1,15 @@
-﻿using DHBIMWATER.Application.DTOs.Revit.ValveRoom;
+﻿using DHBIMWATER.Application.DTOs.Gis;
+using DHBIMWATER.Application.DTOs.Revit.ValveRoom;
 using DHBIMWATER.Application.Interfaces;
+using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Application.Services;
+using DHBIMWATER.Application.UseCases.AutoGenerator;
 using DHBIMWATER.UI.Base;
 using DHBIMWATER.UI.Commands;
 using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Parameters;
+using DHBIMWATER.Core.Structures;
+using DHBIMWATER.UI.Utilities;
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Input;
@@ -45,6 +50,10 @@ public class ValveRoomViewModel : ViewModelBase
     private readonly IDialogService _dialogService;
     private readonly IElementTypeQueryRepo _typeQueryRepo;
     private readonly IProjectInformationQueryRepo _projectInfoQueryRepo;
+    // 위치 자동지정(docs/300). 셋 중 하나라도 없으면(테스트·구형 호출) 버튼이 경고만 띄운다.
+    private readonly IExcelAlignmentSourceReader? _excelReader;
+    private readonly IFileDialogService? _fileDialog;
+    private readonly ResolveValveRoomPlacementUseCase? _resolvePlacement;
 
     private string _selectedValveRoomStructure = "현타밸브실";
     private string _selectedValveRoomType = "이토밸브실";
@@ -101,11 +110,23 @@ public class ValveRoomViewModel : ViewModelBase
     private double _sharedCoordinateY;
     private double _foundationTopEl;
     private double _trueNorthToProjectNorthClockwiseDegrees;
+
+    // 위치 자동지정 입력(docs/300 § D-2). 토피고·이격은 mm. 프리셋이 리셋하지 않는다.
+    private double _coverDepth = 1200;
+    private double _pipeCenterToFoundationTopGap;
+    private bool _isPlacementRotated;
+    // 엑셀 매핑은 창이 열려 있는 동안만 기억한다. 저장 안 함.
+    private string? _placementExcelPath;
+    private ExcelAlignmentMapping? _placementExcelMapping;
     public ValveRoomViewModel(IDialogService dialogService, IElementTypeQueryRepo typeQueryRepo,
         IProjectInformationQueryRepo projectInfoQueryRepo,
-        IConcreteSettingsRepo? concreteSettingsRepo = null, DHBIMWATER.Application.UseCases.AutoGenerator.SaveConcreteSettingsUseCase? saveConcreteSettings = null)
+        IConcreteSettingsRepo? concreteSettingsRepo = null, DHBIMWATER.Application.UseCases.AutoGenerator.SaveConcreteSettingsUseCase? saveConcreteSettings = null,
+        IExcelAlignmentSourceReader? excelReader = null, IFileDialogService? fileDialog = null, ResolveValveRoomPlacementUseCase? resolvePlacement = null)
     {
         _dialogService = dialogService;
+        _excelReader = excelReader;
+        _fileDialog = fileDialog;
+        _resolvePlacement = resolvePlacement;
         // 모델리스 창이라 읽기·저장은 ValveRoomCommand가 RunInRevitContext를 연결해 ExternalEvent로 돈다(docs/249 § E).
         ConcreteLauncher = new ConcreteSettingsLauncher(concreteSettingsRepo, saveConcreteSettings, dialogService);
         _typeQueryRepo = typeQueryRepo;
@@ -123,6 +144,8 @@ public class ValveRoomViewModel : ViewModelBase
         LoadTypeNames();
 
         ResetCommand = new RelayCommand(_ => ApplyPreset());
+        AutoPlaceCommand = new RelayCommand(_ => AutoPlace());
+        RemapPlacementExcelCommand = new RelayCommand(_ => SelectPlacementExcel(reuseMapping: true), _ => _placementExcelPath is not null);
         // 철제밸브실은 형상 계산이 없으므로 생성을 막는다. RelayCommand는 CommandManager.RequerySuggested
         // 기반이라 IsStructureImplemented가 바뀌면 별도 갱신 호출 없이 버튼 상태가 따라온다.
         // 숫자 칸에 변환 오류가 남아 있으면 옛 값으로 생성되지 않게 막는다(docs/238 § B).
@@ -142,6 +165,12 @@ public class ValveRoomViewModel : ViewModelBase
     /// <summary>헌치 구조 프레임 유형 후보. 첫 항목은 자동 탐색이고, 나머지는 "패밀리명 : 타입명" 표기다(docs/156 § D-1).</summary>
     public ObservableCollection<string> HaunchTypeNames { get; }
     public ICommand ResetCommand { get; }
+    /// <summary>[위치 자동지정] 엑셀 선형 + 밸브실측점으로 좌표·도북각·기초상부EL·내부높이를 채운다(docs/300).</summary>
+    public ICommand AutoPlaceCommand { get; }
+    /// <summary>[엑셀 다시 지정] 기억한 파일의 매핑창을 다시 연다.</summary>
+    public ICommand RemapPlacementExcelCommand { get; }
+    /// <summary>엑셀 매핑창 표시 훅. View가 Owner를 붙여 모달로 띄우고, 확정했으면 true. VM은 View 타입을 모른다.</summary>
+    public Func<ExcelAlignmentMappingViewModel, bool>? ShowExcelMappingDialog { get; set; }
     public ICommand CreateCommand { get; }
     /// <summary>밸브실당 드레인 피트는 1개다. 생성 여부는 <see cref="HasDrainPit"/>가 결정한다.</summary>
     public DrainPitItemViewModel DrainPit { get; } = new();
@@ -194,6 +223,7 @@ public class ValveRoomViewModel : ViewModelBase
             OnPropertyChanged(nameof(AirValveVisibility));
             OnPropertyChanged(nameof(PlainConcreteVisibility));
             OnPropertyChanged(nameof(DrainPitVisibility));
+            OnPropertyChanged(nameof(PipeCenterGapVisibility));
             OnPropertyChanged(nameof(Summary));
             OnPropertyChanged(nameof(PlanImagePath));
             OnPropertyChanged(nameof(SectionImagePath));
@@ -323,6 +353,16 @@ public class ValveRoomViewModel : ViewModelBase
     /// <summary>기초 상부 EL(m). 레벨 표고가 되며 내부원점 표고는 항상 0이다.</summary>
     public double FoundationTopEl { get => _foundationTopEl; set => SetProperty(ref _foundationTopEl, value); }
     public double TrueNorthToProjectNorthClockwiseDegrees { get => _trueNorthToProjectNorthClockwiseDegrees; set => SetProperty(ref _trueNorthToProjectNorthClockwiseDegrees, value); }
+    /// <summary>토피고(mm). 상부슬래브 상면 EL = 지표 EL − 토피고.</summary>
+    public double CoverDepth { get => _coverDepth; set => SetProperty(ref _coverDepth, value); }
+    /// <summary>관 중심 → 기초 상면 아래쪽 거리(mm). 이토·타이·제수 전용. 공기는 <see cref="FoundationTopToPipeCenterDepth"/>를 쓴다.</summary>
+    public double PipeCenterToFoundationTopGap { get => _pipeCenterToFoundationTopGap; set => SetProperty(ref _pipeCenterToFoundationTopGap, value); }
+    /// <summary>false = 관 방향이 내부 길이(L), true = 내부 폭(W)으로 90° 회전.</summary>
+    public bool IsPlacementRotated { get => _isPlacementRotated; set => SetProperty(ref _isPlacementRotated, value); }
+    /// <summary>위치 자동지정에 쓸 엑셀 표시(파일명 · 시트). 지정 전이면 안내문.</summary>
+    public string PlacementSourceText => _placementExcelPath is null || _placementExcelMapping is null
+        ? "엑셀 미지정"
+        : $"{System.IO.Path.GetFileName(_placementExcelPath)} · {_placementExcelMapping.SheetName}";
     public bool HasIntermediateWall
     {
         get => _hasIntermediateWall;
@@ -356,6 +396,8 @@ public class ValveRoomViewModel : ViewModelBase
     public Visibility AirValveVisibility => IsAir ? Visibility.Visible : Visibility.Collapsed;
     public Visibility PlainConcreteVisibility => IsAir ? Visibility.Collapsed : Visibility.Visible;
     public Visibility DrainPitVisibility => IsAir ? Visibility.Collapsed : Visibility.Visible;
+    // 공기는 관이 기초 안이라 기존 본관 중심 깊이칸을 쓴다(docs/300 D6).
+    public Visibility PipeCenterGapVisibility => IsAir ? Visibility.Collapsed : Visibility.Visible;
 
     // 참고도는 Resources/ValveRoomImages/{종류}_{평면도|단면도}.png(Resource). 같은 폴더의 .svg가 원본이며 치수 기호는 View 라벨과 같다.
     private const string ImageBasePath = "pack://application:,,,/DHBIMWATER.UI;component/Resources/ValveRoomImages/";
@@ -780,6 +822,106 @@ public class ValveRoomViewModel : ViewModelBase
         var x = pit.Corner is "우상단" or "우하단" ? InnerLength - pit.LengthX / 2 : pit.LengthX / 2;
         var y = pit.Corner is "좌상단" or "우상단" ? InnerWidth - pit.WidthY / 2 : pit.WidthY / 2;
         return new Point3D(x, y, FoundationTopEl * 1000);
+    }
+
+    private void AutoPlace()
+    {
+        if (_excelReader is null || _fileDialog is null || _resolvePlacement is null)
+        {
+            _dialogService.Warn("위치 자동지정", "위치 자동지정 서비스가 연결되지 않았습니다.");
+            return;
+        }
+        if (_placementExcelPath is null || _placementExcelMapping is null)
+        {
+            if (!SelectPlacementExcel(reuseMapping: false)) return;
+        }
+        if (string.IsNullOrWhiteSpace(StationPoint))
+        {
+            _dialogService.Warn("위치 자동지정", $"[{ErrorCodes.VR_PlacementStationInvalid}] 밸브실측점을 입력하세요. 예) 1+750.00");
+            return;
+        }
+
+        var usesIntermediateSlab = IsMud && HasIntermediateSlab;
+        ValveRoomPlacementResolution resolution;
+        try
+        {
+            resolution = _resolvePlacement.Execute(_placementExcelPath!, _placementExcelMapping!, StationPoint, point => new ValveRoomPlacementInput
+            {
+                Point = point,
+                CoverDepthMm = CoverDepth,
+                FoundationTopReference = IsAir ? FoundationTopReference.AbovePipeCenter : FoundationTopReference.BelowPipeCenter,
+                PipeCenterToFoundationTopMm = IsAir ? FoundationTopToPipeCenterDepth : PipeCenterToFoundationTopGap,
+                InnerLengthMm = InnerLength,
+                InnerWidthMm = InnerWidth,
+                UpperSlabThicknessMm = UpperSlabThickness,
+                HasIntermediateSlab = usesIntermediateSlab,
+                IntermediateSlabThicknessMm = IntermediateSlabThickness,
+                Floor1InnerHeightMm = Floor1InnerHeight,
+                RotateQuarterTurn = IsPlacementRotated,
+            });
+        }
+        catch (Exception ex)
+        {
+            // 계산 실패면 칸 하나도 안 바꾼다(부분 적용 금지, docs/300 § 3-5).
+            _dialogService.Warn("위치 자동지정", UiErrors.Report("ValveRoom", ex));
+            return;
+        }
+
+        var placement = resolution.Placement;
+        SharedCoordinateX = placement.SharedX;
+        SharedCoordinateY = placement.SharedY;
+        TrueNorthToProjectNorthClockwiseDegrees = placement.TrueNorthToProjectNorthClockwiseDegrees;
+        FoundationTopEl = placement.FoundationTopEl;
+        if (placement.Floor2InnerHeight is { } floor2) Floor2InnerHeight = floor2;
+        if (placement.InnerHeight is { } inner) InnerHeight = inner;
+
+        var point = resolution.Point;
+        var height = placement.Floor2InnerHeight is { } h2 ? $"2F 내부 높이 {h2:N0} mm" : $"내부 높이 {placement.InnerHeight:N0} mm";
+        var message = $"측점 {point.StationM:0.###} m · 관중심 EL {placement.PipeCenterEl:0.###} m · 지표 EL {point.GroundEl:0.###} m\n" +
+                      $"기초 상부 EL {placement.FoundationTopEl:0.###} m · 상부슬래브 상면 EL {placement.TopSlabTopEl:0.###} m · {height}\n" +
+                      $"도북각 {placement.TrueNorthToProjectNorthClockwiseDegrees:0.###}° 적용";
+        if (resolution.Warnings.Count > 0) message += "\n\n" + string.Join("\n", resolution.Warnings);
+        _dialogService.Info("위치 자동지정", message);
+    }
+
+    /// <summary>엑셀 선택 + 매핑. reuseMapping이면 기억한 파일·매핑으로 매핑창만 다시 연다. 확정하면 true.</summary>
+    private bool SelectPlacementExcel(bool reuseMapping)
+    {
+        if (_excelReader is null || _fileDialog is null) return false;
+        var path = reuseMapping ? _placementExcelPath : _fileDialog.OpenFile("밸브실 위치 — 선형 좌표표 선택", "엑셀·CSV (*.xlsx;*.csv)|*.xlsx;*.csv");
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        if (ShowExcelMappingDialog is null)
+        {
+            _dialogService.Warn("위치 자동지정", "엑셀 매핑 창을 열 수 없습니다.");
+            return false;
+        }
+
+        ExcelAlignmentMappingViewModel mappingVm;
+        try
+        {
+            mappingVm = reuseMapping && _placementExcelMapping is not null
+                ? new ExcelAlignmentMappingViewModel(_excelReader, _dialogService, path, _placementExcelMapping)
+                : new ExcelAlignmentMappingViewModel(_excelReader, _dialogService, path);
+            mappingVm.IsGroundElColumnVisible = true;
+        }
+        catch (Exception ex)
+        {
+            _dialogService.Warn("엑셀 읽기 실패", UiErrors.Report("ValveRoom", ex));
+            return false;
+        }
+
+        if (!ShowExcelMappingDialog(mappingVm) || mappingVm.Result is not { } mappings) return false;
+        if (mappings.Count != 1)
+        {
+            _dialogService.Warn("입력 확인", "밸브실 위치는 시트 1개만 지정하세요.");
+            return false;
+        }
+
+        _placementExcelPath = path;
+        _placementExcelMapping = mappings[0];
+        OnPropertyChanged(nameof(PlacementSourceText));
+        CommandManager.InvalidateRequerySuggested();
+        return true;
     }
 
     private void SetAndRefresh<T>(ref T field, T value)

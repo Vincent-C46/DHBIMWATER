@@ -11,4 +11,7 @@ public interface IExcelAlignmentSourceReader : IAlignmentSourceReader
     IReadOnlyList<IReadOnlyList<string?>> PreviewRows(string filePath, string sheetName, int maxRows);
 
     ShapefileReadResult Read(string filePath, ExcelAlignmentMapping mapping);
+
+    /// <summary>밸브실 위치 자동지정용. 측점·지표EL 열이 매핑돼 있어야 한다(docs/300 § B-2).</summary>
+    AlignmentProfileReadResult ReadProfile(string filePath, ExcelAlignmentMapping mapping);
 }

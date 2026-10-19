@@ -91,6 +91,11 @@ public static class ErrorCodes
     public const string VR_WallProfileTooFewPoints = "VR-306";
     public const string VR_NoCutHost = "VR-307";
     public const string VR_VoidParameterUnwritable = "VR-401";
+    public const string VR_PlacementStationInvalid = "VR-501";
+    public const string VR_PlacementStationOutOfRange = "VR-502";
+    public const string VR_PlacementProfileInvalid = "VR-503";
+    public const string VR_PlacementZDatumUnsupported = "VR-504";
+    public const string VR_PlacementHeightInvalid = "VR-505";
     public const string VR_Internal = "VR-901";
 
     // ── MT: 격점상세 배관재료표 ──

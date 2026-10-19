@@ -1,4 +1,8 @@
-﻿using DHBIMWATER.Application.Interfaces;
+﻿using DHBIMWATER.Application.DTOs.Gis;
+using DHBIMWATER.Application.Interfaces;
+using DHBIMWATER.Application.Interfaces.Gis;
+using DHBIMWATER.Application.UseCases.AutoGenerator;
+using DHBIMWATER.Core.Gis;
 using DHBIMWATER.UI.ViewModels.Modeling;
 using Xunit;
 
@@ -392,6 +396,92 @@ public class ValveRoomViewModelTests
         Assert.Equal(string.Empty, vm.PipelineSection);
     }
 
+    [Fact]
+    public void 위치자동지정_엑셀_측점으로_좌표_도북각_EL_내부높이를_채운다()
+    {
+        var dialog = new StubDialogService();
+        var vm = CreatePlacementViewModel(dialog);
+        vm.StationPoint = "0+050";
+        vm.PipeCenterToFoundationTopGap = 300;
+
+        vm.AutoPlaceCommand.Execute(null);
+
+        // 이토 프리셋 L4000·W2500, 상부슬래브 400, 토피 1200. 측점 50 → (50, 0), 관중심 10.5, 지표 15.5.
+        Assert.Equal(48d, vm.SharedCoordinateX, 4);
+        Assert.Equal(-1.25d, vm.SharedCoordinateY, 4);
+        Assert.Equal(0d, vm.TrueNorthToProjectNorthClockwiseDegrees, 6);
+        Assert.Equal(10.2d, vm.FoundationTopEl, 6);
+        Assert.Equal(3700d, vm.InnerHeight);
+        Assert.Equal("a.xlsx · 선형", vm.PlacementSourceText);
+        Assert.Empty(dialog.Warnings);
+    }
+
+    [Fact]
+    public void 위치자동지정_실패하면_칸을_바꾸지_않는다()
+    {
+        var dialog = new StubDialogService();
+        var vm = CreatePlacementViewModel(dialog);
+        vm.StationPoint = "0+500";
+        var innerHeight = vm.InnerHeight;
+
+        vm.AutoPlaceCommand.Execute(null);
+
+        Assert.Equal(0d, vm.SharedCoordinateX);
+        Assert.Equal(0d, vm.FoundationTopEl);
+        Assert.Equal(innerHeight, vm.InnerHeight);
+        Assert.Contains(dialog.Warnings, x => x.Contains("VR-502"));
+    }
+
+    [Fact]
+    public void 공기밸브실은_관중심_이격칸을_숨긴다()
+    {
+        var vm = CreateViewModel(new StubElementTypeQueryRepo());
+
+        vm.SelectedValveRoomType = "공기밸브실";
+
+        Assert.Equal(System.Windows.Visibility.Collapsed, vm.PipeCenterGapVisibility);
+    }
+
+    private static ValveRoomViewModel CreatePlacementViewModel(StubDialogService dialog)
+    {
+        var reader = new StubProfileReader();
+        var vm = new ValveRoomViewModel(dialog, new StubElementTypeQueryRepo(), new StubProjectInformationQueryRepo(),
+            excelReader: reader, fileDialog: new StubFileDialogService(), resolvePlacement: new ResolveValveRoomPlacementUseCase(reader));
+        // 매핑창 대신 열 자동 추정 결과로 확정한다.
+        vm.ShowExcelMappingDialog = mapping =>
+        {
+            mapping.Sheets[0].IsChecked = true;
+            mapping.OkCommand.Execute(null);
+            return mapping.Result is { Count: > 0 };
+        };
+        return vm;
+    }
+
+    private sealed class StubProfileReader : IExcelAlignmentSourceReader
+    {
+        public bool CanRead(string filePath) => true;
+        public IReadOnlyList<string> GetSheetNames(string filePath) => ["선형"];
+        public IReadOnlyList<IReadOnlyList<string?>> PreviewRows(string filePath, string sheetName, int maxRows) =>
+        [
+            ["측점", "X", "Y", "Z", "지반고"],
+            ["0+000", "0", "0", "10", "15"],
+            ["0+100", "100", "0", "11", "16"]
+        ];
+        public ShapefileReadResult Read(string filePath) => throw new NotSupportedException();
+        public ShapefileReadResult Read(string filePath, ExcelAlignmentMapping mapping) => throw new NotSupportedException();
+        public AlignmentProfileReadResult ReadProfile(string filePath, ExcelAlignmentMapping mapping)
+        {
+            Assert.Equal(4, mapping.GroundElColumnIndex);
+            return new([new AlignmentProfileRow(0, 0, 0, 10, 15), new AlignmentProfileRow(100, 100, 0, 11, 16)], []);
+        }
+    }
+
+    private sealed class StubFileDialogService : IFileDialogService
+    {
+        public string? OpenFile(string title, string filter) => "a.xlsx";
+        public string? SaveFile(string title, string filter, string defaultFileName = "") => null;
+    }
+
     private static ValveRoomViewModel CreateViewModel(StubElementTypeQueryRepo repo,
         IProjectInformationQueryRepo? projectInfo = null)
         => new(new StubDialogService(), repo, projectInfo ?? new StubProjectInformationQueryRepo());
@@ -460,8 +550,9 @@ public class ValveRoomViewModelTests
 
     private sealed class StubDialogService : IDialogService
     {
+        public List<string> Warnings { get; } = new();
         public void Info(string title, string message) { }
-        public void Warn(string title, string message) { }
+        public void Warn(string title, string message) => Warnings.Add(message);
         public bool Confirm(string title, string message) => true;
     }
 }

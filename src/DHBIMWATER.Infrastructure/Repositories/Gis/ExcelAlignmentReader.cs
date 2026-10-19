@@ -130,6 +130,38 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
         return new ShapefileReadResult(features, fields, extent, null, null, "Excel", features.Count, vertices.Count, Math.Max(0, vertices.Count - 1), warnings, attributes.Count > 0 ? attributes : null);
     }
 
+    public AlignmentProfileReadResult ReadProfile(string filePath, ExcelAlignmentMapping mapping)
+    {
+        if (mapping.StationColumnIndex is not { } stationColumn || mapping.GroundElColumnIndex is not { } groundColumn)
+            throw new DhbimwaterException(ErrorCodes.PA_ExcelMappingRequired, "밸브실 위치 자동지정은 측점 열과 지표 EL 열 매핑이 필요합니다.");
+        if (!File.Exists(filePath)) throw new DhbimwaterException(ErrorCodes.PA_ExcelFile, $"엑셀·CSV 파일을 찾을 수 없습니다: {filePath}");
+        using var workbook = OpenWorkbook(filePath);
+        var sheet = FindSheet(workbook, mapping.SheetName);
+        var lastRow = sheet.RangeUsed()?.LastRowUsed().RowNumber() ?? 0;
+
+        var rows = new List<AlignmentProfileRow>();
+        var skipped = 0;
+        for (var r = mapping.DataStartRow; r <= lastRow; r++)
+        {
+            // 측점·좌표·관Z·지표EL 중 하나라도 비면 그 행은 건너뛴다. 빈 줄·소계 줄이 섞인 표가 흔하다.
+            var station = StationTextParser.Parse(sheet.Cell(r, stationColumn + 1).GetFormattedString(), mapping.StationMode, mapping.NumberChainIntervalM);
+            if (station is null ||
+                !TryReadDouble(sheet.Cell(r, mapping.XColumnIndex + 1), out var x) ||
+                !TryReadDouble(sheet.Cell(r, mapping.YColumnIndex + 1), out var y) ||
+                !TryReadDouble(sheet.Cell(r, mapping.ZColumnIndex + 1), out var z) ||
+                !TryReadDouble(sheet.Cell(r, groundColumn + 1), out var ground))
+            {
+                if (!sheet.Row(r).IsEmpty()) skipped++;
+                continue;
+            }
+            rows.Add(new AlignmentProfileRow(station.Value, x, y, z, ground));
+        }
+
+        var warnings = new List<string>();
+        if (skipped > 0) warnings.Add($"{mapping.SheetName}: 측점·좌표·지표EL 누락 {skipped}행 건너뜀");
+        return new AlignmentProfileReadResult(rows, warnings);
+    }
+
     /// <summary>
     /// 헤더행에서 필드 목록과, 열마다 대표값 1개를 담은 속성 딕셔너리를 만든다.
     /// X·Y·Z로 이미 소비한 열은 직경·관종 후보가 될 수 없어 제외하고, 측점 열은 이름 필드로 쓰는 표가 있어 남긴다.

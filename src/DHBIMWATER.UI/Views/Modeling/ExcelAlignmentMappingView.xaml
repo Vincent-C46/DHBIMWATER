@@ -101,6 +101,14 @@
                             <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource LabelTextBlockStyle}" Text="직경(DN)" VerticalAlignment="Center"/>
                             <ComboBox Grid.Row="6" Grid.Column="1" Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding OptionalColumnOptions}" SelectedItem="{Binding VertexDiameterColumn, Mode=TwoWay}"/>
 
+                            <!-- 밸브실 위치 자동지정에서만 보인다(docs/300 § C-2). -->
+                            <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource RequiredLabelTextBlockStyle}" Text="지표 EL *" VerticalAlignment="Top" Margin="0,14,0,0"
+                                       Visibility="{Binding IsGroundElColumnVisible, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                            <StackPanel Grid.Row="7" Grid.Column="1" Margin="0,8,0,0" Visibility="{Binding IsGroundElColumnVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding OptionalColumnOptions}" SelectedItem="{Binding GroundElColumn, Mode=TwoWay}"/>
+                                <TextBlock Text="※ Z = 관 중심 표고(m), 지표 EL = 지표면 표고(m). 측점 열도 필수입니다." FontSize="11" Foreground="#7F8C8D" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+
                         </Grid>
                     </GroupBox>
                 </StackPanel>
