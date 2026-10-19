@@ -17,8 +17,11 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping
     /// 그쪽을 건드리면 회귀 위험이 있어 일부러 복제했다 — <see cref="PipeMaterialConnectorReader"/>가
     /// 같은 이유로 이미 복제를 선택했다. 규칙이 바뀌면 두 곳을 함께 고쳐야 한다.</para>
     /// </summary>
-    internal sealed class RevitValveRoomPipingPickRepo : IValveRoomPipingPickRepo
+    internal sealed class RevitValveRoomPipingPickRepo : IValveRoomPipingPickRepo, IVerticalBranchPickRepo
     {
+        /// <summary>수직분기 시작 부속 판정 — 커넥터 방향 Z 성분. 배치 쪽(RevitPipeSegmentCommandRepo.VerticalConnectorMinZ)과 같은 값.</summary>
+        private const double VerticalConnectorMinZ = 0.7;
+
         /// <summary>연결망 확장 상한. 잘못 고른 한 점에서 문서 전체 관망으로 번지는 것을 막는다.</summary>
         private const int MaxParts = 2000;
 
@@ -63,6 +66,37 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping
                     .Append($"연결망이 {MaxParts}개를 넘어 거기까지만 가져왔습니다. 필요한 구간을 나눠서 선택하세요.")
                     .ToList()
             };
+        }
+
+        /// <summary>수직분기 시작 부속 1개 피킹(docs/301 § A). 열린 +Z 커넥터가 없으면 거부.</summary>
+        public VerticalBranchStart? PickStart()
+        {
+            var uiDoc = _uiDoc() ?? throw new DHBIMWATER.Shared.Errors.DhbimwaterException(
+                DHBIMWATER.Shared.Errors.ErrorCodes.NoActiveDocument, "활성 Revit 문서가 없습니다.");
+            Reference reference;
+            try
+            {
+                reference = uiDoc.Selection.PickObject(ObjectType.Element, new PipingSelectionFilter(),
+                    "수직분기를 시작할 부속을 선택하세요 (+Z 커넥터 필요)");
+            }
+            catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+            {
+                return null;
+            }
+
+            var instance = (FamilyInstance)uiDoc.Document.GetElement(reference);
+            var up = instance.MEPModel?.ConnectorManager?.Connectors.Cast<Connector>()
+                .Where(x => x.Domain == Domain.DomainPiping && x.ConnectorType == ConnectorType.End
+                            && !x.IsConnected && x.CoordinateSystem.BasisZ.Z >= VerticalConnectorMinZ)
+                .OrderByDescending(x => x.Origin.Z)
+                .FirstOrDefault()
+                ?? throw new DHBIMWATER.Shared.Errors.DhbimwaterException(DHBIMWATER.Shared.Errors.ErrorCodes.PL_VerticalBranchNoUpConnector,
+                    $"'{instance.Symbol.Family.Name} : {instance.Symbol.Name}'에 연결되지 않은 위(+Z) 커넥터가 없습니다. 다른 부속을 선택하세요.");
+            var diameterMm = PipeMaterialConnectorReader.DiameterMm(up)
+                ?? throw new DHBIMWATER.Shared.Errors.DhbimwaterException(DHBIMWATER.Shared.Errors.ErrorCodes.PL_VerticalBranchNoUpConnector,
+                    "위(+Z) 커넥터 지름을 읽을 수 없습니다(원형 커넥터가 아님).");
+            return new VerticalBranchStart(instance.Id.Value, $"{instance.Symbol.Family.Name} : {instance.Symbol.Name}",
+                diameterMm, UC.FtToMm(up.Origin.Z));
         }
 
         /// <summary>선택한 부재에서 커넥터를 타고 이어진 배관 부속류·이음쇠를 전부 모은다(docs/158 § C-2).</summary>

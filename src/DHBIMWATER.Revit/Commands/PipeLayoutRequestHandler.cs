@@ -14,6 +14,8 @@ internal sealed class PipeLayoutRequestHandler : IExternalEventHandler
     private readonly IValveRoomOutlinePickRepo _outlinePick;
     private readonly IValveRoomPipingPickRepo _pipingPick;
     private readonly SavePipeLayoutFamilySettingsUseCase _saveFamilySettings;
+    private readonly IVerticalBranchPickRepo _verticalBranchPick;
+    private readonly PlaceVerticalBranchUseCase _placeVerticalBranch;
 
     public PipeLayoutRequest Request { get; } = new();
     public PipeNetworkDefinition? PendingNetwork { get; set; }
@@ -44,10 +46,19 @@ internal sealed class PipeLayoutRequestHandler : IExternalEventHandler
     public Action<bool, string>? FamilySettingsSaved { get; set; }
     /// <summary>피킹 요청이 예외로 끝났을 때 상태줄 문구(`[코드] 메시지`)를 돌려준다(docs/239 § C). 종전에는 null 콜백만 가서 "취소"로 보였다.</summary>
     public Action<string>? RequestFailed { get; set; }
+    /// <summary>배치 대기 중인 수직분기(docs/301). 모달 입면 창이 닫힌 뒤 들어온다.</summary>
+    public VerticalBranchRequest? PendingVerticalBranch { get; set; }
+    /// <summary>수직분기 시작 부속 피킹 결과(부속, 오류 문구). 부속 null + 문구 null = 취소. UI 스레드 마샬링은 호출측.</summary>
+    public Action<VerticalBranchStart?, string?>? VerticalBranchStartPicked { get; set; }
+    /// <summary>수직분기 배치 결과(성공 여부, 문구). UI 스레드 마샬링은 호출측.</summary>
+    public Action<bool, string>? VerticalBranchPlaced { get; set; }
 
     public PipeLayoutRequestHandler(CreateValvePipingUseCase useCase, IValveRoomOutlinePickRepo outlinePick,
-        IValveRoomPipingPickRepo pipingPick, SavePipeLayoutFamilySettingsUseCase saveFamilySettings)
+        IValveRoomPipingPickRepo pipingPick, SavePipeLayoutFamilySettingsUseCase saveFamilySettings,
+        IVerticalBranchPickRepo verticalBranchPick, PlaceVerticalBranchUseCase placeVerticalBranch)
     {
+        _verticalBranchPick = verticalBranchPick;
+        _placeVerticalBranch = placeVerticalBranch;
         _useCase = useCase;
         _outlinePick = outlinePick;
         _pipingPick = pipingPick;
@@ -127,6 +138,9 @@ internal sealed class PipeLayoutRequestHandler : IExternalEventHandler
                         FamilySettingsSaved?.Invoke(false, $"모델은 생성했습니다. 다만 패밀리 설정 저장에 실패했습니다: {settingsSaveError}");
                     if (result.Skipped.Count > 0)
                         ShowSkippedDialog(result.Skipped);
+                    // 수직분기 연결 끊김 등 꼭 봐야 할 알림(docs/301 § E). 일반 경고는 로그만.
+                    if (result.Notices.Count > 0)
+                        TaskDialog.Show("배관 배치 - 확인 필요", string.Join(Environment.NewLine, result.Notices.Take(20).Select(x => "- " + x)));
                     break;
 
                 case PipeLayoutRequestId.PickOutline:
@@ -172,6 +186,23 @@ internal sealed class PipeLayoutRequestHandler : IExternalEventHandler
                     uiDoc.ShowElements(elementIds);
                     break;
 
+                case PipeLayoutRequestId.PickVerticalBranchStart:
+                    VerticalBranchStartPicked?.Invoke(_verticalBranchPick.PickStart(), null);
+                    break;
+
+                case PipeLayoutRequestId.PlaceVerticalBranch:
+                    if (PendingVerticalBranch is not { } verticalRequest)
+                    {
+                        VerticalBranchPlaced?.Invoke(false, $"[{ErrorCodes.RequestLost}] 수직분기 요청이 유실됐습니다. 다시 시도하세요.");
+                        break;
+                    }
+                    PendingVerticalBranch = null;
+                    var placed = _placeVerticalBranch.Execute(verticalRequest);
+                    foreach (var warning in placed.Warnings) LogManager.Logger.Warn($"VERTICAL_BRANCH 경고: {warning}");
+                    VerticalBranchPlaced?.Invoke(true, FormattableString.Invariant(
+                        $"부품 {placed.PlacedCount}개 배치 · 끝 Z {placed.TopElevationMm:N0}mm"));
+                    break;
+
                 case PipeLayoutRequestId.PickPiping:
                     var import = _pipingPick.PickPiping();
                     PipingPicked?.Invoke(import);
@@ -196,6 +227,18 @@ internal sealed class PipeLayoutRequestHandler : IExternalEventHandler
                 PipingPicked?.Invoke(null);
                 RequestFailed?.Invoke(ErrorPresenter.Format(ex));
                 ErrorPresenter.Show("배관 가져오기 오류", "PipeLayout", ex);
+            }
+            else if (requestId == PipeLayoutRequestId.PickVerticalBranchStart)
+            {
+                // 창 다시 띄우기·상태줄 문구를 한 콜백으로 — RequestFailed와 따로 보내면 순서가 꼬여 "취소"가 덮음.
+                VerticalBranchStartPicked?.Invoke(null, ErrorPresenter.Format(ex));
+                ErrorPresenter.Show("수직분기 시작 부속 선택", "PipeLayout", ex);
+            }
+            else if (requestId == PipeLayoutRequestId.PlaceVerticalBranch)
+            {
+                PendingVerticalBranch = null;
+                VerticalBranchPlaced?.Invoke(false, ErrorPresenter.Format(ex));
+                ErrorPresenter.Show("수직분기 배치 오류", "PipeLayout", ex);
             }
             else if (requestId == PipeLayoutRequestId.SelectInRevit)
             {

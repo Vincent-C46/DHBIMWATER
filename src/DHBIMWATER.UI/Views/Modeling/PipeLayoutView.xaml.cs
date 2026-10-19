@@ -24,6 +24,14 @@ public partial class PipeLayoutView : Window
             dialog.ShowDialog();
             Activate();
         };
+        // 수직분기 입면 창(docs/301 § D). 모달 — 닫힌 뒤 배치 ExternalEvent가 돈다.
+        viewModel.OpenVerticalBranchDialog = dialogViewModel =>
+        {
+            var dialog = new VerticalBranchView(dialogViewModel) { Owner = this };
+            var confirmed = dialog.ShowDialog() == true;
+            Activate();
+            return confirmed;
+        };
         // 임시 도구(2026-09-18) — 캔버스를 프리셋 제출 양식 텍스트로 보여 준다. 유형별 기본값 확정 후 이 블록도 지운다.
         viewModel.OpenTemplateTextAction = text =>
         {

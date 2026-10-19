@@ -13,6 +13,9 @@ public sealed record PipeCreationResult(string Summary, IReadOnlyList<string> Wa
     /// 캔버스 오류 표식이 <see cref="PipeConnectionFailure"/>를 이미 소비하므로 타입을 재사용한다.</summary>
     public IReadOnlyList<PipeConnectionFailure> Skipped { get; init; } = [];
 
+    /// <summary>사용자에게 알림창으로 보일 문구(docs/301 § E). 일반 경고(<see cref="Warnings"/>)는 로그로만 간다.</summary>
+    public IReadOnlyList<string> Notices { get; init; } = [];
+
     /// <summary>캔버스 Guid(엣지·인라인 부속·절점) → 이번에 만든 Revit ElementId 목록(docs/179 § C).
     /// 한 엣지가 정척 분할로 여러 본이 되므로 1:N이다.
     /// <para><see cref="Skipped"/>와 같은 이유로 위치 인자가 아니라 init 프로퍼티다 —

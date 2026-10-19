@@ -32,7 +32,8 @@ public class PipeLayoutCommand : CommandBase
         var outlinePick = ServiceContainer.GetService<IValveRoomOutlinePickRepo>();
         var pipingPick = ServiceContainer.GetService<IValveRoomPipingPickRepo>();
         var saveFamilySettings = ServiceContainer.GetService<SavePipeLayoutFamilySettingsUseCase>();
-        var handler = new PipeLayoutRequestHandler(useCase, outlinePick, pipingPick, saveFamilySettings)
+        var handler = new PipeLayoutRequestHandler(useCase, outlinePick, pipingPick, saveFamilySettings,
+            ServiceContainer.GetService<IVerticalBranchPickRepo>(), ServiceContainer.GetService<PlaceVerticalBranchUseCase>())
         {
             // 창을 연 문서에서만 생성·피킹·저장한다(docs/237 § B).
             OwnerDocument = DocumentGuard.Capture(commandData.Application),
@@ -107,6 +108,36 @@ public class PipeLayoutCommand : CommandBase
             view.Activate();
             viewModel.ApplyPickedPiping(import);
         });
+        // 수직분기(docs/301) — 시작 부속 피킹은 기존 배관 가져오기와 같은 왕복. 입면 창은 피킹 결과를 받은 뒤 UI 스레드에서 연다.
+        viewModel.PickVerticalBranchAction = () =>
+        {
+            view.Hide();
+            handler.Request.Make(PipeLayoutRequestId.PickVerticalBranchStart);
+            var status = externalEvent.Raise();
+            if (!IsRejected(status)) return;
+            handler.Request.Clear();
+            view.Show(); view.Activate();
+            viewModel.ApplyRequestError(RejectedMessage(status));
+        };
+        // 모달 입면 창을 이 콜백 안에서 바로 열면 ExternalEvent 실행 중에 막힘 — BeginInvoke로 핸들러가 끝난 뒤 연다.
+        handler.VerticalBranchStartPicked = (start, error) => view.Dispatcher.BeginInvoke(() =>
+        {
+            view.Show();
+            view.Activate();
+            viewModel.ApplyVerticalBranchStart(start, error);
+        });
+        viewModel.PlaceVerticalBranchAction = request =>
+        {
+            handler.PendingVerticalBranch = request;
+            handler.Request.Make(PipeLayoutRequestId.PlaceVerticalBranch);
+            var status = externalEvent.Raise();
+            if (!IsRejected(status)) return;
+            handler.PendingVerticalBranch = null;
+            handler.Request.Clear();
+            viewModel.ApplyVerticalBranchResult(false, RejectedMessage(status));
+        };
+        handler.VerticalBranchPlaced = (succeeded, resultMessage) => view.Dispatcher.Invoke(() =>
+            viewModel.ApplyVerticalBranchResult(succeeded, resultMessage));
         // 피킹이 예외로 끝나면 "취소" 대신 [코드] 문구를 상태줄에(docs/239 § C).
         handler.RequestFailed = error => view.Dispatcher.Invoke(() => viewModel.ApplyRequestError(error));
         handler.ModelCreationCompleted = (succeeded, resultMessage, failures, placedElementIds) => view.Dispatcher.Invoke(() =>

@@ -41,6 +41,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IPipeCommandRepo, RevitPipeMepCommandRepo>();
         services.AddTransient<IPipeCommandRepo, RevitPipeGenericModelCommandRepo>();
         services.AddTransient<IPipeCommandRepo, RevitPipeSegmentCommandRepo>();
+        // 수직분기(docs/301) — 같은 클래스 partial. 헬퍼 공유.
+        services.AddTransient<IVerticalBranchCommandRepo, RevitPipeSegmentCommandRepo>();
         services.AddTransient<IPipeMaterialScheduleRepo, RevitPipeMaterialScheduleRepo>();
         services.AddTransient<IPipeMaterialDraftingRepo, RevitPipeMaterialDraftingRepo>();
         services.AddTransient<IJunctionDetailRepo, RevitJunctionDetailRepo>();
@@ -83,6 +85,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IExteriorWallClassifierRepo, RevitExteriorWallClassifierRepo>();
         services.AddTransient<IValveRoomOutlinePickRepo, RevitValveRoomOutlinePickRepo>();
         services.AddTransient<IValveRoomPipingPickRepo, RevitValveRoomPipingPickRepo>();
+        services.AddTransient<IVerticalBranchPickRepo, RevitValveRoomPipingPickRepo>();
         #endregion
 
         services.AddTransient<IExcelReader, ExcelReader>();

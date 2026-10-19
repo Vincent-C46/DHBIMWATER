@@ -791,7 +791,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo
                 parts.Add(new PlacedPart(bypassValve, "배관부속"));
                 materials.Add(new MaterialPart(bypassValve, FittingNameOf(bypassValve), ValvePipingParameters.DiameterText(bypassMm), bypassMm));
                 foreach (var end in bendValveEnds)
-                    PlaceSetFiller(document, segment, families, end, Nearest(bypassValveEnds, end), bypassMm,
+                    PlaceSetFiller(document, segment, families, end, Nearest(bypassValveEnds, end), bypassMm, mainMm,
                         hostLevel, elevationFixes, created, parts, materials);
             }
             else
@@ -812,12 +812,12 @@ internal sealed partial class RevitPipeSegmentCommandRepo
                     parts.Add(new PlacedPart(valve, "배관부속"));
                     materials.Add(new MaterialPart(valve, FittingNameOf(valve), ValvePipingParameters.DiameterText(bypassMm), bypassMm));
                 }
-                PlaceSetFiller(document, segment, families, bendValveEnds[0], Nearest(valve1Ends, bendValveEnds[0]), bypassMm,
+                PlaceSetFiller(document, segment, families, bendValveEnds[0], Nearest(valve1Ends, bendValveEnds[0]), bypassMm, mainMm,
                     hostLevel, elevationFixes, created, parts, materials);
                 // 단관 0(직결)이면 PlaceSetFiller가 접합 허용치 이하로 보고 놓지 않는다.
-                PlaceSetFiller(document, segment, families, Nearest(valve1Ends, v2Center), Nearest(valve2Ends, v1Center), bypassMm,
+                PlaceSetFiller(document, segment, families, Nearest(valve1Ends, v2Center), Nearest(valve2Ends, v1Center), bypassMm, mainMm,
                     hostLevel, elevationFixes, created, parts, materials);
-                PlaceSetFiller(document, segment, families, Nearest(valve2Ends, bendValveEnds[1]), bendValveEnds[1], bypassMm,
+                PlaceSetFiller(document, segment, families, Nearest(valve2Ends, bendValveEnds[1]), bendValveEnds[1], bypassMm, mainMm,
                     hostLevel, elevationFixes, created, parts, materials);
             }
         }
@@ -871,7 +871,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo
     /// <summary>두 커넥터 사이 틈을 관 패밀리로 채운다. 틈이 접합 허용치 이하면 놓지 않는다(맞닿은 것으로 본다).</summary>
     private static void PlaceSetFiller(
         Document document, FamilySymbol segment, PipeSegmentFamilySelection families, XYZ from, XYZ to, double diameterMm,
-        Level? hostLevel, ICollection<double> elevationFixes,
+        double mainDiameterMm, Level? hostLevel, ICollection<double> elevationFixes,
         ICollection<FamilyInstance> created, ICollection<PlacedPart> parts, ICollection<MaterialPart> materials)
     {
         var lengthMm = UC.FtToMm(from.DistanceTo(to));
@@ -886,7 +886,8 @@ internal sealed partial class RevitPipeSegmentCommandRepo
         document.Regenerate();
         RecenterOnConnectors(document, instance, center);
         var role = PipeMaterialSpecText.SegmentName(lengthMm, families.StraightLengthMm);
-        ValidateCenteredSpan(instance, center, lengthMm, role);
+        // 바이패스 관경은 주관 직경으로 정해짐(docs/256) → 사용자가 고칠 값은 주관 직경(docs/302).
+        ValidateCenteredSpan(instance, center, lengthMm, role, mainDiameterMm);
         parts.Add(new PlacedPart(instance, role));
         materials.Add(new MaterialPart(instance, role, SegmentSpecText(diameterMm, lengthMm), diameterMm, LengthMm: lengthMm));
     }

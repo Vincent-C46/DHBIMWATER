@@ -253,6 +253,45 @@ public sealed class PipeLayoutValveBendTests
         vm.HandleCanvasClick(vm.Transform.ToScreen(end));
     }
 
+    // 수직분기(docs/301) — 이 파일의 스텁이 밸브부관 A·관 패밀리를 갖고 있어 여기 둠.
+    [Fact]
+    public void VerticalBranch_ConfirmedDialog_SendsRequestWithModelFamilies()
+    {
+        var vm = CreateViewModel();
+        VerticalBranchRequest? sent = null;
+        VerticalBranchViewModel? shown = null;
+        vm.OpenVerticalBranchDialog = dialog => { shown = dialog; return true; };
+        vm.PlaceVerticalBranchAction = request => sent = request;
+
+        vm.ApplyVerticalBranchStart(new VerticalBranchStart(42, ValveTeeFamily, 100, 0));
+
+        Assert.NotNull(shown);
+        Assert.Contains("DH_게이트 밸브 : 100A", shown!.AddOptions);
+        Assert.NotNull(sent);
+        Assert.Equal(42, sent!.StartElementId);
+        Assert.Equal(vm.SegmentFamilyTypeName, sent.Families.SegmentFamilyTypeName);
+        Assert.Equal(vm.ValveTeeVerticalBranchParameterName, sent.Families.ValveTeeVerticalBranchParameterName);
+        Assert.True(Assert.Single(sent.Parts).IsPipe);
+    }
+
+    [Fact]
+    public void VerticalBranch_CancelOrPickError_SendsNothing()
+    {
+        var vm = CreateViewModel();
+        var sent = 0;
+        vm.OpenVerticalBranchDialog = _ => false;
+        vm.PlaceVerticalBranchAction = _ => sent++;
+
+        vm.ApplyVerticalBranchStart(new VerticalBranchStart(42, ValveTeeFamily, 100, 0));
+        Assert.Equal("수직분기 취소", vm.Status);
+        vm.ApplyVerticalBranchStart(null, "[PL-313] 위 커넥터 없음");
+        Assert.Equal("[PL-313] 위 커넥터 없음", vm.Status);
+        Assert.Equal(0, sent);
+
+        vm.ApplyVerticalBranchResult(true, "부품 2개 배치");
+        Assert.Equal("최근: 부품 2개 배치", vm.VerticalBranchLastResult);
+    }
+
     private static PipeLayoutViewModel CreateViewModel() => PipeLayoutTestDefaults.UseAbsoluteElevation(new(new StubRepo()));
 
     private sealed class StubRepo : IElementTypeQueryRepo

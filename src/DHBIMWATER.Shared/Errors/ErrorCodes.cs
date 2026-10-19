@@ -56,6 +56,12 @@ public static class ErrorCodes
     public const string PL_NodeConnectFailed = "PL-310";
     /// <summary>기존 객체(벽·기둥) 선택 중 Revit 오류 (205 잔여 정리, 2026-09-22).</summary>
     public const string PL_ExistingObjectPickFailed = "PL-311";
+    /// <summary>수직분기 입력 오류 — 부품 없음·단관 길이(docs/301 § C).</summary>
+    public const string PL_VerticalBranchInvalid = "PL-312";
+    /// <summary>수직분기 시작 부속에 열린 +Z 커넥터 없음(docs/301 § A-2).</summary>
+    public const string PL_VerticalBranchNoUpConnector = "PL-313";
+    /// <summary>수직분기 쌓기 실패 — 커넥터 수·방향·회전(docs/301 § B).</summary>
+    public const string PL_VerticalBranchPlacementFailed = "PL-314";
     public const string PL_DrivenParameterUnwritable = "PL-401";
     public const string PL_LengthParameterUnwritable = "PL-402";
     public const string PL_ParameterUnwritable = "PL-403";

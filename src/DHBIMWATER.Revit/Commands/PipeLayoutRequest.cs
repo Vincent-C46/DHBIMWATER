@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 
 namespace DHBIMWATER.Revit.Commands;
 
-internal enum PipeLayoutRequestId { None, CreateModel, PickOutline, PickPiping, SaveFamilySettings, SelectInRevit, SaveLayout }
+internal enum PipeLayoutRequestId { None, CreateModel, PickOutline, PickPiping, SaveFamilySettings, SelectInRevit, SaveLayout, PickVerticalBranchStart, PlaceVerticalBranch }
 
 internal sealed class PipeLayoutRequest
 {

@@ -334,6 +334,9 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         ExportTemplateTextCommand = new RelayCommand(_ => OpenTemplateTextAction?.Invoke(BuildTemplateText()),
             _ => OpenTemplateTextAction is not null && _network.Edges.Count > 0);
         OpenFamilySettingsCommand = new RelayCommand(_ => OpenFamilySettingsAction?.Invoke(), _ => OpenFamilySettingsAction is not null && !IsCreating);
+        // 수직분기(docs/301) — 관 패밀리·길이 파라미터가 있어야 단관을 쌓음.
+        AddVerticalBranchCommand = new RelayCommand(_ => PickVerticalBranch(),
+            _ => PickVerticalBranchAction is not null && !IsCreating && !string.IsNullOrWhiteSpace(SegmentFamilyTypeName) && !string.IsNullOrWhiteSpace(LengthParameterName));
         // 설정 창 숫자 칸(정척 길이·격자·기준점)에 변환 오류가 남아 있으면 VM은 옛 값이라 그 값이 저장된다 — 막는다(docs/239 § A).
         SaveFamilySettingsCommand = new RelayCommand(_ => SaveFamilySettings(), _ => SaveFamilySettingsAction is not null && !IsCreating && SettingsInputErrorCount == 0);
         // 추정 단계의 후보 갱신은 미룬다(docs/258 § B) — 저장값이 있으면 ApplyFamilySettings가 패밀리를 다 넣은 뒤 한 번만 읽는다.
@@ -570,6 +573,17 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     public Action<string>? OpenTemplateTextAction { get; set; }
     /// <summary>패밀리 설정 창을 연다(docs/175 § E-5). View가 창을 띄우므로 Action으로 위임한다.</summary>
     public ICommand OpenFamilySettingsCommand { get; }
+    /// <summary>6번 섹션 [수직분기 추가…](docs/301 § A).</summary>
+    public ICommand AddVerticalBranchCommand { get; }
+    /// <summary>Revit 피킹 왕복. 결과는 <see cref="ApplyVerticalBranchStart"/>로 돌아옴.</summary>
+    public Action? PickVerticalBranchAction { get; set; }
+    /// <summary>입면 창(모달)을 띄움. [Revit에 배치]면 true. View가 넣음.</summary>
+    public Func<VerticalBranchViewModel, bool>? OpenVerticalBranchDialog { get; set; }
+    /// <summary>배치 요청을 ExternalEvent로 보냄. 결과는 <see cref="ApplyVerticalBranchResult"/>.</summary>
+    public Action<VerticalBranchRequest>? PlaceVerticalBranchAction { get; set; }
+    /// <summary>6번 섹션 최근 결과 1줄.</summary>
+    public string VerticalBranchLastResult { get => _verticalBranchLastResult; private set => SetProperty(ref _verticalBranchLastResult, value); }
+    private string _verticalBranchLastResult = "";
     /// <summary>현재 패밀리·파라미터 매핑을 프로젝트에 저장한다(docs/175 § E-6). 모델리스 창이라 ExternalEvent로 보낸다.</summary>
     public ICommand SaveFamilySettingsCommand { get; }
     public Action? OpenFamilySettingsAction { get; set; }
@@ -3633,7 +3647,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
                 if (fitting.IsJoint || fitting.IsBypassSet) continue;
                 if (!string.IsNullOrWhiteSpace(fitting.FamilyTypeName) && IsTypeDiameterMismatch(fitting.FamilyTypeName, edge.DiameterMm)) valveMismatch++;
             }
-        if (valveMismatch > 0) warnings.Add($"유형 직경이 선 관경과 다른 밸브 {valveMismatch}개 — 4번 섹션 유형 직경 매개변수 확인");
+        if (valveMismatch > 0) warnings.Add($"유형 직경이 선 관경과 다른 밸브 {valveMismatch}개 — 5번 섹션 유형 직경 매개변수 확인");
 
         // 되가져오기는 패밀리명 키워드로 밸브부관을 가린다(RevitValveRoomPipingPickRepo.Classify). 키워드 없는 패밀리로 만들면
         // 모델은 생기지만 되가져올 때 A는 T형·십자, B는 곡관으로 돌아와 세트가 풀린다(2026-09-29).
@@ -4008,25 +4022,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         {
             CreateModelAction?.Invoke(_network.ToDefinition(DiameterMm, PipeOutputMode.PipeAccessorySegment, new(ReferenceX, ReferenceY),
                 "", "", "",
-                new PipeSegmentFamilySelection(
-                    SegmentFamilyTypeName!, LengthParameterName!,
-                    BendFamilyTypeName ?? "", TeeFamilyTypeName ?? "",
-                    StraightLengthMm, DiameterParameterName ?? "",
-                    BendDiameterParameterName ?? "", TeeDiameterParameterName ?? "", ValveDiameterParameterName ?? "",
-                    BendAngleParameterName ?? "", TeeBranchDiameterParameterName ?? "",
-                    // 가변 딕셔너리를 그대로 넘기면 ExternalEvent가 처리하는 사이 UI에서 값이 바뀔 수 있다.
-                    new Dictionary<string, string>(_valveDiameterParameterByFamily),
-                    JointDiameterParameterName ?? "",
-                    // 이형관 종류별(docs/175 § B). 이경관·편락관은 전달만 하고 배치 경계가 쓰지 않는다(D1).
-                    CrossFamilyTypeName ?? "", CrossDiameterParameterName ?? "", CrossBranchDiameterParameterName ?? "",
-                    ReducerFamilyTypeName ?? "", ReducerLargeDiameterParameterName ?? "", ReducerSmallDiameterParameterName ?? "",
-                    // Y형관(docs/187 § 3-2). 레코드 맨 뒤 자리다 — 순서를 지켜야 이경관 칸으로 밀리지 않는다.
-                    WyeFamilyTypeName ?? "", WyeDiameterParameterName ?? "", WyeBranchDiameterParameterName ?? "", WyeBranchAngleParameterName ?? "",
-                    // 밸브부관(docs/225 § B). Y형 뒤, 레코드 맨 뒤 자리다.
-                    ValveBendFamilyTypeName ?? "", ValveBendDiameterParameterName ?? "",
-                    // 밸브부관 A(docs/227 § B).
-                    ValveTeeFamilyTypeName ?? "", ValveTeeMainDiameterParameterName ?? "", ValveTeeBranchDiameterParameterName ?? "",
-                    ValveTeeHorizontalBranchParameterName ?? "", ValveTeeVerticalBranchParameterName ?? ""),
+                BuildSegmentFamilies(),
                 // DH_야간은 항상 0(주간)으로 기록한다. PipeNetworkDefinition.IsNightWork 기본값이 false이므로
                 // 인자를 넘기지 않아도 값이 비지 않는다 — 배관재료표 집계의 "값 없음" 방지(docs/141 § C-6, docs/145 § 3).
                 JunctionId ?? "", PipeMaterial, false,
@@ -4049,6 +4045,60 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             IsCreating = false;
             Status = $"생성 요청 실패 · {UiErrors.Report("PipeLayout", ex)}";
         }
+    }
+
+    /// <summary>모델 생성·수직분기가 같이 쓰는 패밀리 지정(docs/301 § D).</summary>
+    private PipeSegmentFamilySelection BuildSegmentFamilies()
+        => new PipeSegmentFamilySelection(
+            SegmentFamilyTypeName!, LengthParameterName!,
+            BendFamilyTypeName ?? "", TeeFamilyTypeName ?? "",
+            StraightLengthMm, DiameterParameterName ?? "",
+            BendDiameterParameterName ?? "", TeeDiameterParameterName ?? "", ValveDiameterParameterName ?? "",
+            BendAngleParameterName ?? "", TeeBranchDiameterParameterName ?? "",
+            // 가변 딕셔너리를 그대로 넘기면 ExternalEvent가 처리하는 사이 UI에서 값이 바뀔 수 있다.
+            new Dictionary<string, string>(_valveDiameterParameterByFamily),
+            JointDiameterParameterName ?? "",
+            // 이형관 종류별(docs/175 § B). 이경관·편락관은 전달만 하고 배치 경계가 쓰지 않는다(D1).
+            CrossFamilyTypeName ?? "", CrossDiameterParameterName ?? "", CrossBranchDiameterParameterName ?? "",
+            ReducerFamilyTypeName ?? "", ReducerLargeDiameterParameterName ?? "", ReducerSmallDiameterParameterName ?? "",
+            // Y형관(docs/187 § 3-2). 레코드 맨 뒤 자리다 — 순서를 지켜야 이경관 칸으로 밀리지 않는다.
+            WyeFamilyTypeName ?? "", WyeDiameterParameterName ?? "", WyeBranchDiameterParameterName ?? "", WyeBranchAngleParameterName ?? "",
+            // 밸브부관(docs/225 § B). Y형 뒤, 레코드 맨 뒤 자리다.
+            ValveBendFamilyTypeName ?? "", ValveBendDiameterParameterName ?? "",
+            // 밸브부관 A(docs/227 § B).
+            ValveTeeFamilyTypeName ?? "", ValveTeeMainDiameterParameterName ?? "", ValveTeeBranchDiameterParameterName ?? "",
+            ValveTeeHorizontalBranchParameterName ?? "", ValveTeeVerticalBranchParameterName ?? "");
+
+    // ── 수직분기(docs/301) ────────────────────────────────────────────────
+
+    private void PickVerticalBranch()
+    {
+        Status = "Revit에서 +Z 커넥터 부속 선택 (Esc 취소)";
+        PickVerticalBranchAction?.Invoke();
+    }
+
+    /// <summary>피킹 결과. 부속 null = 취소(<paramref name="error"/> 있으면 실패). 입면 창에서 [Revit에 배치]면 요청을 보냄.</summary>
+    public void ApplyVerticalBranchStart(VerticalBranchStart? start, string? error = null)
+    {
+        if (start is null) { Status = error ?? "수직분기 취소"; return; }
+        var dialog = new VerticalBranchViewModel(start, _accessoryFamilyTypeNames);
+        if (OpenVerticalBranchDialog?.Invoke(dialog) != true) { Status = "수직분기 취소"; return; }
+        try
+        {
+            PlaceVerticalBranchAction?.Invoke(new VerticalBranchRequest(start.ElementId, dialog.ToParts(), BuildSegmentFamilies()));
+            Status = "수직분기 배치 중…";
+        }
+        catch (Exception ex)
+        {
+            Status = $"수직분기 요청 실패 · {UiErrors.Report("PipeLayout", ex)}";
+        }
+    }
+
+    /// <summary>배치 결과(성공 여부, 문구). 6번 섹션과 상태줄에 표시.</summary>
+    public void ApplyVerticalBranchResult(bool succeeded, string message)
+    {
+        VerticalBranchLastResult = succeeded ? $"최근: {message}" : $"실패: {message}";
+        Status = succeeded ? $"수직분기 {message}" : $"수직분기 실패 · {message}";
     }
 
     // ── Revit 부재 선택·표시(docs/179 § E-3) ────────────────────────────────────
@@ -4526,7 +4576,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         BeginEditing();
         RecordUndoIfChanged(before);
         RefreshGraph();
-        Status = "바이패스 세트 배치 · 본관 밸브는 [4. 밸브 · 이음관 배치]로 · 방향은 세트 목록에서";
+        Status = "바이패스 세트 배치 · 본관 밸브는 [5. 밸브 · 이음관 배치]로 · 방향은 세트 목록에서";
     }
 
     private void ApplyBypassValves(InlineFittingItem? item)

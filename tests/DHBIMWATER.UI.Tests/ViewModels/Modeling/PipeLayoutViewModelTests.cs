@@ -2212,7 +2212,7 @@ public sealed class PipeLayoutViewModelTests
         Assert.Contains("200", vm.ValveTypeDiameterText);
         Assert.Contains("경고: 유형 직경이 선 관경과 다른 밸브 1개", vm.ValidationSummary);
         // 경고는 생성을 막지 않는다 — 오류 문구가 아니다.
-        Assert.DoesNotContain("밸브", vm.ValidationSummary.Replace("경고: 유형 직경이 선 관경과 다른 밸브 1개 — 4번 섹션 유형 직경 매개변수 확인", ""));
+        Assert.DoesNotContain("밸브", vm.ValidationSummary.Replace("경고: 유형 직경이 선 관경과 다른 밸브 1개 — 5번 섹션 유형 직경 매개변수 확인", ""));
     }
 
     [Fact]

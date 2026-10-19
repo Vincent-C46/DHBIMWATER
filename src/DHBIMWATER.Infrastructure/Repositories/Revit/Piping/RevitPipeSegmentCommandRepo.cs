@@ -87,7 +87,9 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         var symbols = new FamilySymbolCache(document);
         // docs/158 § F — 캔버스로 되가져온 원본을 지우고 다시 만든다. 창에서 "원본 삭제 후 생성"을 체크했을 때만 목록이 찬다.
         // 트랜잭션은 UseCase가 이미 열어 두었으므로(CLAUDE.md), 배치 도중 실패하면 이 삭제도 함께 롤백된다.
-        var deletedCount = DeleteSourceElements(document, network.SourceElementIdsToDelete);
+        // 지울 부속에 붙은 수직분기는 남기고 알림만(docs/301 § E).
+        var notices = new List<string>();
+        var deletedCount = DeleteSourceElements(document, network.SourceElementIdsToDelete, notices);
         var hostLevel = ResolveNearestLevel(document, UC.MmToFt(network.Elevation));
         var families = network.SegmentFamilies
             ?? throw new DhbimwaterException(ErrorCodes.PL_SegmentFamilyMissing, "직관·단관 패밀리 지정이 없습니다. 모델링 창에서 패밀리를 선택하세요.");
@@ -226,6 +228,10 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             }
             warnings.AddRange(plan.Warnings.Select(x => $"[{FormatEdge(edge)}] {x}"));
 
+            // 이 엣지의 바이패스 A 구간 — 붙은 관 조각은 길이 불일치 때 주관 직경 안내(docs/302).
+            var bypassTeeSpans = teePairs.SelectMany(x => new[] { x.First, x.Second })
+                .Concat(teeCenteredHere.Select(x => x.Span))
+                .ToList();
             foreach (var placement in plan.Segments)
             {
                 var center = startAnchor + direction * UC.MmToFt(placement.CenterMm);
@@ -261,7 +267,8 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                 RecenterOnConnectors(document, instance, center);
                 var flow = flowOrientation.IsForward(edge.Id) ? direction : -direction;
                 CorrectSegmentSocketDirection(document, instance, center, flow, role, warnings);
-                ValidateCenteredSpan(instance, center, placement.LengthMm, role);
+                ValidateCenteredSpan(instance, center, placement.LengthMm, role,
+                    TouchesBypassTee(placement, bypassTeeSpans) ? edge.DiameterMm : null);
                 if (placement.Kind == PipeSegmentKind.Straight) straightCount++; else shortCount++;
             }
         }
@@ -398,6 +405,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         {
             Skipped = skipped,
             PlacedElementIds = placedIdsByOwner.ToDictionary(x => x.Key, x => (IReadOnlyList<long>)x.Value),
+            Notices = notices,
         };
     }
 
@@ -405,7 +413,8 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
     /// 사용자가 그 사이 Revit에서 직접 지웠을 수 있고, 그것 때문에 생성 전체가 실패하면 안 된다.
     /// <para>배관 부속·배관 액세서리·배관 카테고리만 지운다(docs/237 § C) — Id 숫자만 보면 다른 문서·다른 부재(벽·치수 등)를
     /// 지울 수 있다. 역가져오기 피킹 필터(RevitValveRoomPipingPickRepo)와 생성 경로가 만드는 카테고리다. 그 밖은 조용히 건너뛴다.</para></summary>
-    private static int DeleteSourceElements(Document document, IReadOnlyList<long>? elementIds)
+    /// <param name="notices">지울 부속의 +Z 커넥터에 남는 부재(수직분기, docs/301 § E)가 붙어 있으면 알림 문구를 담는다.</param>
+    private static int DeleteSourceElements(Document document, IReadOnlyList<long>? elementIds, ICollection<string> notices)
     {
         if (elementIds is null || elementIds.Count == 0) return 0;
 
@@ -418,9 +427,28 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             .ToList();
         if (targets.Count == 0) return 0;
 
+        WarnDetachedVerticalBranches(document, targets, notices);
         document.Delete(targets);
         document.Regenerate();
         return targets.Count;
+    }
+
+    /// <summary>지울 부속의 위(+Z) 커넥터가 지우지 않는 부재와 이어져 있으면 알림(docs/301 § E). 수직분기는 독립 요소라 건드리지 않음.</summary>
+    private static void WarnDetachedVerticalBranches(Document document, IReadOnlyCollection<ElementId> targets, ICollection<string> notices)
+    {
+        var targetIds = targets.Select(x => x.Value).ToHashSet();
+        foreach (var id in targets)
+        {
+            if (document.GetElement(id) is not FamilyInstance instance) continue;
+            var attached = GetMepConnectors(instance)
+                .Where(x => x.IsConnected && x.CoordinateSystem.BasisZ.Z >= VerticalConnectorMinZ)
+                .SelectMany(x => x.AllRefs.Cast<Connector>())
+                .Select(x => x.Owner?.Id.Value ?? 0)
+                .Any(x => x != 0 && x != id.Value && !targetIds.Contains(x));
+            if (!attached) continue;
+            notices.Add($"수직분기: 다시 생성하면서 지운 부속 '{instance.Symbol.Family.Name} : {instance.Symbol.Name}'(ElementId {id.Value})에 수직 배관이 붙어 있었습니다. " +
+                "수직 배관은 그대로 두었고 연결이 끊겼습니다 — [수직분기 추가]로 다시 잇거나 직접 옮기세요.");
+        }
     }
 
     private static Guid NodeIdAt(PipeNetworkDefinition network, DHBIMWATER.Core.Geometry.Point2D point)
@@ -1768,7 +1796,9 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         document.Regenerate();
     }
 
-    private static void ValidateCenteredSpan(FamilyInstance instance, XYZ expectedCenter, double expectedLengthMm, string role)
+    /// <param name="bypassMainDiameterMm">바이패스 세트에 붙은 관이면 주관 직경(mm). 길이 불일치 때 주관 직경 확인 문구를 낸다(docs/302).</param>
+    private static void ValidateCenteredSpan(
+        FamilyInstance instance, XYZ expectedCenter, double expectedLengthMm, string role, double? bypassMainDiameterMm = null)
     {
         var connectors = GetMepConnectors(instance);
         if (connectors.Count != 2)
@@ -1776,10 +1806,25 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
         var midpoint = (connectors[0].Origin + connectors[1].Origin) / 2;
         var centerErrorMm = UC.FtToMm(midpoint.DistanceTo(expectedCenter));
         var spanMm = ConnectorSpanMm(connectors);
+        // 세트 주변 관 길이만 틀림 = 패밀리가 이 직경에서 길이 무시. 중앙 오차는 원인 다름 → 기존 문구.
+        if (bypassMainDiameterMm is { } mainMm && centerErrorMm <= ConnectionToleranceMm
+            && Math.Abs(spanMm - expectedLengthMm) > ConnectionToleranceMm)
+            throw new DhbimwaterException(ErrorCodes.PL_ConnectorSpanMismatch,
+                $"바이패스 세트 배치 실패 — 주관 직경(DN{mainMm:0.##})을 확인하세요.{Environment.NewLine}" +
+                $"'{instance.Symbol.Family.Name} : {instance.Symbol.Name}'가 이 직경에서 길이 {expectedLengthMm:N1}mm를 만들지 못했습니다(실제 {spanMm:N1}mm).");
         if (centerErrorMm > ConnectionToleranceMm || Math.Abs(spanMm - expectedLengthMm) > ConnectionToleranceMm)
             throw new DhbimwaterException(ErrorCodes.PL_ConnectorSpanMismatch,
                 $"{role} '{instance.Symbol.Family.Name} : {instance.Symbol.Name}'의 커넥터 형상이 요청 구간과 맞지 않습니다. " +
                 $"중앙 오차 {centerErrorMm:N1}mm, 길이 {spanMm:N1}mm(요청 {expectedLengthMm:N1}mm)입니다.");
+    }
+
+    /// <summary>관 조각 한쪽 끝이 바이패스 A 구간 경계에 닿는지(docs/302).</summary>
+    private static bool TouchesBypassTee(PipeSegmentPlacement placement, IReadOnlyList<OccupiedSpan> teeSpans)
+    {
+        var start = placement.CenterMm - placement.LengthMm / 2;
+        var end = placement.CenterMm + placement.LengthMm / 2;
+        return teeSpans.Any(x => new[] { x.StartMm, x.EndMm }
+            .Any(b => Math.Abs(b - start) <= ConnectionToleranceMm || Math.Abs(b - end) <= ConnectionToleranceMm));
     }
 
     private static void ValidateConnectorMidpoint(
