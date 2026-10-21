@@ -33,6 +33,40 @@ public sealed record JunctionValveRoom(IReadOnlyList<JunctionWallFootprint> Wall
             left.MinX, bottom.MinY, right.MaxX, top.MaxY);
     }
 
+    // 부재 원점마다 4면 벽 판정, 다수결. 동수면 뿌리가 든 실, 그 외에는 먼저 찾은 실 (docs/303)
+    public static JunctionValveRoom? ResolveMajority(IReadOnlyList<JunctionWallFootprint> walls,
+        IReadOnlyList<ShapePoint> points, ShapePoint? root)
+    {
+        var rooms = new List<(JunctionValveRoom Room, int Count, bool HasRoot)>();
+        foreach (var point in points)
+        {
+            var room = Resolve(walls, point);
+            if (room is null) continue;
+            var ids = room.Walls.Select(x => x.Id).Order().ToArray();
+            var index = rooms.FindIndex(x => x.Room.Walls.Select(w => w.Id).Order().SequenceEqual(ids));
+            if (index < 0) rooms.Add((room, 1, root == point));
+            else
+            {
+                var current = rooms[index];
+                rooms[index] = (current.Room, current.Count + 1, current.HasRoot || root == point);
+            }
+        }
+
+        return rooms.OrderByDescending(x => x.Count).ThenByDescending(x => x.HasRoot)
+            .Select(x => x.Room).FirstOrDefault();
+    }
+
+    // 다수결에서 모두 실패한 경우 안내 문구 (docs/303)
+    public static string? ExplainMajorityFailure(IReadOnlyList<JunctionWallFootprint> walls, ShapePoint center)
+    {
+        var explanation = Explain(walls, center);
+        if (explanation is null || walls.Count == 0) return explanation;
+        const string prefix = "밸브실 벽 없음: ";
+        var detail = explanation.StartsWith(prefix, StringComparison.Ordinal)
+            ? explanation[prefix.Length..] : explanation;
+        return $"{prefix}어느 부재도 4면 벽 안에 없습니다. {detail}";
+    }
+
     /// <summary>4면 못 찾은 이유(미리보기 경고, docs/299). 찾았으면 null</summary>
     public static string? Explain(IReadOnlyList<JunctionWallFootprint> walls, ShapePoint center)
     {

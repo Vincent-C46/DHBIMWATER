@@ -41,6 +41,51 @@ public sealed class JunctionValveRoomTests
     public void Resolve_MissingSide_ReturnsNull()
         => Assert.Null(JunctionValveRoom.Resolve(Room.Take(3).ToList(), new ShapePoint(1200, 900)));
 
+    [Fact]
+    public void ResolveMajority_IgnoresMembersOutsideRoom()
+    {
+        var room = JunctionValveRoom.ResolveMajority(Room, [new(500, 500), new(1200, 900), new(2000, 1200), new(5000, 900)], null);
+        Assert.NotNull(room);
+        Assert.Equal((2400d, 1800d), (room.InnerWidth, room.InnerHeight));
+    }
+
+    [Fact]
+    public void ResolveMajority_AllInside_SameAsCenter()
+    {
+        var points = new[] { new ShapePoint(500, 500), new ShapePoint(2000, 1200) };
+        var majority = JunctionValveRoom.ResolveMajority(Room, points, null);
+        var center = JunctionValveRoom.Resolve(Room, new ShapePoint(1250, 850));
+        Assert.Equal(center!.Walls.Select(x => x.Id).Order(), majority!.Walls.Select(x => x.Id).Order());
+    }
+
+    [Fact]
+    public void ResolveMajority_Tie_PrefersRoomWithRoot()
+    {
+        var secondRoom = new[]
+        {
+            Wall(11, 4700, -300, 5000, 2100), Wall(12, 7400, -300, 7700, 2100),
+            Wall(13, 4700, -300, 7700, 0), Wall(14, 4700, 1800, 7700, 2100)
+        };
+        var points = new[] { new ShapePoint(1200, 900), new ShapePoint(6200, 900) };
+        var room = JunctionValveRoom.ResolveMajority(Room.Concat(secondRoom).ToList(), points, points[1]);
+        Assert.Equal(2400, room!.InnerWidth);
+        Assert.Equal(4700, room.OuterMinX);
+    }
+
+    [Fact]
+    public void ResolveMajority_NoPointInside_ReturnsNull()
+        => Assert.Null(JunctionValveRoom.ResolveMajority(Room, [new(5000, 900)], null));
+
+    [Fact]
+    public void ExplainMajorityFailure_PrependsNoMemberInsideMessage()
+    {
+        var message = JunctionValveRoom.ExplainMajorityFailure(Room, new ShapePoint(5000, 900));
+        Assert.StartsWith("밸브실 벽 없음: 어느 부재도 4면 벽 안에 없습니다. ", message);
+        Assert.Contains("벽이 부재 중심", message);
+        Assert.Equal("밸브실 벽 없음: 부재 주변 10m 안에 직선 벽이 없습니다.",
+            JunctionValveRoom.ExplainMajorityFailure([], new ShapePoint(0, 0)));
+    }
+
     // 못 찾은 면을 이유로 알려줌, 찾으면 null (docs/299)
     [Fact]
     public void Explain_NamesMissingSides()
