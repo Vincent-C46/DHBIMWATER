@@ -72,6 +72,8 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
 
                             <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource RequiredLabelTextBlockStyle}" Text="X (E/W) *" VerticalAlignment="Center"/>
@@ -80,7 +82,7 @@
                             <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource RequiredLabelTextBlockStyle}" Text="Y (N/S) *" VerticalAlignment="Center"/>
                             <ComboBox Grid.Row="1" Grid.Column="1" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,0,0,8" ItemsSource="{Binding ColumnOptions}" SelectedItem="{Binding YColumn}"/>
 
-                            <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource RequiredLabelTextBlockStyle}" Text="Z *" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource RequiredLabelTextBlockStyle}" Text="{Binding ZLabel}" VerticalAlignment="Center"/>
                             <ComboBox Grid.Row="2" Grid.Column="1" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,0,0,8" ItemsSource="{Binding ColumnOptions}" SelectedItem="{Binding ZColumn}"/>
 
                             <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource LabelTextBlockStyle}" Text="Station" VerticalAlignment="Center"/>
@@ -101,15 +103,39 @@
                             <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource LabelTextBlockStyle}" Text="직경(DN)" VerticalAlignment="Center"/>
                             <ComboBox Grid.Row="6" Grid.Column="1" Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding OptionalColumnOptions}" SelectedItem="{Binding VertexDiameterColumn, Mode=TwoWay}"/>
 
-                            <!-- 밸브실 위치 자동지정에서만 보인다(docs/300 § C-2). -->
-                            <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource RequiredLabelTextBlockStyle}" Text="지표 EL *" VerticalAlignment="Top" Margin="0,14,0,0"
-                                       Visibility="{Binding IsGroundElColumnVisible, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                            <StackPanel Grid.Row="7" Grid.Column="1" Margin="0,8,0,0" Visibility="{Binding IsGroundElColumnVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding OptionalColumnOptions}" SelectedItem="{Binding GroundElColumn, Mode=TwoWay}"/>
-                                <TextBlock Text="※ Z = 관 중심 표고(m), 지표 EL = 지표면 표고(m). 측점 열도 필수입니다." FontSize="11" Foreground="#7F8C8D" Margin="0,6,0,0" TextWrapping="Wrap"/>
-                            </StackPanel>
+                            <!-- 밸브실 위치 자동지정에서만 보인다(docs/304). 선형 시트 1장에 밸브실 행을 끼우고 유형·원지반 열을 더한 표. -->
+                            <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource RequiredLabelTextBlockStyle}" Text="밸브실 유형 *" VerticalAlignment="Center" Margin="0,8,0,0"
+                                       Visibility="{Binding IsValveRoomMode, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                            <ComboBox Grid.Row="7" Grid.Column="1" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,8,0,0" ItemsSource="{Binding OptionalColumnOptions}" SelectedItem="{Binding ValveRoomTypeColumn, Mode=TwoWay}"
+                                      Visibility="{Binding IsValveRoomMode, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                            <TextBlock Grid.Row="8" Grid.Column="0" Style="{StaticResource RequiredLabelTextBlockStyle}" Text="원지반 Z *" VerticalAlignment="Center" Margin="0,8,0,0"
+                                       Visibility="{Binding IsValveRoomMode, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                            <ComboBox Grid.Row="8" Grid.Column="1" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,8,0,0" ItemsSource="{Binding OptionalColumnOptions}" SelectedItem="{Binding GroundElColumn, Mode=TwoWay}"
+                                      Visibility="{Binding IsValveRoomMode, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                            <TextBlock Grid.Row="9" Grid.Column="1" Margin="0,8,0,0" FontSize="11" Foreground="#7F8C8D" TextWrapping="Wrap"
+                                       Text="※ 선형 시트 1개만 고르세요. 밸브실 유형 칸이 채워진 행이 밸브실 위치입니다. Z = 관저고(m), 원지반 Z(m). 측점·직경(DN) 필수."
+                                       Visibility="{Binding IsValveRoomMode, Converter={StaticResource BooleanToVisibilityConverter}}"/>
 
                         </Grid>
+                    </GroupBox>
+
+                    <!-- 밸브실 모드 하단 목록(docs/304). 열 매핑에 따라 바로 갱신, 하나 골라 [확인]. -->
+                    <GroupBox Header="밸브실 목록 — 하나 선택" Style="{StaticResource PrimaryGroupBox}" Margin="0,0,0,10"
+                              Visibility="{Binding IsValveRoomMode, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <StackPanel>
+                            <TextBlock Text="{Binding ValveRoomListStatus}" FontSize="11" Foreground="#7F8C8D" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                            <DataGrid Style="{StaticResource QuantityDataGridStyle}" ItemsSource="{Binding ValveRoomRows}" SelectedItem="{Binding SelectedValveRoomRow, Mode=TwoWay}"
+                                      AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single" Height="160">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="행" Binding="{Binding RowNumber}" Width="50"/>
+                                    <DataGridTextColumn Header="밸브실 유형" Binding="{Binding RoomType}" Width="*"/>
+                                    <DataGridTextColumn Header="측점" Binding="{Binding StationText}" Width="*"/>
+                                    <DataGridTextColumn Header="DN" Binding="{Binding DiameterMm, StringFormat=0}" Width="70"/>
+                                    <DataGridTextColumn Header="관저고(m)" Binding="{Binding PipeInvertEl, StringFormat=0.000}" Width="90"/>
+                                    <DataGridTextColumn Header="원지반(m)" Binding="{Binding GroundEl, StringFormat=0.000}" Width="90"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </StackPanel>
                     </GroupBox>
                 </StackPanel>
             </ScrollViewer>

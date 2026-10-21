@@ -111,9 +111,13 @@ public class ValveRoomViewModel : ViewModelBase
     private double _foundationTopEl;
     private double _trueNorthToProjectNorthClockwiseDegrees;
 
-    // 위치 자동지정 입력(docs/300 § D-2). 토피고·이격은 mm. 프리셋이 리셋하지 않는다.
-    private double _coverDepth = 1200;
-    private double _pipeCenterToFoundationTopGap;
+    // 위치 자동지정 입력(docs/300 § D-2, docs/304). 관저고·원지반 m, 관경 mm. 프리셋이 리셋하지 않는다.
+    private double _pipeInvertEl;
+    private double _groundEl;
+    private double _placementPipeDiameter = 300;
+    private string _selectedSluiceVariant = ValveRoomStandardDimensionCatalog.TypeA;
+    // 마지막으로 고른 밸브실 엑셀 행 번호. [엑셀 다시 지정] 때 매핑창 목록에서 미리 선택한다.
+    private int? _placementRowNumber;
     private bool _isPlacementRotated;
     // 엑셀 매핑은 창이 열려 있는 동안만 기억한다. 저장 안 함.
     private string? _placementExcelPath;
@@ -145,7 +149,7 @@ public class ValveRoomViewModel : ViewModelBase
 
         ResetCommand = new RelayCommand(_ => ApplyPreset());
         AutoPlaceCommand = new RelayCommand(_ => AutoPlace());
-        RemapPlacementExcelCommand = new RelayCommand(_ => SelectPlacementExcel(reuseMapping: true), _ => _placementExcelPath is not null);
+        RemapPlacementExcelCommand = new RelayCommand(_ => { if (SelectPlacementExcel(reuseMapping: true)) AutoPlace(); }, _ => _placementExcelPath is not null);
         // 철제밸브실은 형상 계산이 없으므로 생성을 막는다. RelayCommand는 CommandManager.RequerySuggested
         // 기반이라 IsStructureImplemented가 바뀌면 별도 갱신 호출 없이 버튼 상태가 따라온다.
         // 숫자 칸에 변환 오류가 남아 있으면 옛 값으로 생성되지 않게 막는다(docs/238 § B).
@@ -223,7 +227,6 @@ public class ValveRoomViewModel : ViewModelBase
             OnPropertyChanged(nameof(AirValveVisibility));
             OnPropertyChanged(nameof(PlainConcreteVisibility));
             OnPropertyChanged(nameof(DrainPitVisibility));
-            OnPropertyChanged(nameof(PipeCenterGapVisibility));
             OnPropertyChanged(nameof(Summary));
             OnPropertyChanged(nameof(PlanImagePath));
             OnPropertyChanged(nameof(SectionImagePath));
@@ -353,10 +356,18 @@ public class ValveRoomViewModel : ViewModelBase
     /// <summary>기초 상부 EL(m). 레벨 표고가 되며 내부원점 표고는 항상 0이다.</summary>
     public double FoundationTopEl { get => _foundationTopEl; set => SetProperty(ref _foundationTopEl, value); }
     public double TrueNorthToProjectNorthClockwiseDegrees { get => _trueNorthToProjectNorthClockwiseDegrees; set => SetProperty(ref _trueNorthToProjectNorthClockwiseDegrees, value); }
-    /// <summary>토피고(mm). 상부슬래브 상면 EL = 지표 EL − 토피고.</summary>
-    public double CoverDepth { get => _coverDepth; set => SetProperty(ref _coverDepth, value); }
-    /// <summary>관 중심 → 기초 상면 아래쪽 거리(mm). 이토·타이·제수 전용. 공기는 <see cref="FoundationTopToPipeCenterDepth"/>를 쓴다.</summary>
-    public double PipeCenterToFoundationTopGap { get => _pipeCenterToFoundationTopGap; set => SetProperty(ref _pipeCenterToFoundationTopGap, value); }
+    /// <summary>관저고(m). 목록 선택 시 채워지고 직접 고칠 수 있다(docs/304).</summary>
+    public double PipeInvertEl { get => _pipeInvertEl; set => SetProperty(ref _pipeInvertEl, value); }
+    /// <summary>원지반 표고(m). 상부슬래브 상면 EL = 원지반 − <see cref="ValveRoomPlacementRules.GroundToTopSlabTopMm"/>.</summary>
+    public double GroundEl { get => _groundEl; set => SetProperty(ref _groundEl, value); }
+    /// <summary>본관 관경(mm). 제원표 조회·관 중심(관저고 + 관경/2)에 쓴다. 공기밸브실은 성공 시 본관 관경 칸에도 넣는다.</summary>
+    public double PlacementPipeDiameter { get => _placementPipeDiameter; set => SetProperty(ref _placementPipeDiameter, value); }
+    /// <summary>제수밸브실 제원표 형식. A형은 DN350까지 — 그 밖은 B형으로 넘어간다.</summary>
+    public IReadOnlyList<string> SluiceVariants { get; } = ValveRoomStandardDimensionCatalog.Variants(ValveRoomStandardDimensionCatalog.Sluice);
+    public string SelectedSluiceVariant { get => _selectedSluiceVariant; set => SetProperty(ref _selectedSluiceVariant, value ?? ValveRoomStandardDimensionCatalog.TypeA); }
+    /// <summary>고정 규칙 안내.</summary>
+    public string PlacementRuleText =>
+        $"기초 상면 = 관저고 − {ValveRoomPlacementRules.DefaultInvertToFoundationTopMm:0} mm · 상부슬래브 상면 = 원지반 − {ValveRoomPlacementRules.GroundToTopSlabTopMm:0} mm";
     /// <summary>false = 관 방향이 내부 길이(L), true = 내부 폭(W)으로 90° 회전.</summary>
     public bool IsPlacementRotated { get => _isPlacementRotated; set => SetProperty(ref _isPlacementRotated, value); }
     /// <summary>위치 자동지정에 쓸 엑셀 표시(파일명 · 시트). 지정 전이면 안내문.</summary>
@@ -396,8 +407,6 @@ public class ValveRoomViewModel : ViewModelBase
     public Visibility AirValveVisibility => IsAir ? Visibility.Visible : Visibility.Collapsed;
     public Visibility PlainConcreteVisibility => IsAir ? Visibility.Collapsed : Visibility.Visible;
     public Visibility DrainPitVisibility => IsAir ? Visibility.Collapsed : Visibility.Visible;
-    // 공기는 관이 기초 안이라 기존 본관 중심 깊이칸을 쓴다(docs/300 D6).
-    public Visibility PipeCenterGapVisibility => IsAir ? Visibility.Collapsed : Visibility.Visible;
 
     // 참고도는 Resources/ValveRoomImages/{종류}_{평면도|단면도}.png(Resource). 같은 폴더의 .svg가 원본이며 치수 기호는 View 라벨과 같다.
     private const string ImageBasePath = "pack://application:,,,/DHBIMWATER.UI;component/Resources/ValveRoomImages/";
@@ -824,6 +833,18 @@ public class ValveRoomViewModel : ViewModelBase
         return new Point3D(x, y, FoundationTopEl * 1000);
     }
 
+    /// <summary>매핑창에서 고른 밸브실 행 → 입력칸. 유형을 먼저 바꾼다 — 유형 세터의 ApplyPreset이 L·W·본관 관경을 되돌리기 때문.</summary>
+    private void ApplyValveRoomListRow(ValveRoomListRow row)
+    {
+        _placementRowNumber = row.RowNumber;
+        if (ValveRoomUsageTypes.Contains(row.RoomType)) SelectedValveRoomType = row.RoomType;
+        else _dialogService.Warn("밸브실 목록", $"'{row.RoomType}'은 이 창에서 만들 수 없는 유형입니다. 유형은 그대로 두고 나머지 값만 채웁니다.");
+        StationPoint = row.StationText;
+        PlacementPipeDiameter = row.DiameterMm;
+        PipeInvertEl = row.PipeInvertEl;
+        GroundEl = row.GroundEl;
+    }
+
     private void AutoPlace()
     {
         if (_excelReader is null || _fileDialog is null || _resolvePlacement is null)
@@ -831,6 +852,7 @@ public class ValveRoomViewModel : ViewModelBase
             _dialogService.Warn("위치 자동지정", "위치 자동지정 서비스가 연결되지 않았습니다.");
             return;
         }
+        // 처음이면 매핑창에서 밸브실 행까지 골라야 확정된다 — 측점 칸이 프로젝트 정보의 옛 값으로 남지 않는다(VR-502 오발생 방지).
         if (_placementExcelPath is null || _placementExcelMapping is null)
         {
             if (!SelectPlacementExcel(reuseMapping: false)) return;
@@ -841,6 +863,10 @@ public class ValveRoomViewModel : ViewModelBase
             return;
         }
 
+        // 제원표 L·W. 없으면(타이·표 밖 관경) 지금 값으로 계산하고 경고만 남긴다(docs/304 가정 3).
+        var standard = ValveRoomStandardDimensionCatalog.Find(SelectedValveRoomType, PlacementPipeDiameter, IsSluice ? SelectedSluiceVariant : null);
+        var innerLength = standard?.LengthMm ?? InnerLength;
+        var innerWidth = standard?.WidthMm ?? InnerWidth;
         var usesIntermediateSlab = IsMud && HasIntermediateSlab;
         ValveRoomPlacementResolution resolution;
         try
@@ -848,11 +874,13 @@ public class ValveRoomViewModel : ViewModelBase
             resolution = _resolvePlacement.Execute(_placementExcelPath!, _placementExcelMapping!, StationPoint, point => new ValveRoomPlacementInput
             {
                 Point = point,
-                CoverDepthMm = CoverDepth,
-                FoundationTopReference = IsAir ? FoundationTopReference.AbovePipeCenter : FoundationTopReference.BelowPipeCenter,
-                PipeCenterToFoundationTopMm = IsAir ? FoundationTopToPipeCenterDepth : PipeCenterToFoundationTopGap,
-                InnerLengthMm = InnerLength,
-                InnerWidthMm = InnerWidth,
+                PipeInvertEl = PipeInvertEl,
+                GroundEl = GroundEl,
+                PipeDiameterMm = PlacementPipeDiameter,
+                FoundationTopReference = IsAir ? FoundationTopReference.AbovePipeCenter : FoundationTopReference.BelowPipeInvert,
+                FoundationTopOffsetMm = IsAir ? FoundationTopToPipeCenterDepth : ValveRoomPlacementRules.InvertToFoundationTopMm(PlacementPipeDiameter),
+                InnerLengthMm = innerLength,
+                InnerWidthMm = innerWidth,
                 UpperSlabThicknessMm = UpperSlabThickness,
                 HasIntermediateSlab = usesIntermediateSlab,
                 IntermediateSlabThicknessMm = IntermediateSlabThickness,
@@ -868,6 +896,9 @@ public class ValveRoomViewModel : ViewModelBase
         }
 
         var placement = resolution.Placement;
+        InnerLength = innerLength;
+        InnerWidth = innerWidth;
+        if (IsAir) MainPipeDiameter = PlacementPipeDiameter;
         SharedCoordinateX = placement.SharedX;
         SharedCoordinateY = placement.SharedY;
         TrueNorthToProjectNorthClockwiseDegrees = placement.TrueNorthToProjectNorthClockwiseDegrees;
@@ -877,11 +908,18 @@ public class ValveRoomViewModel : ViewModelBase
 
         var point = resolution.Point;
         var height = placement.Floor2InnerHeight is { } h2 ? $"2F 내부 높이 {h2:N0} mm" : $"내부 높이 {placement.InnerHeight:N0} mm";
-        var message = $"측점 {point.StationM:0.###} m · 관중심 EL {placement.PipeCenterEl:0.###} m · 지표 EL {point.GroundEl:0.###} m\n" +
+        var dimension = standard is null
+            ? $"제원표에 {SelectedValveRoomType} DN{PlacementPipeDiameter:0} 없음 — 내부 L·W 유지 ({innerLength:N0}×{innerWidth:N0} mm)"
+            : $"제원표 {standard.RoomKind}{(standard.Variant is null ? string.Empty : " " + standard.Variant)} DN{standard.DiameterMm:0} → L {standard.LengthMm:N0} · W {standard.WidthMm:N0} mm (표 높이 {standard.HeightMm:N0}은 참고)";
+        var message = $"측점 {point.StationM:0.###} m · 관저고 {PipeInvertEl:0.###} m · 관중심 EL {placement.PipeCenterEl:0.###} m · 원지반 {GroundEl:0.###} m\n" +
+                      $"{dimension}\n" +
                       $"기초 상부 EL {placement.FoundationTopEl:0.###} m · 상부슬래브 상면 EL {placement.TopSlabTopEl:0.###} m · {height}\n" +
                       $"도북각 {placement.TrueNorthToProjectNorthClockwiseDegrees:0.###}° 적용";
+        if (IsSluice && standard is not null && standard.Variant != SelectedSluiceVariant)
+            message += $"\n※ {SelectedSluiceVariant}에 DN{PlacementPipeDiameter:0}이 없어 {standard.Variant}을 적용했습니다.";
         if (resolution.Warnings.Count > 0) message += "\n\n" + string.Join("\n", resolution.Warnings);
-        _dialogService.Info("위치 자동지정", message);
+        if (standard is null) _dialogService.Warn("위치 자동지정", message);
+        else _dialogService.Info("위치 자동지정", message);
     }
 
     /// <summary>엑셀 선택 + 매핑. reuseMapping이면 기억한 파일·매핑으로 매핑창만 다시 연다. 확정하면 true.</summary>
@@ -902,7 +940,9 @@ public class ValveRoomViewModel : ViewModelBase
             mappingVm = reuseMapping && _placementExcelMapping is not null
                 ? new ExcelAlignmentMappingViewModel(_excelReader, _dialogService, path, _placementExcelMapping)
                 : new ExcelAlignmentMappingViewModel(_excelReader, _dialogService, path);
-            mappingVm.IsGroundElColumnVisible = true;
+            mappingVm.IsValveRoomMode = true;
+            if (reuseMapping && _placementRowNumber is { } rowNumber)
+                mappingVm.SelectedValveRoomRow = mappingVm.ValveRoomRows.FirstOrDefault(x => x.RowNumber == rowNumber);
         }
         catch (Exception ex)
         {
@@ -919,6 +959,7 @@ public class ValveRoomViewModel : ViewModelBase
 
         _placementExcelPath = path;
         _placementExcelMapping = mappings[0];
+        if (mappingVm.SelectedValveRoomRow is { } selected) ApplyValveRoomListRow(selected);
         OnPropertyChanged(nameof(PlacementSourceText));
         CommandManager.InvalidateRequerySuggested();
         return true;

@@ -100,8 +100,9 @@ public static class ErrorCodes
     public const string VR_PlacementStationInvalid = "VR-501";
     public const string VR_PlacementStationOutOfRange = "VR-502";
     public const string VR_PlacementProfileInvalid = "VR-503";
-    public const string VR_PlacementZDatumUnsupported = "VR-504";
+    // VR-504(엑셀 Z 기준 미지원)는 docs/304에서 관저고를 목록 시트로 받게 되어 폐기. 번호 재사용 금지.
     public const string VR_PlacementHeightInvalid = "VR-505";
+    public const string VR_PlacementListInvalid = "VR-506";
     public const string VR_Internal = "VR-901";
 
     // ── MT: 격점상세 배관재료표 ──

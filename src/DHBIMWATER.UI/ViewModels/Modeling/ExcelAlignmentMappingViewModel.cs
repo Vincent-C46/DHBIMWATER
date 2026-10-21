@@ -32,8 +32,12 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
     private readonly IDialogService _dialog;
     private int _headerRow = 1, _dataStartRow = 2;
     private ExcelSheetPickItem? _previewSheet;
-    private ExcelColumnOption? _xColumn, _yColumn, _zColumn, _stationColumn, _bendKindColumn, _vertexDiameterColumn, _groundElColumn;
-    private bool _isGroundElColumnVisible;
+    private ExcelColumnOption? _xColumn, _yColumn, _zColumn, _stationColumn, _bendKindColumn, _vertexDiameterColumn, _valveRoomTypeColumn, _groundElColumn;
+    private bool _isValveRoomMode;
+    // 밸브실 모드 하단 목록(docs/304). 미리보기 갱신 중엔 열 세터마다 파일을 다시 읽지 않게 막는다.
+    private ValveRoomListRow? _selectedValveRoomRow;
+    private bool _suspendValveRoomRefresh;
+    private string _valveRoomListStatus = string.Empty;
     private StationParseMode _stationMode = StationParseMode.Station;
     private double _numberChainIntervalM = 20d;
     private DataTable _previewTable = new();
@@ -65,6 +69,7 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
         StationColumn = FindOptionalColumn(existingMapping.StationColumnIndex);
         BendKindColumn = FindOptionalColumn(existingMapping.BendKindColumnIndex);
         VertexDiameterColumn = FindOptionalColumn(existingMapping.VertexDiameterColumnIndex);
+        ValveRoomTypeColumn = FindOptionalColumn(existingMapping.ValveRoomTypeColumnIndex);
         GroundElColumn = FindOptionalColumn(existingMapping.GroundElColumnIndex);
     }
 
@@ -97,15 +102,38 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
 
     public ExcelColumnOption? XColumn { get => _xColumn; set { if (SetProperty(ref _xColumn, value)) OnPropertyChanged(nameof(CanConfirm)); } }
     public ExcelColumnOption? YColumn { get => _yColumn; set { if (SetProperty(ref _yColumn, value)) OnPropertyChanged(nameof(CanConfirm)); } }
-    public ExcelColumnOption? ZColumn { get => _zColumn; set { if (SetProperty(ref _zColumn, value)) OnPropertyChanged(nameof(CanConfirm)); } }
+    public ExcelColumnOption? ZColumn { get => _zColumn; set { if (SetProperty(ref _zColumn, value)) NotifyConfirmState(); } }
     /// <summary>선택 사항. null이면 "(사용 안 함)".</summary>
     public ExcelColumnOption? StationColumn { get => _stationColumn; set { if (SetProperty(ref _stationColumn, value)) NotifyConfirmState(); } }
     public ExcelColumnOption? BendKindColumn { get => _bendKindColumn; set => SetProperty(ref _bendKindColumn, value); }
-    public ExcelColumnOption? VertexDiameterColumn { get => _vertexDiameterColumn; set => SetProperty(ref _vertexDiameterColumn, value); }
-    /// <summary>지표 EL 열. 밸브실 위치 자동지정에서만 보이고 필수다(docs/300 § C-1).</summary>
+    public ExcelColumnOption? VertexDiameterColumn { get => _vertexDiameterColumn; set { if (SetProperty(ref _vertexDiameterColumn, value)) NotifyConfirmState(); } }
+    /// <summary>밸브실 유형 열(docs/304). 값 있는 행 = 밸브실 위치. 밸브실 모드에서만 보이고 필수.</summary>
+    public ExcelColumnOption? ValveRoomTypeColumn { get => _valveRoomTypeColumn; set { if (SetProperty(ref _valveRoomTypeColumn, value)) NotifyConfirmState(); } }
+    /// <summary>원지반 Z 열(docs/304). 밸브실 모드에서만 보이고 필수.</summary>
     public ExcelColumnOption? GroundElColumn { get => _groundElColumn; set { if (SetProperty(ref _groundElColumn, value)) NotifyConfirmState(); } }
-    /// <summary>true = 밸브실 경로. 지표EL 열을 보이고 측점·지표EL 열을 필수로 본다. 관로 모델링은 false.</summary>
-    public bool IsGroundElColumnVisible { get => _isGroundElColumnVisible; set { if (SetProperty(ref _isGroundElColumnVisible, value)) NotifyConfirmState(); } }
+    /// <summary>true = 밸브실 위치 자동지정(docs/304). 선형 시트 1장에 밸브실 행을 끼운 표 — Z는 관저고로 읽고,
+    /// 측점·직경(DN)·밸브실 유형·원지반 열을 필수로 본다. 관로 모델링은 false.</summary>
+    public bool IsValveRoomMode
+    {
+        get => _isValveRoomMode;
+        set
+        {
+            if (!SetProperty(ref _isValveRoomMode, value)) return;
+            OnPropertyChanged(nameof(ZLabel));
+            NotifyConfirmState();
+        }
+    }
+    /// <summary>현재 열 매핑으로 읽은 밸브실 행(유형 칸 채움). 열을 바꾸면 다시 읽는다.</summary>
+    public ObservableCollection<ValveRoomListRow> ValveRoomRows { get; } = new();
+    /// <summary>[확인] 시 밸브실 창에 넣을 행. 밸브실 모드에선 필수.</summary>
+    public ValveRoomListRow? SelectedValveRoomRow
+    {
+        get => _selectedValveRoomRow;
+        set { if (SetProperty(ref _selectedValveRoomRow, value)) { OnPropertyChanged(nameof(CanConfirm)); OnPropertyChanged(nameof(StatusText)); } }
+    }
+    /// <summary>목록 상태 안내(개수·누락 경고·오류).</summary>
+    public string ValveRoomListStatus { get => _valveRoomListStatus; private set => SetProperty(ref _valveRoomListStatus, value); }
+    public string ZLabel => IsValveRoomMode ? "Z (관저고) *" : "Z *";
     public StationParseMode StationMode { get => _stationMode; set { if (SetProperty(ref _stationMode, value)) { OnPropertyChanged(nameof(IsStationMode)); OnPropertyChanged(nameof(IsNumberChainMode)); } } }
     public bool IsStationMode { get => StationMode == StationParseMode.Station; set { if (value) StationMode = StationParseMode.Station; } }
     public bool IsNumberChainMode { get => StationMode == StationParseMode.NumberChain; set { if (value) StationMode = StationParseMode.NumberChain; } }
@@ -113,9 +141,10 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
 
     public int CheckedCount => Sheets.Count(x => x.IsChecked);
     public bool CanConfirm => CheckedCount > 0 && XColumn is not null && YColumn is not null && ZColumn is not null
-        && (!IsGroundElColumnVisible || (UsedIndex(StationColumn) is not null && UsedIndex(GroundElColumn) is not null));
-    public string StatusText => $"시트 {CheckedCount}개" + (IsGroundElColumnVisible
-        ? (CanConfirm ? " · X·Y·Z·측점·지표EL 지정 완료" : " · X·Y·Z·측점·지표EL 미지정")
+        && (!IsValveRoomMode || (UsedIndex(StationColumn) is not null && UsedIndex(VertexDiameterColumn) is not null
+            && UsedIndex(ValveRoomTypeColumn) is not null && UsedIndex(GroundElColumn) is not null && SelectedValveRoomRow is not null));
+    public string StatusText => $"시트 {CheckedCount}개" + (IsValveRoomMode
+        ? (CanConfirm ? $" · 선택: {SelectedValveRoomRow?.Display}" : " · 열 지정 후 아래 목록에서 밸브실을 고르세요")
         : (CanConfirm ? " · X·Y·Z 지정 완료" : " · X·Y·Z 미지정"));
 
     public ICommand OkCommand { get; }
@@ -123,7 +152,7 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
     public Action? CloseAction { get; set; }
     public IReadOnlyList<ExcelAlignmentMapping>? Result { get; private set; }
 
-    private void NotifyConfirmState() { OnPropertyChanged(nameof(CanConfirm)); OnPropertyChanged(nameof(StatusText)); }
+    private void NotifyConfirmState() { RefreshValveRoomRows(); OnPropertyChanged(nameof(CanConfirm)); OnPropertyChanged(nameof(StatusText)); }
 
     private void OnSheetCheckedChanged()
     {
@@ -134,13 +163,62 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
 
     private void RefreshPreview()
     {
+        _suspendValveRoomRefresh = true;
+        try { RefreshPreviewCore(); }
+        finally { _suspendValveRoomRefresh = false; }
+        RefreshValveRoomRows();
+    }
+
+    /// <summary>밸브실 모드 하단 목록을 현재 매핑으로 다시 읽는다. 같은 엑셀 행 번호면 선택을 유지한다.</summary>
+    private void RefreshValveRoomRows()
+    {
+        if (!IsValveRoomMode || _suspendValveRoomRefresh) return;
+        var previousRow = SelectedValveRoomRow?.RowNumber;
+        ValveRoomRows.Clear();
+        _selectedValveRoomRow = null;
+        if (PreviewSheet is null || BuildMapping(PreviewSheet.Name) is not { } mapping)
+        {
+            ValveRoomListStatus = "X·Y·Z(관저고)·측점·직경(DN)·밸브실 유형·원지반 열을 지정하면 밸브실 목록이 표시됩니다.";
+        }
+        else
+        {
+            try
+            {
+                var list = _reader.ReadValveRoomList(FilePath, mapping);
+                foreach (var row in list.Rows) ValveRoomRows.Add(row);
+                ValveRoomListStatus = $"밸브실 {list.Rows.Count}개" + (list.Warnings.Count > 0 ? " · " + string.Join(" · ", list.Warnings) : string.Empty);
+            }
+            catch (Exception ex)
+            {
+                ValveRoomListStatus = ex is DHBIMWATER.Shared.Errors.DhbimwaterException ? ex.Message : UiErrors.Report("ValveRoom", ex);
+            }
+        }
+        _selectedValveRoomRow = ValveRoomRows.FirstOrDefault(x => x.RowNumber == previousRow);
+        OnPropertyChanged(nameof(SelectedValveRoomRow));
+    }
+
+    /// <summary>현재 콤보 값으로 매핑을 만든다. 필수 열(밸브실 모드면 측점·DN·유형·원지반 포함)이 비면 null.</summary>
+    private ExcelAlignmentMapping? BuildMapping(string sheetName)
+    {
+        if (XColumn is null || YColumn is null || ZColumn is null) return null;
+        var station = UsedIndex(StationColumn);
+        var vertexDiameter = UsedIndex(VertexDiameterColumn);
+        var valveRoomType = UsedIndex(ValveRoomTypeColumn);
+        var groundEl = UsedIndex(GroundElColumn);
+        if (IsValveRoomMode && (station is null || vertexDiameter is null || valveRoomType is null || groundEl is null)) return null;
+        return new ExcelAlignmentMapping(sheetName, HeaderRow, DataStartRow, XColumn.Index, YColumn.Index, ZColumn.Index, station, StationMode, NumberChainIntervalM,
+            UsedIndex(BendKindColumn), vertexDiameter, valveRoomType, groundEl);
+    }
+
+    private void RefreshPreviewCore()
+    {
         var previousX = XColumn?.Index; var previousY = YColumn?.Index; var previousZ = ZColumn?.Index;
         // 선택 열이 "(사용 안 함)"(-1)이면 이전 값이 없는 것으로 보고 다시 추정한다. 헤더가 4행인 코리더 점 보고서는
         // 처음(헤더 1행) 추정이 실패해 -1로 굳고, 헤더 행을 4로 바꿔도 Station·곡관유형·호칭지름이 매핑되지 않았다.
         var previousStation = UsedIndex(StationColumn); var previousBendKind = UsedIndex(BendKindColumn); var previousVertexDiameter = UsedIndex(VertexDiameterColumn);
-        var previousGroundEl = UsedIndex(GroundElColumn);
+        var previousValveRoomType = UsedIndex(ValveRoomTypeColumn); var previousGroundEl = UsedIndex(GroundElColumn);
         ColumnOptions.Clear(); OptionalColumnOptions.Clear();
-        if (PreviewSheet is null || HeaderRow < 1) { _previewTable = new DataTable(); OnPropertyChanged(nameof(PreviewView)); XColumn = YColumn = ZColumn = StationColumn = BendKindColumn = VertexDiameterColumn = GroundElColumn = null; return; }
+        if (PreviewSheet is null || HeaderRow < 1) { _previewTable = new DataTable(); OnPropertyChanged(nameof(PreviewView)); XColumn = YColumn = ZColumn = StationColumn = BendKindColumn = VertexDiameterColumn = ValveRoomTypeColumn = GroundElColumn = null; return; }
 
         IReadOnlyList<IReadOnlyList<string?>> rows;
         try { rows = _reader.PreviewRows(FilePath, PreviewSheet.Name, Math.Max(HeaderRow, DataStartRow) + 3); }
@@ -187,6 +265,9 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
         VertexDiameterColumn = previousVertexDiameter is null
             ? OptionalMatch(GuessColumn(headers, VertexDiameterKeywords))
             : OptionalColumnOptions.FirstOrDefault(x => x.Index == previousVertexDiameter) ?? OptionalColumnOptions.First();
+        ValveRoomTypeColumn = previousValveRoomType is null
+            ? OptionalMatch(GuessColumn(headers, ValveRoomTypeKeywords))
+            : OptionalColumnOptions.FirstOrDefault(x => x.Index == previousValveRoomType) ?? OptionalColumnOptions.First();
         GroundElColumn = previousGroundEl is null
             ? OptionalMatch(GuessColumn(headers, GroundElKeywords))
             : OptionalColumnOptions.FirstOrDefault(x => x.Index == previousGroundEl) ?? OptionalColumnOptions.First();
@@ -196,6 +277,7 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
     private void Confirm()
     {
         if (CheckedCount == 0) { _dialog.Warn("입력 확인", "시트를 1개 이상 선택하세요."); return; }
+        if (IsValveRoomMode && SelectedValveRoomRow is null) { _dialog.Warn("입력 확인", "아래 목록에서 밸브실을 고르세요."); return; }
         if (HeaderRow < 1) { _dialog.Warn("입력 확인", "헤더 행은 1 이상이어야 합니다."); return; }
         if (DataStartRow <= HeaderRow) { _dialog.Warn("입력 확인", "데이터 시작 행은 헤더 행보다 커야 합니다."); return; }
         if (XColumn is null || YColumn is null || ZColumn is null) { _dialog.Warn("입력 확인", "X, Y, Z 열은 필수입니다."); return; }
@@ -203,10 +285,12 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
         if (StationMode == StationParseMode.NumberChain && NumberChainIntervalM <= 0) { _dialog.Warn("입력 확인", "NumberChain 간격은 0보다 커야 합니다."); return; }
         var bendKind = BendKindColumn is { Index: >= 0 } ? BendKindColumn.Index : (int?)null;
         var vertexDiameter = VertexDiameterColumn is { Index: >= 0 } ? VertexDiameterColumn.Index : (int?)null;
+        var valveRoomType = ValveRoomTypeColumn is { Index: >= 0 } ? ValveRoomTypeColumn.Index : (int?)null;
         var groundEl = GroundElColumn is { Index: >= 0 } ? GroundElColumn.Index : (int?)null;
-        if (IsGroundElColumnVisible && (station is null || groundEl is null)) { _dialog.Warn("입력 확인", "밸브실 위치 자동지정은 측점 열과 지표 EL 열이 필수입니다."); return; }
+        if (IsValveRoomMode && (station is null || vertexDiameter is null || valveRoomType is null || groundEl is null))
+        { _dialog.Warn("입력 확인", "밸브실 위치 자동지정은 측점·직경(DN)·밸브실 유형·원지반 열이 필수입니다."); return; }
         Result = Sheets.Where(x => x.IsChecked)
-            .Select(x => new ExcelAlignmentMapping(x.Name, HeaderRow, DataStartRow, XColumn.Index, YColumn.Index, ZColumn.Index, station, StationMode, NumberChainIntervalM, bendKind, vertexDiameter, groundEl))
+            .Select(x => new ExcelAlignmentMapping(x.Name, HeaderRow, DataStartRow, XColumn.Index, YColumn.Index, ZColumn.Index, station, StationMode, NumberChainIntervalM, bendKind, vertexDiameter, valveRoomType, groundEl))
             .ToList();
         CloseAction?.Invoke();
     }
@@ -223,7 +307,8 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
     private static readonly string[] ZKeywords = ["Z", "표고", "고도", "EL", "ELEV", "LEVEL", "높이"];
     private static readonly string[] StationKeywords = ["STA", "STATION", "측점", "측점번호", "측점명", "누가거리", "CHAINAGE", "NO"];
     private static readonly string[] BendKindKeywords = ["곡관유형", "곡관종류", "곡관", "BEND"];
-    private static readonly string[] GroundElKeywords = ["지표EL", "지표고", "지표표고", "지반고", "지반EL", "계획지반고", "현지반고", "GL", "GROUND", "EG"];
+    private static readonly string[] ValveRoomTypeKeywords = ["밸브실유형", "밸브실종류", "밸브실", "유형"];
+    private static readonly string[] GroundElKeywords = ["원지반", "원지반Z", "원지반EL", "원지반고", "지반고", "지표EL", "지표고", "GL"];
     private static readonly string[] VertexDiameterKeywords = ["호칭지름(DN)", "호칭지름\n(DN)", "호칭지름", "DN", "직경", "관경", "구경", "호구경"];
 
     private ExcelColumnOption OptionalMatch(ExcelColumnOption? option)

@@ -8,10 +8,11 @@ public enum PipeAlignmentOutputMode { DirectShape, Adaptive, PipingSystem }
 
 /// <summary>엑셀 시트 1개를 관로 선형으로 읽기 위한 열 매핑. X·Y·Z는 필수, Station은 선택.</summary>
 /// <param name="StationColumnIndex">선택. 체이니지 정렬 검증용.</param>
-/// <param name="GroundElColumnIndex">선택. 지표 EL(m) 열 — 밸브실 위치 자동지정 전용(docs/300 § B-1). 관로 모델링은 안 씀.</param>
+/// <param name="ValveRoomTypeColumnIndex">선택. 밸브실 유형 열 — 밸브실 위치 자동지정 전용(docs/304). 값 있는 행 = 밸브실 위치.</param>
+/// <param name="GroundElColumnIndex">선택. 원지반 Z(m) 열 — 밸브실 위치 자동지정 전용(docs/304).</param>
 public sealed record ExcelAlignmentMapping(string SheetName, int HeaderRow, int DataStartRow, int XColumnIndex, int YColumnIndex, int ZColumnIndex, int? StationColumnIndex,
     StationParseMode StationMode = StationParseMode.Station, double NumberChainIntervalM = 20d, int? BendKindColumnIndex = null, int? VertexDiameterColumnIndex = null,
-    int? GroundElColumnIndex = null);
+    int? ValveRoomTypeColumnIndex = null, int? GroundElColumnIndex = null);
 
 /// <summary>입력 파일 1개와 그 파일의 필드 매핑. null 필드는 해당 값을 읽지 않는다. ExcelMapping이 있으면 엑셀 리더가 재읽기 시에도 이를 사용한다.</summary>
 /// <param name="ManualDiameterMm">직경 필드로 해석하지 못했을 때(엑셀처럼 필드 자체가 없는 경우 포함) 대신 쓸 수동 입력값. null 또는 0 이하면 쓰지 않는다.</param>

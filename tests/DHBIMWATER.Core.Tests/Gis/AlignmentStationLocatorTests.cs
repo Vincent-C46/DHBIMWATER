@@ -9,12 +9,11 @@ public sealed class AlignmentStationLocatorTests
     [Fact]
     public void 행_사이는_측점_비율로_보간한다()
     {
-        var point = AlignmentStationLocator.Locate([Row(0, 0, 0, 10, 15), Row(100, 100, 0, 11, 16)], 50);
+        var point = AlignmentStationLocator.Locate([Row(0, 0, 0, 10), Row(100, 100, 0, 11)], 50);
 
         Assert.Equal(50d, point.X, 9);
         Assert.Equal(0d, point.Y, 9);
         Assert.Equal(10.5d, point.Z, 9);
-        Assert.Equal(15.5d, point.GroundEl, 9);
         Assert.Equal(1d, point.DirX, 9);
         Assert.Equal(0d, point.DirY, 9);
     }
@@ -70,6 +69,6 @@ public sealed class AlignmentStationLocatorTests
         Assert.Equal(ErrorCodes.VR_PlacementProfileInvalid, ex.Code);
     }
 
-    private static AlignmentProfileRow Row(double station, double x, double y, double z = 0, double ground = 0)
-        => new(station, x, y, z, ground);
+    private static AlignmentProfileRow Row(double station, double x, double y, double z = 0)
+        => new(station, x, y, z);
 }

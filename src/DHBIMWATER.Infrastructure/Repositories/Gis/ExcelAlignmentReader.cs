@@ -132,8 +132,8 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
 
     public AlignmentProfileReadResult ReadProfile(string filePath, ExcelAlignmentMapping mapping)
     {
-        if (mapping.StationColumnIndex is not { } stationColumn || mapping.GroundElColumnIndex is not { } groundColumn)
-            throw new DhbimwaterException(ErrorCodes.PA_ExcelMappingRequired, "밸브실 위치 자동지정은 측점 열과 지표 EL 열 매핑이 필요합니다.");
+        if (mapping.StationColumnIndex is not { } stationColumn)
+            throw new DhbimwaterException(ErrorCodes.PA_ExcelMappingRequired, "밸브실 위치 자동지정은 측점 열 매핑이 필요합니다.");
         if (!File.Exists(filePath)) throw new DhbimwaterException(ErrorCodes.PA_ExcelFile, $"엑셀·CSV 파일을 찾을 수 없습니다: {filePath}");
         using var workbook = OpenWorkbook(filePath);
         var sheet = FindSheet(workbook, mapping.SheetName);
@@ -143,23 +143,71 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
         var skipped = 0;
         for (var r = mapping.DataStartRow; r <= lastRow; r++)
         {
-            // 측점·좌표·관Z·지표EL 중 하나라도 비면 그 행은 건너뛴다. 빈 줄·소계 줄이 섞인 표가 흔하다.
+            // 측점·좌표·관Z 중 하나라도 비면 그 행은 건너뛴다. 빈 줄·소계 줄이 섞인 표가 흔하다.
             var station = StationTextParser.Parse(sheet.Cell(r, stationColumn + 1).GetFormattedString(), mapping.StationMode, mapping.NumberChainIntervalM);
             if (station is null ||
                 !TryReadDouble(sheet.Cell(r, mapping.XColumnIndex + 1), out var x) ||
                 !TryReadDouble(sheet.Cell(r, mapping.YColumnIndex + 1), out var y) ||
-                !TryReadDouble(sheet.Cell(r, mapping.ZColumnIndex + 1), out var z) ||
-                !TryReadDouble(sheet.Cell(r, groundColumn + 1), out var ground))
+                !TryReadDouble(sheet.Cell(r, mapping.ZColumnIndex + 1), out var z))
             {
-                if (!sheet.Row(r).IsEmpty()) skipped++;
+                // 밸브실 행(유형 칸 채움)은 X·Y를 비워도 된다 — 측점으로 앞뒤 정점 사이를 보간한다(docs/304). 경고 안 함.
+                var isValveRoomRow = mapping.ValveRoomTypeColumnIndex is { } typeColumn
+                    && !string.IsNullOrWhiteSpace(sheet.Cell(r, typeColumn + 1).GetFormattedString());
+                if (!isValveRoomRow && !sheet.Row(r).IsEmpty()) skipped++;
                 continue;
             }
-            rows.Add(new AlignmentProfileRow(station.Value, x, y, z, ground));
+            rows.Add(new AlignmentProfileRow(station.Value, x, y, z));
         }
 
         var warnings = new List<string>();
-        if (skipped > 0) warnings.Add($"{mapping.SheetName}: 측점·좌표·지표EL 누락 {skipped}행 건너뜀");
+        if (skipped > 0) warnings.Add($"{mapping.SheetName}: 측점·좌표 누락 {skipped}행 건너뜀");
         return new AlignmentProfileReadResult(rows, warnings);
+    }
+
+    public ValveRoomListReadResult ReadValveRoomList(string filePath, ExcelAlignmentMapping mapping)
+    {
+        if (mapping.StationColumnIndex is not { } stationColumn || mapping.VertexDiameterColumnIndex is not { } diameterColumn
+            || mapping.ValveRoomTypeColumnIndex is not { } typeColumn || mapping.GroundElColumnIndex is not { } groundColumn)
+            throw new DhbimwaterException(ErrorCodes.PA_ExcelMappingRequired, "밸브실 위치 자동지정은 측점·직경(DN)·밸브실 유형·원지반 열 매핑이 필요합니다.");
+        if (!File.Exists(filePath)) throw new DhbimwaterException(ErrorCodes.PA_ExcelFile, $"엑셀·CSV 파일을 찾을 수 없습니다: {filePath}");
+        using var workbook = OpenWorkbook(filePath);
+        var sheet = FindSheet(workbook, mapping.SheetName);
+        var lastRow = sheet.RangeUsed()?.LastRowUsed().RowNumber() ?? 0;
+
+        var rows = new List<ValveRoomListRow>();
+        var skipped = 0;
+        for (var r = mapping.DataStartRow; r <= lastRow; r++)
+        {
+            // 유형 칸이 빈 행은 선형 정점일 뿐 — 밸브실 아님.
+            var roomType = NormalizeRoomType(sheet.Cell(r, typeColumn + 1).GetFormattedString());
+            if (roomType.Length == 0) continue;
+            var station = sheet.Cell(r, stationColumn + 1).GetFormattedString().Trim();
+            var diameterCell = sheet.Cell(r, diameterColumn + 1);
+            // 관경은 숫자 칸이 기본, "DN300"·"Φ300" 같은 문자도 받는다.
+            double? diameter = TryReadDouble(diameterCell, out var d) ? d : Core.Piping.NominalDiameterParser.Parse(diameterCell.GetFormattedString());
+            if (station.Length == 0 || diameter is not > 0 ||
+                !TryReadDouble(sheet.Cell(r, mapping.ZColumnIndex + 1), out var invert) ||
+                !TryReadDouble(sheet.Cell(r, groundColumn + 1), out var ground))
+            {
+                skipped++;
+                continue;
+            }
+            rows.Add(new ValveRoomListRow(r, roomType, station, diameter.Value, invert, ground));
+        }
+
+        var warnings = new List<string>();
+        if (skipped > 0) warnings.Add($"{sheet.Name}: 밸브실 행 중 측점·DN·관저고(Z)·원지반 누락 {skipped}행 건너뜀");
+        if (rows.Count == 0)
+            throw new DhbimwaterException(ErrorCodes.VR_PlacementListInvalid,
+                $"'{sheet.Name}' 시트에 밸브실 행이 없습니다. 밸브실 위치 행의 '밸브실 유형' 칸을 채우세요." + (skipped > 0 ? $" ({warnings[0]})" : string.Empty));
+        return new ValveRoomListReadResult(sheet.Name, rows, warnings);
+    }
+
+    /// <summary>"제수" 같은 줄임 표기를 창 유형 이름("제수밸브실")으로 맞춘다. 공백 제거.</summary>
+    private static string NormalizeRoomType(string? text)
+    {
+        var compact = new string((text ?? string.Empty).Where(ch => !char.IsWhiteSpace(ch)).ToArray());
+        return compact is "제수" or "이토" or "공기" or "타이" or "감압" ? compact + "밸브실" : compact;
     }
 
     /// <summary>

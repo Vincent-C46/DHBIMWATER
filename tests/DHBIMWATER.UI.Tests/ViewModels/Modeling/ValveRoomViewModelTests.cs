@@ -397,52 +397,110 @@ public class ValveRoomViewModelTests
     }
 
     [Fact]
-    public void 위치자동지정_엑셀_측점으로_좌표_도북각_EL_내부높이를_채운다()
+    public void 밸브실목록_선택하면_제원표_LW와_좌표_도북각_EL_내부높이를_채운다()
     {
         var dialog = new StubDialogService();
-        var vm = CreatePlacementViewModel(dialog);
-        vm.StationPoint = "0+050";
-        vm.PipeCenterToFoundationTopGap = 300;
+        var vm = CreatePlacementViewModel(dialog, rowIndex: 0);
 
         vm.AutoPlaceCommand.Execute(null);
 
-        // 이토 프리셋 L4000·W2500, 상부슬래브 400, 토피 1200. 측점 50 → (50, 0), 관중심 10.5, 지표 15.5.
-        Assert.Equal(48d, vm.SharedCoordinateX, 4);
-        Assert.Equal(-1.25d, vm.SharedCoordinateY, 4);
+        // 이토 DN300 → L1500·W1500. 측점 50 → 중심 (50, 0). 관저 10.0 − 0.6 = 9.4, 원지반 15.0 − 0.25 = 14.75, 상부슬래브 400.
+        Assert.Equal("이토밸브실", vm.SelectedValveRoomType);
+        Assert.Equal("0+050", vm.StationPoint);
+        Assert.Equal(1500d, vm.InnerLength);
+        Assert.Equal(1500d, vm.InnerWidth);
+        Assert.Equal(49.25d, vm.SharedCoordinateX, 4);
+        Assert.Equal(-0.75d, vm.SharedCoordinateY, 4);
         Assert.Equal(0d, vm.TrueNorthToProjectNorthClockwiseDegrees, 6);
-        Assert.Equal(10.2d, vm.FoundationTopEl, 6);
-        Assert.Equal(3700d, vm.InnerHeight);
+        Assert.Equal(9.4d, vm.FoundationTopEl, 6);
+        Assert.Equal(4950d, vm.InnerHeight);
         Assert.Equal("a.xlsx · 선형", vm.PlacementSourceText);
         Assert.Empty(dialog.Warnings);
+    }
+
+    [Fact]
+    public void 제수_A형에_없는_관경이면_B형_제원을_쓴다()
+    {
+        var dialog = new StubDialogService();
+        var vm = CreatePlacementViewModel(dialog, rowIndex: 1);
+
+        vm.AutoPlaceCommand.Execute(null);
+
+        Assert.Equal("제수밸브실", vm.SelectedValveRoomType);
+        Assert.Equal("A형", vm.SelectedSluiceVariant);
+        Assert.Equal(4100d, vm.InnerLength);
+        Assert.Equal(2300d, vm.InnerWidth);
+        Assert.Contains(dialog.Infos, x => x.Contains("B형을 적용"));
+    }
+
+    [Fact]
+    public void 타이밸브실은_제원표가_없어_LW를_유지하고_경고한다()
+    {
+        var dialog = new StubDialogService();
+        var vm = CreatePlacementViewModel(dialog, rowIndex: 2);
+
+        vm.AutoPlaceCommand.Execute(null);
+
+        Assert.Equal("타이밸브실", vm.SelectedValveRoomType);
+        Assert.Equal(4000d, vm.InnerLength);
+        Assert.Equal(2500d, vm.InnerWidth);
+        Assert.Equal(9.4d, vm.FoundationTopEl, 6);
+        Assert.Contains(dialog.Warnings, x => x.Contains("제원표에 타이밸브실 DN300 없음"));
+    }
+
+    [Fact]
+    public void 공기밸브실은_관중심_위_깊이로_기초상면을_정한다()
+    {
+        var dialog = new StubDialogService();
+        var vm = CreatePlacementViewModel(dialog, rowIndex: 3);
+
+        vm.AutoPlaceCommand.Execute(null);
+
+        // 관중심 10.0 + 0.15 = 10.15, 깊이 프리셋 250 → 10.4. (14.75 − 10.4) × 1000 − 400 = 3950.
+        Assert.Equal(10.4d, vm.FoundationTopEl, 6);
+        Assert.Equal(3950d, vm.InnerHeight);
+        Assert.Equal(300d, vm.MainPipeDiameter);
     }
 
     [Fact]
     public void 위치자동지정_실패하면_칸을_바꾸지_않는다()
     {
         var dialog = new StubDialogService();
-        var vm = CreatePlacementViewModel(dialog);
-        vm.StationPoint = "0+500";
+        // 5번째 행 측점 0+500은 선형(0~100) 밖.
+        var vm = CreatePlacementViewModel(dialog, rowIndex: 4);
         var innerHeight = vm.InnerHeight;
+        var innerLength = vm.InnerLength;
 
         vm.AutoPlaceCommand.Execute(null);
 
         Assert.Equal(0d, vm.SharedCoordinateX);
         Assert.Equal(0d, vm.FoundationTopEl);
         Assert.Equal(innerHeight, vm.InnerHeight);
+        Assert.Equal(innerLength, vm.InnerLength);
         Assert.Contains(dialog.Warnings, x => x.Contains("VR-502"));
     }
 
     [Fact]
-    public void 공기밸브실은_관중심_이격칸을_숨긴다()
+    public void 매핑창_취소하면_아무_칸도_바꾸지_않는다()
     {
-        var vm = CreateViewModel(new StubElementTypeQueryRepo());
+        var dialog = new StubDialogService();
+        var reader = new StubProfileReader();
+        var vm = new ValveRoomViewModel(dialog, new StubElementTypeQueryRepo(), new StubProjectInformationQueryRepo(),
+            excelReader: reader, fileDialog: new StubFileDialogService(), resolvePlacement: new ResolveValveRoomPlacementUseCase(reader));
+        ExcelAlignmentMappingViewModel? shown = null;
+        vm.ShowExcelMappingDialog = mapping => { mapping.Sheets[0].IsChecked = true; shown = mapping; return false; };
+        vm.StationPoint = "24+5.50";
 
-        vm.SelectedValveRoomType = "공기밸브실";
+        vm.AutoPlaceCommand.Execute(null);
 
-        Assert.Equal(System.Windows.Visibility.Collapsed, vm.PipeCenterGapVisibility);
+        // 시트를 고르면 매핑창 하단 목록이 열 추정만으로 채워진다.
+        Assert.Equal(5, shown!.ValveRoomRows.Count);
+        Assert.Equal("24+5.50", vm.StationPoint);
+        Assert.Equal(0d, vm.SharedCoordinateX);
+        Assert.Empty(dialog.Warnings);
     }
 
-    private static ValveRoomViewModel CreatePlacementViewModel(StubDialogService dialog)
+    private static ValveRoomViewModel CreatePlacementViewModel(StubDialogService dialog, int rowIndex = 0)
     {
         var reader = new StubProfileReader();
         var vm = new ValveRoomViewModel(dialog, new StubElementTypeQueryRepo(), new StubProjectInformationQueryRepo(),
@@ -451,6 +509,7 @@ public class ValveRoomViewModelTests
         vm.ShowExcelMappingDialog = mapping =>
         {
             mapping.Sheets[0].IsChecked = true;
+            mapping.SelectedValveRoomRow = mapping.ValveRoomRows[rowIndex];
             mapping.OkCommand.Execute(null);
             return mapping.Result is { Count: > 0 };
         };
@@ -463,17 +522,26 @@ public class ValveRoomViewModelTests
         public IReadOnlyList<string> GetSheetNames(string filePath) => ["선형"];
         public IReadOnlyList<IReadOnlyList<string?>> PreviewRows(string filePath, string sheetName, int maxRows) =>
         [
-            ["측점", "X", "Y", "Z", "지반고"],
-            ["0+000", "0", "0", "10", "15"],
-            ["0+100", "100", "0", "11", "16"]
+            ["측점", "X", "Y", "Z", "호칭지름(DN)", "밸브실유형", "원지반"],
+            ["0+000", "0", "0", "10", "DN300", "", ""],
+            ["0+050", "50", "0", "10", "DN300", "이토밸브실", "15"]
         ];
         public ShapefileReadResult Read(string filePath) => throw new NotSupportedException();
         public ShapefileReadResult Read(string filePath, ExcelAlignmentMapping mapping) => throw new NotSupportedException();
         public AlignmentProfileReadResult ReadProfile(string filePath, ExcelAlignmentMapping mapping)
         {
-            Assert.Equal(4, mapping.GroundElColumnIndex);
-            return new([new AlignmentProfileRow(0, 0, 0, 10, 15), new AlignmentProfileRow(100, 100, 0, 11, 16)], []);
+            Assert.Equal(0, mapping.StationColumnIndex);
+            Assert.Equal((4, 5, 6), (mapping.VertexDiameterColumnIndex, mapping.ValveRoomTypeColumnIndex, mapping.GroundElColumnIndex));
+            return new([new AlignmentProfileRow(0, 0, 0, 10), new AlignmentProfileRow(100, 100, 0, 11)], []);
         }
+        public ValveRoomListReadResult ReadValveRoomList(string filePath, ExcelAlignmentMapping mapping) => new("선형",
+        [
+            new ValveRoomListRow(2, "이토밸브실", "0+050", 300, 10.0, 15.0),
+            new ValveRoomListRow(3, "제수밸브실", "0+050", 600, 10.0, 15.0),
+            new ValveRoomListRow(4, "타이밸브실", "0+050", 300, 10.0, 15.0),
+            new ValveRoomListRow(5, "공기밸브실", "0+050", 300, 10.0, 15.0),
+            new ValveRoomListRow(6, "이토밸브실", "0+500", 300, 10.0, 15.0),
+        ], []);
     }
 
     private sealed class StubFileDialogService : IFileDialogService
@@ -551,7 +619,8 @@ public class ValveRoomViewModelTests
     private sealed class StubDialogService : IDialogService
     {
         public List<string> Warnings { get; } = new();
-        public void Info(string title, string message) { }
+        public List<string> Infos { get; } = new();
+        public void Info(string title, string message) => Infos.Add(message);
         public void Warn(string title, string message) => Warnings.Add(message);
         public bool Confirm(string title, string message) => true;
     }

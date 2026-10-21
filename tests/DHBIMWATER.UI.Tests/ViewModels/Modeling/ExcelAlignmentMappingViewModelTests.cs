@@ -65,6 +65,7 @@ public sealed class ExcelAlignmentMappingViewModelTests
         public ShapefileReadResult Read(string filePath) => throw new NotSupportedException();
         public ShapefileReadResult Read(string filePath, ExcelAlignmentMapping mapping) => throw new NotSupportedException();
         public AlignmentProfileReadResult ReadProfile(string filePath, ExcelAlignmentMapping mapping) => throw new NotSupportedException();
+        public ValveRoomListReadResult ReadValveRoomList(string filePath, ExcelAlignmentMapping mapping) => throw new NotSupportedException();
     }
 
     private sealed class StubDialog : IDialogService

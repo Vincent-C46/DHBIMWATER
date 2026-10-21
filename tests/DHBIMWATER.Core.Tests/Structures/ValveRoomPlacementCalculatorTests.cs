@@ -46,13 +46,14 @@ public sealed class ValveRoomPlacementCalculatorTests
     }
 
     [Fact]
-    public void 기초_상면이_관중심_아래면_이격을_빼고_내부높이를_계산한다()
+    public void 기초_상면은_관저고_아래_H1_상부슬래브_상면은_원지반_아래_250()
     {
         var result = ValveRoomPlacementCalculator.Calculate(Input(Point(1, 0)));
 
-        Assert.Equal(13.8d, result.TopSlabTopEl, 9);
-        Assert.Equal(9.7d, result.FoundationTopEl, 9);
-        Assert.Equal(3700d, result.InnerHeight);
+        Assert.Equal(10d, result.PipeCenterEl, 9);
+        Assert.Equal(14.75d, result.TopSlabTopEl, 9);
+        Assert.Equal(9.25d, result.FoundationTopEl, 9);
+        Assert.Equal(5100d, result.InnerHeight);
         Assert.Null(result.Floor2InnerHeight);
     }
 
@@ -62,11 +63,11 @@ public sealed class ValveRoomPlacementCalculatorTests
         var result = ValveRoomPlacementCalculator.Calculate(Input(Point(1, 0)) with
         {
             FoundationTopReference = FoundationTopReference.AbovePipeCenter,
-            PipeCenterToFoundationTopMm = 250,
+            FoundationTopOffsetMm = 250,
         });
 
         Assert.Equal(10.25d, result.FoundationTopEl, 9);
-        Assert.Equal(3150d, result.InnerHeight);
+        Assert.Equal(4100d, result.InnerHeight);
     }
 
     [Fact]
@@ -80,33 +81,28 @@ public sealed class ValveRoomPlacementCalculatorTests
         });
 
         Assert.Null(result.InnerHeight);
-        Assert.Equal(1900d, result.Floor2InnerHeight);
+        Assert.Equal(3300d, result.Floor2InnerHeight);
     }
 
     [Fact]
     public void 높이가_0_이하면_VR505()
     {
-        var ex = Assert.Throws<DhbimwaterException>(() => ValveRoomPlacementCalculator.Calculate(Input(Point(1, 0)) with { CoverDepthMm = 5000 }));
+        var ex = Assert.Throws<DhbimwaterException>(() => ValveRoomPlacementCalculator.Calculate(Input(Point(1, 0)) with { GroundEl = 9 }));
         Assert.Equal(ErrorCodes.VR_PlacementHeightInvalid, ex.Code);
     }
 
-    [Fact]
-    public void 관중심_외_ZDatum은_VR504()
-    {
-        var ex = Assert.Throws<DhbimwaterException>(() => ValveRoomPlacementCalculator.Calculate(Input(Point(1, 0)) with { ZDatum = ZDatum.Invert }));
-        Assert.Equal(ErrorCodes.VR_PlacementZDatumUnsupported, ex.Code);
-    }
-
     private static AlignmentStationPoint Point(double dirX, double dirY)
-        => new(50, 100, 200, 10, 15, dirX, dirY, 0);
+        => new(50, 100, 200, 10, dirX, dirY, 0);
 
-    // 지표 15, 토피 1200, 관중심 10, 이격 300, 상부슬래브 400, L 4000, W 2000.
+    // 관저 9.85, DN300(관중심 10.0), 원지반 15, H1 600, 상부슬래브 400, L 4000, W 2000.
     private static ValveRoomPlacementInput Input(AlignmentStationPoint point) => new()
     {
         Point = point,
-        CoverDepthMm = 1200,
-        FoundationTopReference = FoundationTopReference.BelowPipeCenter,
-        PipeCenterToFoundationTopMm = 300,
+        PipeInvertEl = 9.85,
+        GroundEl = 15,
+        PipeDiameterMm = 300,
+        FoundationTopReference = FoundationTopReference.BelowPipeInvert,
+        FoundationTopOffsetMm = ValveRoomPlacementRules.InvertToFoundationTopMm(300),
         InnerLengthMm = 4000,
         InnerWidthMm = 2000,
         UpperSlabThicknessMm = 400,

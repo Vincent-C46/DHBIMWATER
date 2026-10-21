@@ -244,6 +244,7 @@
                                             <Button DockPanel.Dock="Left" Style="{StaticResource CancelButtonStyle}" Content="엑셀 다시 지정" Command="{Binding RemapPlacementExcelCommand}" Margin="0,0,8,0"/>
                                             <TextBlock Text="{Binding PlacementSourceText}" Foreground="#7F8C8D" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                                         </DockPanel>
+                                        <!-- docs/304: 밸브실 행은 매핑창 하단 목록에서 고른다. 아래 값은 그 행으로 채워지며 직접 고칠 수 있다. -->
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="45"/>
@@ -251,24 +252,48 @@
                                                 <ColumnDefinition Width="110"/>
                                                 <ColumnDefinition Width="35"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Hc"/>
-                                            <TextBlock Grid.Column="1" Text="토피고 (지표→상부슬래브 상면)"/>
-                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding CoverDepth, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
+                                            <TextBlock Text="DN"/>
+                                            <TextBlock Grid.Column="1" Text="본관 관경"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding PlacementPipeDiameter, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
                                             <TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
-                                        <Grid Margin="0,8,0,0" Visibility="{Binding PipeCenterGapVisibility}">
+                                        <Grid Margin="0,8,0,0">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="45"/>
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="110"/>
                                                 <ColumnDefinition Width="35"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Hg"/>
-                                            <TextBlock Grid.Column="1" Text="관 중심→기초 상면 이격 (아래로)"/>
-                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding PipeCenterToFoundationTopGap, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
-                                            <TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
+                                            <TextBlock Text="IL"/>
+                                            <TextBlock Grid.Column="1" Text="관저고"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding PipeInvertEl, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
+                                            <TextBlock Grid.Column="3" Text="m" Margin="8,0"/>
                                         </Grid>
-                                        <TextBlock Margin="0,8,0,0" Text="※ 공기밸브실은 '기초 상부~본관 중심 깊이(Hp)'로 기초 상부 EL을 계산합니다." FontSize="11" Foreground="#7F8C8D"
+                                        <Grid Margin="0,8,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="45"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="110"/>
+                                                <ColumnDefinition Width="35"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="GL"/>
+                                            <TextBlock Grid.Column="1" Text="원지반 Z"/>
+                                            <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding GroundEl, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
+                                            <TextBlock Grid.Column="3" Text="m" Margin="8,0"/>
+                                        </Grid>
+                                        <Grid Margin="0,8,0,0" Visibility="{Binding SluiceVisibility}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="45"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="110"/>
+                                                <ColumnDefinition Width="35"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="1" Text="제원표 형식"/>
+                                            <ComboBox Grid.Column="2" Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding SluiceVariants}" SelectedItem="{Binding SelectedSluiceVariant, Mode=TwoWay}"/>
+                                        </Grid>
+                                        <TextBlock Margin="0,8,0,0" Text="{Binding PlacementRuleText}" FontSize="11" Foreground="#7F8C8D" TextWrapping="Wrap"/>
+                                        <TextBlock Margin="0,4,0,0" Text="※ 내부 L·W는 표준도 제원표(유형 + 관경)에서 채웁니다. 표에 없으면 지금 값을 유지합니다." FontSize="11" Foreground="#7F8C8D" TextWrapping="Wrap"/>
+                                        <TextBlock Margin="0,4,0,0" Text="※ 공기밸브실은 기초 상면 = 관중심(관저고 + 관경/2) + 본관 중심 깊이(Hp)입니다." FontSize="11" Foreground="#7F8C8D"
                                                    TextWrapping="Wrap" Visibility="{Binding AirValveVisibility}"/>
                                         <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" Content="90° 회전 (관 방향 = 내부 폭 W)" IsChecked="{Binding IsPlacementRotated, Mode=TwoWay}" Margin="0,8,0,0"/>
                                         <Separator Margin="0,10,0,10"/>

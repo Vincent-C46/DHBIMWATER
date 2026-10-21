@@ -1,11 +1,11 @@
 using DHBIMWATER.Shared.Errors;
 namespace DHBIMWATER.Core.Gis;
 
-/// <summary>엑셀 선형 1행. 측점(m)·공유좌표(m)·관 Z(m)·지표 EL(m)(docs/300 § 3-1).</summary>
-public sealed record AlignmentProfileRow(double StationM, double X, double Y, double Z, double GroundEl);
+/// <summary>엑셀 선형 1행. 측점(m)·공유좌표(m)·관 Z(m)(docs/300 § 3-1). 지표 EL은 docs/304부터 밸브실 목록 시트에서 받는다.</summary>
+public sealed record AlignmentProfileRow(double StationM, double X, double Y, double Z);
 
 /// <summary>측점 위 점. Dir은 측점 증가 방향 평면 단위벡터.</summary>
-public sealed record AlignmentStationPoint(double StationM, double X, double Y, double Z, double GroundEl, double DirX, double DirY, int SegmentIndex);
+public sealed record AlignmentStationPoint(double StationM, double X, double Y, double Z, double DirX, double DirY, int SegmentIndex);
 
 /// <summary>측점 → 선형 위 점(docs/300 § 3-1). 행 사이는 측점 비율 선형 보간, 범위 밖 외삽 안 함.</summary>
 public static class AlignmentStationLocator
@@ -48,7 +48,6 @@ public static class AlignmentStationLocator
             Lerp(a.X, b.X, t),
             Lerp(a.Y, b.Y, t),
             Lerp(a.Z, b.Z, t),
-            Lerp(a.GroundEl, b.GroundEl, t),
             dirX,
             dirY,
             segment);
