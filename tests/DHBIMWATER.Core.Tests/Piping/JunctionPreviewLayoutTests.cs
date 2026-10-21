@@ -59,12 +59,12 @@ public sealed class JunctionPreviewLayoutTests
         Assert.Equal(0, collapsed.Placements[1].Y);
     }
 
-    // 머리 = 대체 기호 반폭 2.2 + 간격 3 + 원 반지름 1.25 = 6.45, 지시선 끝 = 부재 위치 → 직선(docs/296)
+    // 머리 = 대체 기호 반폭 2.2 + 간격 6 + 원 반지름 1.25 = 9.45, 지시선 끝 = 부재 위치 → 직선(docs/296)
     [Theory]
-    [InlineData(JunctionTagSide.Right, 6.45, 0)]
-    [InlineData(JunctionTagSide.Top, 0, 6.45)]
-    [InlineData(JunctionTagSide.Left, -6.45, 0)]
-    [InlineData(JunctionTagSide.Bottom, 0, -6.45)]
+    [InlineData(JunctionTagSide.Right, 9.45, 0)]
+    [InlineData(JunctionTagSide.Top, 0, 9.45)]
+    [InlineData(JunctionTagSide.Left, -9.45, 0)]
+    [InlineData(JunctionTagSide.Bottom, 0, -9.45)]
     public void Build_FixedTagSide_PlacesHeadOutsideSymbolOnStraightLeader(JunctionTagSide side, double dx, double dy)
     {
         var scene = JunctionPreviewLayout.Build([Item(1, null, 0, 1000, 500, vertical: false)], [], [], 50, true, side);
@@ -82,7 +82,7 @@ public sealed class JunctionPreviewLayoutTests
             [Item(1, null, 0, 0, 0, vertical: false), Item(2, null, 0, 325, 0, vertical: false), Item(3, null, 0, -1500, 0, vertical: false)],
             [], [], 50);
         var first = scene.Placements.Single(x => x.Item.ElementId == 1);
-        Assert.Equal((0d, 6.45), (first.TagX, Math.Round(first.TagY, 6)));
+        Assert.Equal((0d, 9.45), (first.TagX, Math.Round(first.TagY, 6)));
         Assert.DoesNotContain(scene.Warnings, x => x.Contains("번호 원"));
         Assert.All(scene.Placements, x => Assert.True(x.TagX == x.LeaderX || x.TagY == x.LeaderY));
     }
@@ -102,14 +102,14 @@ public sealed class JunctionPreviewLayoutTests
              Wide(5, 0, 0, -1000, 1500), Wide(6, 3, 0, 3000, 100)],
             [], [], 50, true, JunctionTagSide.Left);
         var byId = scene.Placements.ToDictionary(x => x.Item.ElementId);
-        // 세트 2 열 1~3(X 0·0·0.4mm): 가장 넓은 2번 MinX −6 − 4.25
-        foreach (var id in new long[] { 1, 2, 3 }) Assert.Equal(-10.25, byId[id].TagX, 6);
+        // 세트 2 열 1~3(X 0·0·0.4mm): 가장 넓은 2번 MinX −6 − 7.25
+        foreach (var id in new long[] { 1, 2, 3 }) Assert.Equal(-13.25, byId[id].TagX, 6);
         Assert.Equal((0d, 20d, 40d), (byId[1].TagY, byId[2].TagY, byId[3].TagY));
-        // 다른 열 4번: 자기 기호 기준 40 − 2 − 4.25
-        Assert.Equal(33.75, byId[4].TagX, 6);
+        // 다른 열 4번: 자기 기호 기준 40 − 2 − 7.25
+        Assert.Equal(30.75, byId[4].TagX, 6);
         // 주관 넓은 단관 5번은 정렬 안 함 → 세트 태그도 안 끌려감. 다른 세트 6번은 자기 기호 기준
-        Assert.Equal(-34.25, byId[5].TagX, 6);
-        Assert.Equal(-6.25, byId[6].TagX, 6);
+        Assert.Equal(-37.25, byId[5].TagX, 6);
+        Assert.Equal(-9.25, byId[6].TagX, 6);
     }
 
     [Fact]
@@ -131,6 +131,20 @@ public sealed class JunctionPreviewLayoutTests
         Assert.Contains(fixedSide.Warnings, x => x.Contains("번호 원"));
         var auto = JunctionPreviewLayout.Build(items, [], [], 50);
         Assert.DoesNotContain(auto.Warnings, x => x.Contains("번호 원"));
+    }
+
+    // 세트 −Y 펼침 → 위쪽 삼각 모양 180° 회전(docs/306). 주관 부재 모양은 그대로
+    [Fact]
+    public void Build_RotatesSetShapeToExpandDirection_ButNotMainPipe()
+    {
+        var triangle = JunctionSymbolShape.FromPolylines([[new ShapePoint(-100, 0), new ShapePoint(0, 300), new ShapePoint(100, 0)]]);
+        var scene = JunctionPreviewLayout.Build([Tee with { Shape = triangle }, Item(2, 1, 2) with { Shape = triangle }],
+            [new(1, 2)], [new(2, JunctionExpandAxis.Y, -400)], 50);
+        var member = scene.Placements.Single(x => x.Item.ElementId == 2);
+        Assert.Equal(-300, member.Item.Shape!.MinY, 6);
+        Assert.Equal(0, member.Item.Shape.MaxY, 6);
+        Assert.Equal(-8 - 6, member.MinY, 6);
+        Assert.Same(triangle, scene.Placements.Single(x => x.Item.ElementId == 1).Item.Shape);
     }
 
     [Fact]

@@ -34,8 +34,8 @@ public static class JunctionPreviewLayout
 {
     // 종전 태그 규칙(부재 위치 − 4.5mm). 이전 버전이 만든 태그 소유 판정에만 씀(docs/296 § C)
     public const double TagGapPaperMm = 4.5;
-    // 기호 범위 바깥 끝 ~ 번호 원 가장자리 간격 = 지시선 보이는 길이(docs/296)
-    public const double TagClearancePaperMm = 3;
+    // 기호 범위 바깥 끝 ~ 번호 원 가장자리 간격 = 지시선 보이는 길이(docs/296). 3 → 6: 객체에 붙어 태그 겹침 잦음(2026-10-21 사용자)
+    public const double TagClearancePaperMm = 6;
     // 자동 배치 충돌 판정 여유
     private const double TagMarginPaperMm = 0.3;
     // 기호선 없는 부재의 대체 기호 반폭
@@ -99,6 +99,10 @@ public static class JunctionPreviewLayout
             var distance = order * set.StepMm / viewScale; // 실제 mm → 도면 mm
             if (set.Axis == JunctionExpandAxis.X) x += distance;
             else y += distance;
+            // 실행 때 인스턴스 회전 → 미리보기 모양도 같은 각도로 돌림(docs/306)
+            if (item.Shape is { IsRenderable: true } current &&
+                JunctionSymbolRotation.AngleRadians(item.BasisY, item.ViewRight, item.ViewUp, set) is { } angle && angle != 0)
+                item = item with { Shape = JunctionSymbolRotation.Rotate(current, angle) };
         }
 
         double minX, minY, maxX, maxY;

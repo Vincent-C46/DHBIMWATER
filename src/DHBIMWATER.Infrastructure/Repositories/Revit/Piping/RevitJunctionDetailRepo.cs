@@ -241,6 +241,7 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
             RemovePreviousFilter(document, view);
 
             var warnings = ResetInstances(instances);
+            RotateSymbols(instances, slots, view, options, warnings);
             PlaceRoomLabel(document, view, room, warnings);
             WriteOffsets(instances, slots, view, options, warnings);
             if (options.PlaceTags) PlaceNumberTags(document, view, instances, group.Nodes, slots, options, warnings);
@@ -436,10 +437,78 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
         var warnings = new List<string>();
         foreach (var instance in instances)
         {
+            // 회전 복원은 오프셋 매개변수 유무와 별개(docs/306)
+            RestoreRotation(instance, warnings);
             if (!TryParameters(instance, warnings, out var parameters)) continue;
             foreach (var parameter in parameters) parameter?.Set(0d);
         }
+        if (instances.Count > 0) instances[0].Document.Regenerate();
         return warnings;
+    }
+
+    // 애드인이 돌린 부재 → 기록한 원래 BasisY 각으로 되돌림, 기록 지움(docs/306)
+    private static void RestoreRotation(FamilyInstance instance, List<string> warnings)
+    {
+        if (JunctionRotationStorageSchema.Read(instance) is not { } original) return;
+        var delta = NormalizeAngle(original - PlanAngle(instance.GetTransform().BasisY));
+        if (Math.Abs(delta) < 1e-6 || TryRotate(instance, delta, warnings, "원래 방향 복원"))
+            JunctionRotationStorageSchema.Clear(instance);
+    }
+
+    // 세트 부재 심볼 위쪽(BasisY) → 펼침 방향. 축 = 수직 커넥터 원점 Z선이라 연결 유지(docs/306)
+    private static void RotateSymbols(IReadOnlyList<FamilyInstance> instances, IReadOnlyList<VerticalSlot> slots,
+        ViewPlan view, JunctionDetailViewOptions options, List<string> warnings)
+    {
+        var byId = instances.ToDictionary(x => x.Id.Value);
+        var rotated = false;
+        foreach (var slot in slots)
+        {
+            if (!byId.TryGetValue(slot.ElementId, out var instance)) continue;
+            var transform = instance.GetTransform();
+            var angle = JunctionSymbolRotation.AngleRadians(ToVector(transform.BasisY), ToVector(view.RightDirection),
+                ToVector(view.UpDirection), options.For(slot.SetId));
+            if (angle is null)
+            {
+                warnings.Add($"부재 {instance.Id.Value}: 로컬 Y가 수직이라 심볼 방향 회전을 건너뜁니다");
+                continue;
+            }
+            if (angle == 0) continue;
+            // 뷰 오른쪽 × 위쪽 = 뷰 법선. 평면뷰는 +Z → 뷰 반시계 = 월드 Z 반시계
+            var normal = view.RightDirection.CrossProduct(view.UpDirection).Z >= 0 ? 1 : -1;
+            var original = PlanAngle(transform.BasisY);
+            if (!TryRotate(instance, angle.Value * normal, warnings, "심볼 방향 회전")) continue;
+            if (JunctionRotationStorageSchema.Read(instance) is null) JunctionRotationStorageSchema.Write(instance, original);
+            rotated = true;
+        }
+        // WriteOffsets가 새 GetTransform 읽게
+        if (rotated) instances[0].Document.Regenerate();
+    }
+
+    private static bool TryRotate(FamilyInstance instance, double radians, List<string> warnings, string action)
+    {
+        try
+        {
+            var vertical = PipeMaterialConnectorReader.EndConnectors(instance)
+                .FirstOrDefault(x => Math.Abs(x.CoordinateSystem.BasisZ.Z) >= JunctionVerticalChain.VerticalCosine);
+            var origin = vertical?.Origin ?? instance.GetTransform().Origin;
+            ElementTransformUtils.RotateElement(instance.Document, instance.Id,
+                Line.CreateBound(origin, origin + XYZ.BasisZ), radians);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"부재 {instance.Id.Value}: {action} 실패 — {ex.Message}");
+            return false;
+        }
+    }
+
+    private static double PlanAngle(XYZ vector) => Math.Atan2(vector.Y, vector.X);
+
+    private static double NormalizeAngle(double radians)
+    {
+        while (radians > Math.PI) radians -= 2 * Math.PI;
+        while (radians < -Math.PI) radians += 2 * Math.PI;
+        return radians;
     }
 
     private static void WriteOffsets(IReadOnlyList<FamilyInstance> instances, IReadOnlyList<VerticalSlot> slots,
