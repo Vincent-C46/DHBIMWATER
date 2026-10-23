@@ -401,6 +401,9 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
             view.SetCategoryHidden(category.Id, !keep);
             if (keep) ShowSubCategories(view, category);
         }
+        // 단면 기호 = 주석 카테고리라 위 루프 대상 아님 → 따로 끔
+        var sections = Category.GetCategory(document, BuiltInCategory.OST_Sections);
+        if (sections is not null && view.CanCategoryBeHidden(sections.Id)) view.SetCategoryHidden(sections.Id, true);
     }
 
     // 하위 카테고리 개별로 꺼져 있으면 심볼 선 빠짐 → 재실행마다 켬

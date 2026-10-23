@@ -22,6 +22,7 @@ internal static class PipeJointConnectionRecorder
     public static int Apply(Document document, ICollection<string> warnings, IPipeQuantityRules rules)
     {
         var snapshot = PipeJointEndReader.Read(document, rules);
+        foreach (var warning in snapshot.Warnings) warnings.Add(warning);
         if (snapshot.Members.Count == 0) return 0;
 
         var result = rules.RunConnectionPass(snapshot.Members, snapshot.Ends, snapshot.IsValveRoom);

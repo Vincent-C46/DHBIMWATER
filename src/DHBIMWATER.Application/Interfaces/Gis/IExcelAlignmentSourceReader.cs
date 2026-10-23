@@ -16,6 +16,7 @@ public interface IExcelAlignmentSourceReader : IAlignmentSourceReader
     AlignmentProfileReadResult ReadProfile(string filePath, ExcelAlignmentMapping mapping);
 
     /// <summary>선형 시트에서 밸브실 유형 칸이 채워진 행을 밸브실 목록으로 읽는다(docs/304).
-    /// Z = 관저고, 직경(DN)·유형·원지반 열 매핑 필수. 밸브실 행이 0개면 VR-506.</summary>
-    ValveRoomListReadResult ReadValveRoomList(string filePath, ExcelAlignmentMapping mapping);
+    /// Z = 관중심(docs/310), 직경(DN)·유형·원지반 열 매핑 필수. 밸브실 행이 0개면 VR-506.
+    /// cumulativeDistanceColumn(0-based)은 목록 표시용 누가거리 — 매핑 레코드에 넣지 않는다.</summary>
+    ValveRoomListReadResult ReadValveRoomList(string filePath, ExcelAlignmentMapping mapping, int? cumulativeDistanceColumn = null);
 }

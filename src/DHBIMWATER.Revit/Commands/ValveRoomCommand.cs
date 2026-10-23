@@ -37,6 +37,8 @@ public class ValveRoomCommand : CommandBase
         };
         // 콘크리트 강도 설정 읽기·저장도 같은 ExternalEvent로 돈다 — 모델리스 창이라 API 컨텍스트 밖이다(docs/249 § E).
         viewModel.ConcreteLauncher.RunInRevitContext = viewModel.RunInRevitContext;
+        // 제원표 읽기·저장도 같은 경로(docs/312).
+        viewModel.DimensionCatalogLauncher.RunInRevitContext = viewModel.RunInRevitContext;
         viewModel.CreateModelAction = request =>
         {
             handler.PendingRequest = request;

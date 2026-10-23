@@ -62,14 +62,10 @@ public static class ValveRoomPlacementCalculator
         var pipeAngleDeg = Math.Atan2(point.DirY, point.DirX) * 180d / Math.PI;
         var trueNorth = Math.Round(NormalizeDegrees((input.RotateQuarterTurn ? 90d : 0d) - pipeAngleDeg), 6);
 
-        // 프로젝트 X·Y축의 공유좌표 단위벡터. 측점 점 = 내부공간 중심 → 좌하단으로 되돌린다.
-        var phi = -trueNorth * Math.PI / 180d;
-        var ux = (X: Math.Cos(phi), Y: Math.Sin(phi));
-        var uy = (X: -Math.Sin(phi), Y: Math.Cos(phi));
-        var halfL = input.InnerLengthMm / 2000d;
-        var halfW = input.InnerWidthMm / 2000d;
-        var sharedX = Math.Round(point.X - halfL * ux.X - halfW * uy.X, 4);
-        var sharedY = Math.Round(point.Y - halfL * ux.Y - halfW * uy.Y, 4);
+        // 측점 점 = 내부공간 중심 → 좌하단으로 되돌린다.
+        var (cornerX, cornerY) = LowerLeftFromCenter(point.X, point.Y, trueNorth, input.InnerLengthMm, input.InnerWidthMm);
+        var sharedX = Math.Round(cornerX, 4);
+        var sharedY = Math.Round(cornerY, 4);
 
         var topSlabTopEl = input.GroundEl - input.GroundToTopSlabTopMm / 1000d;
         var foundationTopEl = Math.Round(input.FoundationTopReference == FoundationTopReference.AbovePipeCenter
@@ -95,6 +91,18 @@ public static class ValveRoomPlacementCalculator
         }
 
         return new ValveRoomPlacementResult(sharedX, sharedY, trueNorth, foundationTopEl, pipeCenterEl, topSlabTopEl, innerHeight, floor2Height);
+    }
+
+    /// <summary>내부공간 중심(공유좌표 m) → 좌하단(공유좌표 m). L·W mm. 자동지정 뒤 L·W만 바뀔 때 중심 유지용.</summary>
+    public static (double X, double Y) LowerLeftFromCenter(double centerX, double centerY, double trueNorthClockwiseDegrees, double innerLengthMm, double innerWidthMm)
+    {
+        // 프로젝트 X·Y축의 공유좌표 단위벡터.
+        var phi = -trueNorthClockwiseDegrees * Math.PI / 180d;
+        var ux = (X: Math.Cos(phi), Y: Math.Sin(phi));
+        var uy = (X: -Math.Sin(phi), Y: Math.Cos(phi));
+        var halfL = innerLengthMm / 2000d;
+        var halfW = innerWidthMm / 2000d;
+        return (centerX - halfL * ux.X - halfW * uy.X, centerY - halfL * ux.Y - halfW * uy.Y);
     }
 
     /// <summary>(−180°, 180°]로 접는다.</summary>

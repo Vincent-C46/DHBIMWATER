@@ -34,8 +34,8 @@ public static class JunctionPreviewLayout
 {
     // 종전 태그 규칙(부재 위치 − 4.5mm). 이전 버전이 만든 태그 소유 판정에만 씀(docs/296 § C)
     public const double TagGapPaperMm = 4.5;
-    // 기호 범위 바깥 끝 ~ 번호 원 가장자리 간격 = 지시선 보이는 길이(docs/296). 3 → 6: 객체에 붙어 태그 겹침 잦음(2026-10-21 사용자)
-    public const double TagClearancePaperMm = 6;
+    // 기호 범위 바깥 끝 ~ 번호 원 가장자리 간격 = 지시선 보이는 길이(docs/296). 3 → 6: 객체에 붙어 태그 겹침 잦음(2026-10-21 사용자) → 8: 여전히 가까움(2026-10-22 사용자, docs/308)
+    public const double TagClearancePaperMm = 8;
     // 자동 배치 충돌 판정 여유
     private const double TagMarginPaperMm = 0.3;
     // 기호선 없는 부재의 대체 기호 반폭
@@ -149,10 +149,10 @@ public static class JunctionPreviewLayout
 
     /// <summary>같은 세트·같은 방향·같은 열(좌우) 또는 행(상하) 태그끼리 머리를 가장 바깥 값으로 맞춤(docs/298).
     /// 지시선 방향으로만 밀어냄 → 직선 유지, 원은 여전히 자기 기호 밖.
-    /// 주관 부재(세트 0)는 정렬 안 함 → 긴 수평 단관 하나가 열 전체 태그를 멀리 밀어내지 않게.</summary>
+    /// 주관 부재(세트 0)는 위/아래 행만 정렬, 좌/우 열은 안 함 → 긴 수평 단관 하나가 열 전체 태그를 멀리 밀어내지 않게(docs/308).</summary>
     private static void AlignTags(List<JunctionPreviewPlacement> result, IReadOnlyDictionary<int, JunctionTagSide> sides)
     {
-        foreach (var group in sides.Where(x => result[x.Key].Item.SetId != 0)
+        foreach (var group in sides.Where(x => result[x.Key].Item.SetId != 0 || x.Value is JunctionTagSide.Top or JunctionTagSide.Bottom)
                      .GroupBy(x => (Side: x.Value, result[x.Key].Item.SetId)))
         {
             var side = group.Key.Side;

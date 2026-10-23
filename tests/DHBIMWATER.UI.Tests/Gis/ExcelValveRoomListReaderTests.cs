@@ -11,7 +11,7 @@ public sealed class ExcelValveRoomListReaderTests : IDisposable
 {
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"dhbim_valveroom_list_{Guid.NewGuid():N}.xlsx");
 
-    // 측점 · X · Y · Z(관저고) · 호칭지름(DN) · 밸브실유형 · 원지반. 헤더 4행.
+    // 측점 · X · Y · Z(관중심, docs/310) · 호칭지름(DN) · 밸브실유형 · 원지반. 헤더 4행.
     private static readonly ExcelAlignmentMapping Mapping = new("선형", HeaderRow: 4, DataStartRow: 5, XColumnIndex: 1, YColumnIndex: 2, ZColumnIndex: 3,
         StationColumnIndex: 0, VertexDiameterColumnIndex: 4, ValveRoomTypeColumnIndex: 5, GroundElColumnIndex: 6);
 
@@ -37,11 +37,15 @@ public sealed class ExcelValveRoomListReaderTests : IDisposable
             ["1+250.00", 140.0, 200.0, 57.075, 1650.0, "이토밸브실", 59.0],
             ["1+300.00", 150.0, 200.0, 57.2, "DN1650", "공기밸브실", ""]);
 
-        var result = new ExcelAlignmentReader().ReadValveRoomList(_path, Mapping);
+        // 누가거리 대신 측점 열(0)을 넘겨 표시값이 실리는지만 본다.
+        var result = new ExcelAlignmentReader().ReadValveRoomList(_path, Mapping, cumulativeDistanceColumn: 0);
 
         Assert.Equal(2, result.Rows.Count);
         var first = result.Rows[0];
-        Assert.Equal(("제수밸브실", "0+250.00", 1650d, 57.075, 59d), (first.RoomType, first.StationText, first.DiameterMm, first.PipeInvertEl, first.GroundEl));
+        Assert.Equal(("제수밸브실", "0+250.00", 1650d, 57.075, 59d), (first.RoomType, first.StationText, first.DiameterMm, first.PipeCenterEl, first.GroundEl));
+        // 관저고 = 표고(관중심) − DN/2 = 57.075 − 0.825.
+        Assert.Equal(56.25, first.PipeInvertEl, 6);
+        Assert.Equal("0+250.00", first.CumulativeDistanceText);
         Assert.Equal("이토밸브실", result.Rows[1].RoomType);
         Assert.Single(result.Warnings);
     }

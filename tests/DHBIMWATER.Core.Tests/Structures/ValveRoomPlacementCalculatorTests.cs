@@ -18,6 +18,16 @@ public sealed class ValveRoomPlacementCalculatorTests
     }
 
     [Fact]
+    public void 중심에서_좌하단_변환은_도북각만큼_회전한다()
+    {
+        // 도북각 −90 → 프로젝트 X = 공유 (0,1), 프로젝트 Y = 공유 (−1,0). L 10000·W 4000.
+        var (x, y) = ValveRoomPlacementCalculator.LowerLeftFromCenter(100, 200, -90, 10000, 4000);
+
+        Assert.Equal(102d, x, 6);
+        Assert.Equal(195d, y, 6);
+    }
+
+    [Fact]
     public void 관이_북쪽이면_도북각_마이너스90이고_좌하단도_회전한다()
     {
         // 프로젝트 X = 공유 (0,1), 프로젝트 Y = 공유 (−1,0).

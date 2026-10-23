@@ -92,6 +92,9 @@ public sealed class JunctionDetailViewModel : ViewModelBase
                 return $"{item.ItemNumber} · {item.Name} · 개략 도형 사용 · {diagnostic?.Note ?? "기호선 정보 없음"}{rotated}";
             return $"{item.ItemNumber} · {item.Name}{rotated} · 기호선 {diagnostic?.CurveCount ?? 0}개 · 점 {diagnostic?.PointCount ?? 0}개 · 크기 {diagnostic?.WidthMm ?? 0:0.#}×{diagnostic?.HeightMm ?? 0:0.#} mm · 오프셋 {diagnostic?.OffsetResponse ?? "확인 안 함"} · {diagnostic?.Note ?? ""}";
         }).ToList();
+    // 복사용 한 덩어리(요약 + 줄). 텍스트박스 표시 → 사용자 선택·복사
+    public string ShapeDiagnosticText
+        => string.Join(Environment.NewLine, ShapeDiagnosticLines.Prepend(ShapeDiagnosticSummary));
     public JunctionDetailPreviewJunction? FirstJunction => _preview.Junctions.FirstOrDefault();
     /// <summary>값 빈 배관 부재 수(수동 배치 밸브 등). 실행 시 자동 기록 대상.</summary>
     public int UntaggedCount { get; private set; }
@@ -604,6 +607,7 @@ public sealed class JunctionDetailViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShapeDiagnostics));
         OnPropertyChanged(nameof(ShapeDiagnosticSummary));
         OnPropertyChanged(nameof(ShapeDiagnosticLines));
+        OnPropertyChanged(nameof(ShapeDiagnosticText));
         RefreshSummary();
     }
 

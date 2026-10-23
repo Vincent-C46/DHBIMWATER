@@ -65,6 +65,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     private static readonly string[] ExactDiameterParameterNames = ["ND", "DN", "NB"];
     private static readonly string[] BendAngleParameterDefaultKeywords = ["각도"];
     private const string RadiusToken = "반지름";
+    // 볼트내밈_길이 등 볼트 치수는 관 길이 아님 — 추정·저장값 복원에서 제외(docs/309).
+    private const string BoltToken = "볼트";
     /// <summary>밸브부관 A·B 기본 패밀리명(유형명 제외, 2026-09-28 사용자 결정, docs/232 § A). 완전일치 → 없으면 종전 A/B 글자 규칙.</summary>
     private const string ValveTeeDefaultFamilyName = "DH_특수_밸브부관";
     private const string ValveBendDefaultFamilyName = "DH_특수_밸브부관(D형)";
@@ -1027,7 +1029,10 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         finally { _parameterRefreshDeferral--; }
         FlushDeferredParameterRefresh();
         // 패밀리를 넣으면 세터가 파라미터 후보를 다시 추정하므로, 파라미터는 패밀리 뒤(위 갱신 뒤)에 넣어야 덮이지 않는다.
-        if (!string.IsNullOrWhiteSpace(settings.LengthParameterName)) LengthParameterName = settings.LengthParameterName;
+        // 볼트 치수 이름 저장값은 PL-303 원인 — 무시하고 추정값 유지(docs/309).
+        if (!string.IsNullOrWhiteSpace(settings.LengthParameterName)
+            && !settings.LengthParameterName.Contains(BoltToken, StringComparison.Ordinal))
+            LengthParameterName = settings.LengthParameterName;
         if (!string.IsNullOrWhiteSpace(settings.DiameterParameterName)) DiameterParameterName = settings.DiameterParameterName;
         if (double.IsFinite(settings.StraightLengthMm) && settings.StraightLengthMm > 0) StraightLengthMm = settings.StraightLengthMm;
         if (!string.IsNullOrWhiteSpace(settings.BendDiameterParameterName)) BendDiameterParameterName = settings.BendDiameterParameterName;
@@ -3381,10 +3386,12 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         // 사용자가 고른 값이 새 패밀리에도 있으면 그대로 둔다.
         if (!(_lengthParameterPinned && _lengthParameterName is not null && names.Contains(_lengthParameterName)))
         {
+            // 볼트 이름 고르면 형상 안 바뀌고 PL-303 남(docs/309).
+            var lengthCandidates = names.Where(x => !x.Contains(BoltToken, StringComparison.Ordinal)).ToList();
             _lengthParameterName = names.FirstOrDefault(x => string.Equals(x, "직관_길이", StringComparison.Ordinal))
-                ?? names.FirstOrDefault(x => x.Contains("길이", StringComparison.Ordinal))
-                ?? names.FirstOrDefault(x => x.Contains("Length", StringComparison.OrdinalIgnoreCase))
-                ?? names.FirstOrDefault(x => string.Equals(x, "L", StringComparison.OrdinalIgnoreCase));
+                ?? lengthCandidates.FirstOrDefault(x => x.Contains("길이", StringComparison.Ordinal))
+                ?? lengthCandidates.FirstOrDefault(x => x.Contains("Length", StringComparison.OrdinalIgnoreCase))
+                ?? lengthCandidates.FirstOrDefault(x => string.Equals(x, "L", StringComparison.OrdinalIgnoreCase));
             _lengthParameterPinned = false;
             OnPropertyChanged(nameof(LengthParameterName));
         }

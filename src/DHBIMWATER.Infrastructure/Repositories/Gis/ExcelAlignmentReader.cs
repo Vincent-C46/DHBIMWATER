@@ -164,7 +164,7 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
         return new AlignmentProfileReadResult(rows, warnings);
     }
 
-    public ValveRoomListReadResult ReadValveRoomList(string filePath, ExcelAlignmentMapping mapping)
+    public ValveRoomListReadResult ReadValveRoomList(string filePath, ExcelAlignmentMapping mapping, int? cumulativeDistanceColumn = null)
     {
         if (mapping.StationColumnIndex is not { } stationColumn || mapping.VertexDiameterColumnIndex is not { } diameterColumn
             || mapping.ValveRoomTypeColumnIndex is not { } typeColumn || mapping.GroundElColumnIndex is not { } groundColumn)
@@ -185,18 +185,20 @@ public sealed class ExcelAlignmentReader : IExcelAlignmentSourceReader
             var diameterCell = sheet.Cell(r, diameterColumn + 1);
             // 관경은 숫자 칸이 기본, "DN300"·"Φ300" 같은 문자도 받는다.
             double? diameter = TryReadDouble(diameterCell, out var d) ? d : Core.Piping.NominalDiameterParser.Parse(diameterCell.GetFormattedString());
+            // 표고 = 관중심(docs/310). 관저고는 행 레코드가 DN/2를 빼서 만든다.
             if (station.Length == 0 || diameter is not > 0 ||
-                !TryReadDouble(sheet.Cell(r, mapping.ZColumnIndex + 1), out var invert) ||
+                !TryReadDouble(sheet.Cell(r, mapping.ZColumnIndex + 1), out var center) ||
                 !TryReadDouble(sheet.Cell(r, groundColumn + 1), out var ground))
             {
                 skipped++;
                 continue;
             }
-            rows.Add(new ValveRoomListRow(r, roomType, station, diameter.Value, invert, ground));
+            var cumulative = cumulativeDistanceColumn is { } cumulativeColumn ? sheet.Cell(r, cumulativeColumn + 1).GetFormattedString().Trim() : null;
+            rows.Add(new ValveRoomListRow(r, roomType, station, diameter.Value, center, ground, cumulative));
         }
 
         var warnings = new List<string>();
-        if (skipped > 0) warnings.Add($"{sheet.Name}: 밸브실 행 중 측점·DN·관저고(Z)·원지반 누락 {skipped}행 건너뜀");
+        if (skipped > 0) warnings.Add($"{sheet.Name}: 밸브실 행 중 측점·DN·표고(관중심)·원지반 누락 {skipped}행 건너뜀");
         if (rows.Count == 0)
             throw new DhbimwaterException(ErrorCodes.VR_PlacementListInvalid,
                 $"'{sheet.Name}' 시트에 밸브실 행이 없습니다. 밸브실 위치 행의 '밸브실 유형' 칸을 채우세요." + (skipped > 0 ? $" ({warnings[0]})" : string.Empty));

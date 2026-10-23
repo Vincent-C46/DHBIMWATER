@@ -178,9 +178,11 @@ internal sealed class RevitReducerDirectShapeRepo : IReducerDirectShapeRepo
             && _rules.ReducerWeightKg(catalog, weightMaterial, info.BendConnection, plan.Form,
                 info.JointType, info.SteelFittingClass, large, small) is { } weightKg)
             writer.MassKg(shape, PipeAlignmentParameters.Weight, weightKg);
-        // 이경관은 `DH_접합구성`을 비워 둔다(docs/199 § 2, 2026-09-21 사용자 확정). 관로 이경관은 패밀리가 아니라
-        // 생성한 DirectShape 솔리드라 밸브실처럼 단부 플래그(`좌측_소켓`…)를 읽어 소켓/플랜지를 정할 근거가 없다.
-        // 모르는 값을 지어내지 않는다 — 필요하면 사용자가 속성창에서 `1S1F`처럼 직접 적는다.
+        // 플랜지는 창에서 고른 접합 방식이 근거라 `2F`를 적는다 — 연결 패스가 이것을 보고 이경관 양쪽 플랜지 연결을 센다(docs/305 § 3-1).
+        // 소켓은 `DH_접합구성`을 비워 둔다(docs/199 § 2, 2026-09-21 사용자 확정). DirectShape라 단부 플래그(`좌측_소켓`…)로
+        // 소켓 단부를 정할 근거가 없다 — 필요하면 사용자가 속성창에서 `1S1F`처럼 직접 적는다.
+        if (info.BendConnection == BendConnection.Flanged)
+            writer.JointComposition(shape, info.BendConnection, endCount: 2, socketEnds: 2);
         // DirectShape는 측점편집 대상이 아니다(docs/214) — 수량산출이 읽는 셋만 남긴다.
         writer.Text(shape, PlacementStationParameters.Alignment, plan.RecordNumber);
         writer.StationM(shape, PlacementStationParameters.StaStart, placement.StaStartM);

@@ -18,6 +18,7 @@ public partial class ValveRoomView : Window
         DataContext = viewModel;
         viewModel.CloseAction = Close;
         viewModel.ConcreteLauncher.ShowDialog = vm => ConcreteSettingsView.Show(this, vm);   // docs/249 § E
+        viewModel.DimensionCatalogLauncher.ShowDialog = vm => ValveRoomDimensionCatalogView.Show(this, vm);   // docs/312
         viewModel.ShowExcelMappingDialog = ShowExcelMappingDialog;                            // docs/300 § D-5
         // Revit 위의 모델리스 WPF 창은 떠도 WPF 키보드 포커스가 비어 있어, 사용자가 처음 클릭한 TextBox가
         // IME(TSF) 컨텍스트를 못 받는다 → 한글 조합이 깨지고 백스페이스가 텍스트 전체를 지운다(docs/182 § 2).

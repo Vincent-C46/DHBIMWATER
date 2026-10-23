@@ -404,7 +404,7 @@ public class ValveRoomViewModelTests
 
         vm.AutoPlaceCommand.Execute(null);
 
-        // 이토 DN300 → L1500·W1500. 측점 50 → 중심 (50, 0). 관저 10.0 − 0.6 = 9.4, 원지반 15.0 − 0.25 = 14.75, 상부슬래브 400.
+        // 이토 DN300 → L1500·W1500. 측점 50 → 중심 (50, 0). 표고 10.0 = 관중심 → 관저 9.85 − 0.6 = 9.25, 원지반 15.0 − 0.25 = 14.75, 상부슬래브 400.
         Assert.Equal("이토밸브실", vm.SelectedValveRoomType);
         Assert.Equal("0+050", vm.StationPoint);
         Assert.Equal(1500d, vm.InnerLength);
@@ -412,10 +412,37 @@ public class ValveRoomViewModelTests
         Assert.Equal(49.25d, vm.SharedCoordinateX, 4);
         Assert.Equal(-0.75d, vm.SharedCoordinateY, 4);
         Assert.Equal(0d, vm.TrueNorthToProjectNorthClockwiseDegrees, 6);
-        Assert.Equal(9.4d, vm.FoundationTopEl, 6);
-        Assert.Equal(4950d, vm.InnerHeight);
+        Assert.Equal(9.25d, vm.FoundationTopEl, 6);
+        Assert.Equal(5100d, vm.InnerHeight);
         Assert.Equal("a.xlsx · 선형", vm.PlacementSourceText);
         Assert.Empty(dialog.Warnings);
+    }
+
+    [Fact]
+    public void 자동지정_뒤_LW를_바꾸면_중심을_유지하도록_좌하단을_다시_계산한다()
+    {
+        var vm = CreatePlacementViewModel(new StubDialogService(), rowIndex: 0);
+        vm.AutoPlaceCommand.Execute(null);
+
+        // 중심 (50, 0). L 10000 → X 45, W 3000 → Y −1.5.
+        vm.InnerLength = 10000;
+        vm.InnerWidth = 3000;
+
+        Assert.Equal(45d, vm.SharedCoordinateX, 4);
+        Assert.Equal(-1.5d, vm.SharedCoordinateY, 4);
+    }
+
+    [Fact]
+    public void 좌표를_손으로_고친_뒤엔_LW를_바꿔도_좌표를_건드리지_않는다()
+    {
+        var vm = CreatePlacementViewModel(new StubDialogService(), rowIndex: 0);
+        vm.AutoPlaceCommand.Execute(null);
+
+        vm.SharedCoordinateX = 10;
+        vm.InnerLength = 10000;
+
+        Assert.Equal(10d, vm.SharedCoordinateX, 4);
+        Assert.Equal(-0.75d, vm.SharedCoordinateY, 4);
     }
 
     [Fact]
@@ -423,6 +450,8 @@ public class ValveRoomViewModelTests
     {
         var dialog = new StubDialogService();
         var vm = CreatePlacementViewModel(dialog, rowIndex: 1);
+        // 기본 형식이 B형으로 바뀜(docs/311). A형 → B형 대체를 보려면 A형을 먼저 고른다.
+        vm.SelectedSluiceVariant = "A형";
 
         vm.AutoPlaceCommand.Execute(null);
 
@@ -444,7 +473,7 @@ public class ValveRoomViewModelTests
         Assert.Equal("타이밸브실", vm.SelectedValveRoomType);
         Assert.Equal(4000d, vm.InnerLength);
         Assert.Equal(2500d, vm.InnerWidth);
-        Assert.Equal(9.4d, vm.FoundationTopEl, 6);
+        Assert.Equal(9.25d, vm.FoundationTopEl, 6);
         Assert.Contains(dialog.Warnings, x => x.Contains("제원표에 타이밸브실 DN300 없음"));
     }
 
@@ -456,10 +485,146 @@ public class ValveRoomViewModelTests
 
         vm.AutoPlaceCommand.Execute(null);
 
-        // 관중심 10.0 + 0.15 = 10.15, 깊이 프리셋 250 → 10.4. (14.75 − 10.4) × 1000 − 400 = 3950.
-        Assert.Equal(10.4d, vm.FoundationTopEl, 6);
-        Assert.Equal(3950d, vm.InnerHeight);
+        // 표고 10.0 = 관중심, Hp = 200 + 300/2 = 350(docs/311) → 10.35. (14.75 − 10.35) × 1000 − 400 = 4000.
+        Assert.Equal(10.35d, vm.FoundationTopEl, 6);
+        Assert.Equal(4000d, vm.InnerHeight, 6);
         Assert.Equal(300d, vm.MainPipeDiameter);
+        Assert.Equal(800d, vm.FoundationThickness);
+        Assert.Equal(350d, vm.FoundationTopToPipeCenterDepth);
+    }
+
+    [Fact]
+    public void 창을_열면_이토_DN1200_제원표_치수가_들어간다()
+    {
+        var vm = CreateViewModel(new StubElementTypeQueryRepo());
+
+        Assert.Equal("이토밸브실", vm.SelectedValveRoomType);
+        Assert.Equal(3000d, vm.InnerLength);
+        Assert.Equal(2500d, vm.InnerWidth);
+        Assert.Equal(4500d, vm.InnerHeight);
+        Assert.Equal(1500d, vm.IntermediateWallOffset);
+        Assert.Equal(1200d, vm.PlacementPipeDiameter);
+    }
+
+    [Fact]
+    public void 제수로_바꾸면_DN1650_B형_제원표_치수가_들어간다()
+    {
+        var vm = CreateViewModel(new StubElementTypeQueryRepo());
+
+        vm.SelectedValveRoomType = "제수밸브실";
+
+        Assert.Equal(7000d, vm.InnerLength);
+        Assert.Equal(5000d, vm.InnerWidth);
+        Assert.Equal(4000d, vm.InnerHeight);
+        Assert.Equal("B형", vm.SelectedSluiceVariant);
+        Assert.Equal(1650d, vm.PlacementPipeDiameter);
+    }
+
+    [Fact]
+    public void 공기로_바꾸면_DN1650_제원표_치수와_기초두께_Hp가_들어간다()
+    {
+        var vm = CreateViewModel(new StubElementTypeQueryRepo());
+
+        vm.SelectedValveRoomType = "공기밸브실";
+
+        Assert.Equal(2000d, vm.InnerLength);
+        Assert.Equal(2200d, vm.InnerWidth);
+        Assert.Equal(1900d, vm.InnerHeight);
+        Assert.Equal(1650d, vm.MainPipeDiameter);
+        Assert.Equal(2150d, vm.FoundationThickness);
+        Assert.Equal(1025d, vm.FoundationTopToPipeCenterDepth);
+    }
+
+    [Fact]
+    public void 공기_본관직경을_바꾸면_기초두께와_Hp가_따라간다()
+    {
+        var vm = CreateViewModel(new StubElementTypeQueryRepo());
+        vm.SelectedValveRoomType = "공기밸브실";
+
+        vm.MainPipeDiameter = 800;
+
+        Assert.Equal(1300d, vm.FoundationThickness);
+        Assert.Equal(600d, vm.FoundationTopToPipeCenterDepth);
+    }
+
+    [Fact]
+    public void 제원표_값은_사용자가_고칠_수_있다()
+    {
+        var vm = CreateViewModel(new StubElementTypeQueryRepo());
+        vm.SelectedValveRoomType = "공기밸브실";
+
+        vm.InnerLength = 2500;
+        vm.FoundationThickness = 2000;
+
+        Assert.Equal(2500d, vm.InnerLength);
+        Assert.Equal(2000d, vm.FoundationThickness);
+    }
+
+    [Fact]
+    public void 공기에서_이토로_바꾸면_기초두께가_500으로_돌아간다()
+    {
+        var vm = CreateViewModel(new StubElementTypeQueryRepo());
+        vm.SelectedValveRoomType = "공기밸브실";
+
+        vm.SelectedValveRoomType = "이토밸브실";
+
+        Assert.Equal(500d, vm.FoundationThickness);
+    }
+
+    [Fact]
+    public void 타이는_제원표가_없어_기존_프리셋을_쓴다()
+    {
+        var vm = CreateViewModel(new StubElementTypeQueryRepo());
+
+        vm.SelectedValveRoomType = "타이밸브실";
+
+        Assert.Equal(4000d, vm.InnerLength);
+        Assert.Equal(2500d, vm.InnerWidth);
+        Assert.Equal(2500d, vm.InnerHeight);
+    }
+
+    [Fact]
+    public void 엑셀_행을_고른_뒤엔_유형을_바꿔도_행_관경을_유지한다()
+    {
+        var dialog = new StubDialogService();
+        var vm = CreatePlacementViewModel(dialog, rowIndex: 0);
+        vm.AutoPlaceCommand.Execute(null);
+
+        vm.SelectedValveRoomType = "제수밸브실";
+        vm.ResetCommand.Execute(null);
+
+        Assert.Equal(300d, vm.PlacementPipeDiameter);
+    }
+
+    [Fact]
+    public void 관저고_기초상면_거리를_바꾸면_기초상면에_반영한다()
+    {
+        var dialog = new StubDialogService();
+        var vm = CreatePlacementViewModel(dialog, rowIndex: 0);
+        vm.InvertToFoundationTopMm = 800;
+
+        vm.AutoPlaceCommand.Execute(null);
+
+        // 관저 9.85 − 0.8 = 9.05.
+        Assert.Equal(9.05d, vm.FoundationTopEl, 6);
+        Assert.Contains("800", vm.PlacementRuleText);
+    }
+
+    [Fact]
+    public void 고른_행과_측점이_다르면_경고하고_칸을_바꾸지_않는다()
+    {
+        var dialog = new StubDialogService();
+        var vm = CreatePlacementViewModel(dialog, rowIndex: 0);
+        vm.AutoPlaceCommand.Execute(null);
+        var foundationTop = vm.FoundationTopEl;
+        vm.FoundationTopEl = 0;
+
+        vm.StationPoint = "0+060";
+        vm.AutoPlaceCommand.Execute(null);
+
+        Assert.Equal(9.25d, foundationTop, 6);
+        Assert.Equal(0d, vm.FoundationTopEl);
+        Assert.Contains(dialog.Warnings, x => x.Contains("측점이 엑셀에서 고른 행(0+050)과 다릅니다"));
     }
 
     [Fact]
@@ -500,6 +665,50 @@ public class ValveRoomViewModelTests
         Assert.Empty(dialog.Warnings);
     }
 
+    [Fact]
+    public void 문서에_저장된_표가_있으면_밸브실_창_기본값이_그_표를_쓴다()
+    {
+        var repo = new StubCatalogRepo
+        {
+            Stored = new DHBIMWATER.Core.Structures.ValveRoomDimensionTable([new DHBIMWATER.Core.Structures.ValveRoomStandardDimension("이토밸브실", null, 4, 1200, 3300, 2600, 4700, "")]),
+        };
+
+        var vm = new ValveRoomViewModel(new StubDialogService(), new StubElementTypeQueryRepo(), new StubProjectInformationQueryRepo(),
+            dimensionCatalogRepo: repo);
+
+        Assert.Equal(3300d, vm.InnerLength);
+        Assert.Equal(2600d, vm.InnerWidth);
+        Assert.Equal(4700d, vm.InnerHeight);
+    }
+
+    [Fact]
+    public void 제원표_창에서_저장하면_다음_기본값부터_새_표를_쓴다()
+    {
+        var repo = new StubCatalogRepo();
+        var vm = new ValveRoomViewModel(new StubDialogService(), new StubElementTypeQueryRepo(), new StubProjectInformationQueryRepo(),
+            dimensionCatalogRepo: repo);
+        vm.DimensionCatalogLauncher.ShowDialog = dialog =>
+        {
+            dialog.VisibleRows.Single(x => x.DiameterMm == 1200).LengthMm = 3300;
+            return true;
+        };
+
+        vm.DimensionCatalogLauncher.OpenCommand.Execute(null);
+        // 저장만으로는 입력칸을 안 바꾼다.
+        Assert.Equal(3000d, vm.InnerLength);
+
+        vm.ResetCommand.Execute(null);
+        Assert.Equal(3300d, vm.InnerLength);
+    }
+
+    /// <summary>문서 제원표 저장소 스텁(docs/312).</summary>
+    private sealed class StubCatalogRepo : IValveRoomDimensionCatalogRepo
+    {
+        public DHBIMWATER.Core.Structures.ValveRoomDimensionTable? Stored { get; set; }
+        public DHBIMWATER.Core.Structures.ValveRoomDimensionTable? Load() => Stored;
+        public void Save(DHBIMWATER.Core.Structures.ValveRoomDimensionTable table) => Stored = table;
+    }
+
     private static ValveRoomViewModel CreatePlacementViewModel(StubDialogService dialog, int rowIndex = 0)
     {
         var reader = new StubProfileReader();
@@ -534,7 +743,7 @@ public class ValveRoomViewModelTests
             Assert.Equal((4, 5, 6), (mapping.VertexDiameterColumnIndex, mapping.ValveRoomTypeColumnIndex, mapping.GroundElColumnIndex));
             return new([new AlignmentProfileRow(0, 0, 0, 10), new AlignmentProfileRow(100, 100, 0, 11)], []);
         }
-        public ValveRoomListReadResult ReadValveRoomList(string filePath, ExcelAlignmentMapping mapping) => new("선형",
+        public ValveRoomListReadResult ReadValveRoomList(string filePath, ExcelAlignmentMapping mapping, int? cumulativeDistanceColumn = null) => new("선형",
         [
             new ValveRoomListRow(2, "이토밸브실", "0+050", 300, 10.0, 15.0),
             new ValveRoomListRow(3, "제수밸브실", "0+050", 600, 10.0, 15.0),

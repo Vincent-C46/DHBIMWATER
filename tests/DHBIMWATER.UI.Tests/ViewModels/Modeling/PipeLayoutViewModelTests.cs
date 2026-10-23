@@ -831,12 +831,43 @@ public sealed class PipeLayoutViewModelTests
     }
 
     [Fact]
-    public void Segment_length_parameter_keeps_existing_first_length_fallback()
+    public void Segment_length_parameter_fallback_skips_bolt_names()
     {
         var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(
             segmentParameterNames: ["볼트내밈길이", "관길이"]));
 
-        Assert.Equal("볼트내밈길이", vm.LengthParameterName);
+        Assert.Equal("관길이", vm.LengthParameterName);
+    }
+
+    [Fact]
+    public void Segment_length_parameter_is_null_when_only_bolt_names()
+    {
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(
+            segmentParameterNames: ["볼트내밈_길이"]));
+
+        Assert.Null(vm.LengthParameterName);
+    }
+
+    [Fact]
+    public void Saved_bolt_length_parameter_is_ignored_and_guess_kept()
+    {
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(
+            segmentParameterNames: ["볼트내밈_길이", "직관_길이"]));
+
+        vm.ApplyFamilySettings(PipeLayoutFamilySettings.Empty with { LengthParameterName = "볼트내밈_길이" }, fromStorage: true);
+
+        Assert.Equal("직관_길이", vm.LengthParameterName);
+    }
+
+    [Fact]
+    public void User_can_still_pick_bolt_length_parameter_directly()
+    {
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(
+            segmentParameterNames: ["볼트내밈_길이", "직관_길이"]));
+
+        vm.LengthParameterName = "볼트내밈_길이";
+
+        Assert.Equal("볼트내밈_길이", vm.LengthParameterName);
     }
 
     [Fact]

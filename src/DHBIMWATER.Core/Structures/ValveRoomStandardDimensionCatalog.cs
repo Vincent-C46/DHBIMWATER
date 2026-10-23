@@ -17,7 +17,7 @@ public sealed record ValveRoomStandardDimension(
 
 /// <summary>상수도시설 밸브실 표준도 설계설명서 표 4.1~4.6 제원(docs/02 PDF, docs/304).
 /// <para>타이밸브실 표 없음 — 사용자 결정으로 비워 둠. 찾으면 null.</para>
-/// <para>새 유형 추가 = <see cref="Tables"/>에 표 1개 추가. 조회 코드 수정 불필요.</para></summary>
+/// <para>새 유형 추가 = <see cref="Default"/>에 표 1개 추가. 조회 코드 수정 불필요.</para></summary>
 public static class ValveRoomStandardDimensionCatalog
 {
     public const string Sluice = "제수밸브실";
@@ -32,10 +32,8 @@ public static class ValveRoomStandardDimensionCatalog
     public const string Electromagnetic = "전자식";
     public const string Ultrasonic = "초음파";
 
-    private const double DiameterTolerance = 0.5;
-
-    // TODO(docs/304): 사용자 편집 제원표(설정 Repository)가 생기면 이 내장 표 앞에 끼워 넣는다.
-    private static readonly IReadOnlyList<ValveRoomStandardDimension> Tables =
+    /// <summary>내장 표준표. 사용자 편집본은 문서 DataStorage에 따로 저장된다(docs/312) — 이 표는 안 바뀜.</summary>
+    public static ValveRoomDimensionTable Default { get; } = new(
     [
         .. SluiceTable(),
         .. MudTable(),
@@ -43,27 +41,19 @@ public static class ValveRoomStandardDimensionCatalog
         .. AirTable(),
         .. FlowMeterTable(),
         .. FlowMeterWithLabTable(),
-    ];
+    ]);
 
-    public static IReadOnlyList<ValveRoomStandardDimension> Entries => Tables;
+    public static IReadOnlyList<ValveRoomStandardDimension> Entries => Default.Entries;
 
     /// <summary>표가 있는 유형 이름. 표 순서 유지.</summary>
-    public static IReadOnlyList<string> RoomKinds { get; } = Tables.Select(x => x.RoomKind).Distinct().ToList();
+    public static IReadOnlyList<string> RoomKinds { get; } = Default.RoomKinds;
 
     /// <summary>유형의 비고 형식 목록. 표 순서라 첫 값이 기본값. 형식 없는 유형이면 빈 목록.</summary>
-    public static IReadOnlyList<string> Variants(string? roomKind)
-        => Tables.Where(x => x.RoomKind == roomKind && x.Variant is not null).Select(x => x.Variant!).Distinct().ToList();
+    public static IReadOnlyList<string> Variants(string? roomKind) => Default.Variants(roomKind);
 
-    /// <summary>유형 + 관경으로 제원 1행을 찾는다. 없으면 null(타이밸브실·표 밖 관경).
-    /// <para>요청 형식에 그 관경이 없으면 같은 유형의 다른 형식으로 넘어간다 — 제수 A형은 DN350까지라
-    /// DN400 이상은 B형뿐이다. 실제 적용 형식은 결과의 <see cref="ValveRoomStandardDimension.Variant"/>로 확인.</para></summary>
+    /// <summary>내장 표준표에서 찾는다. 규칙은 <see cref="ValveRoomDimensionTable.Find"/>.</summary>
     public static ValveRoomStandardDimension? Find(string? roomKind, double diameterMm, string? variant = null)
-    {
-        if (string.IsNullOrWhiteSpace(roomKind) || !double.IsFinite(diameterMm)) return null;
-        var matches = Tables.Where(x => x.RoomKind == roomKind && Math.Abs(x.DiameterMm - diameterMm) <= DiameterTolerance).ToList();
-        if (matches.Count == 0) return null;
-        return matches.FirstOrDefault(x => x.Variant == variant) ?? matches[0];
-    }
+        => Default.Find(roomKind, diameterMm, variant);
 
     // 표 4.1 제수밸브실. 구분 1 = A형, 2~12 = B형.
     private static IEnumerable<ValveRoomStandardDimension> SluiceTable()

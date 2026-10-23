@@ -4,6 +4,7 @@ using DHBIMWATER.Core.Gis;
 using DHBIMWATER.Core.Parameters;
 using DHBIMWATER.Core.Piping;
 using DHBIMWATER.Application.Interfaces.Piping;
+using DHBIMWATER.Infrastructure.Helpers;
 using PipeJointMemberInput = DHBIMWATER.Application.DTOs.Piping.PipeJointMemberInput;
 using PipeJointEndInput = DHBIMWATER.Application.DTOs.Piping.PipeJointEndInput;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
@@ -15,7 +16,7 @@ internal static class PipeJointEndReader
 {
     /// <summary>패스 입력과, 결과를 쓸 요소 표.</summary>
     public sealed record Snapshot(IReadOnlyList<PipeJointMemberInput> Members, IReadOnlyList<PipeJointEndInput> Ends,
-        IReadOnlyDictionary<long, Element> Elements, bool IsValveRoom);
+        IReadOnlyDictionary<long, Element> Elements, bool IsValveRoom, IReadOnlyList<string> Warnings);
 
     private static readonly Regex DiameterNumber = new(@"\d+(\.\d+)?", RegexOptions.Compiled);
 
@@ -24,11 +25,13 @@ internal static class PipeJointEndReader
         var members = new List<PipeJointMemberInput>();
         var ends = new List<PipeJointEndInput>();
         var elements = new Dictionary<long, Element>();
+        var warnings = new List<string>();
 
         ReadPipingFittings(document, members, ends, elements);
         ReadAdaptivePipes(document, rules, members, ends, elements);
+        ReadReducerDirectShapes(document, rules, members, ends, elements, warnings);
 
-        return new Snapshot(members, ends, elements, IsValveRoom(document));
+        return new Snapshot(members, ends, elements, IsValveRoom(document), warnings);
     }
 
     /// <summary>밸브실 문서인지 — 프로젝트 정보 `밸브실유형`이 채워져 있으면 그렇다(docs/266 § 1-3). 짝 없는 플랜지 판정이 갈린다.</summary>
@@ -115,6 +118,63 @@ internal static class PipeJointEndReader
             }
         }
     }
+
+    /// <summary>계획관로 이경관 DirectShape(docs/305 § 3-2). 배치점·커넥터가 없어 끝단은 형상 원호 중심에서 찾고(<see cref="ReducerEndLocator"/>),
+    /// 짝은 위치 일치로만 찾는다. Adaptive와 같은 이유로 플랜지 구성인 부재만 넣는다.</summary>
+    private static void ReadReducerDirectShapes(Document document, IPipeQuantityRules rules, List<PipeJointMemberInput> members,
+        List<PipeJointEndInput> ends, Dictionary<long, Element> elements, List<string> warnings)
+    {
+        var shapes = new FilteredElementCollector(document)
+            .OfCategory(BuiltInCategory.OST_GenericModel)
+            .OfClass(typeof(DirectShape))
+            .Cast<DirectShape>();
+        var unresolved = new List<long>();
+        foreach (var shape in shapes)
+        {
+            if (!string.Equals(shape.LookupParameter(PipeAlignmentParameters.Addin)?.AsString(), PipeAlignmentParameters.AddinValue, StringComparison.Ordinal)) continue;
+            var part = shape.LookupParameter(PipeAlignmentParameters.Part)?.AsString();
+            if (!string.Equals(part, PipeAlignmentParameters.ReducerPartValue, StringComparison.Ordinal)) continue;
+            var composition = shape.LookupParameter(PipeAlignmentParameters.JointComposition)?.AsString();
+            if (rules.DecodeComposition(composition).Flange <= 0) continue;
+
+            var id = shape.Id.Value;
+            var diameters = DiametersFromText(shape.LookupParameter(PipeAlignmentParameters.NominalDiameter)?.AsString());
+            var located = ReducerEndLocator.Locate(ArcsOf(shape));
+            if (located is null || diameters.Count < 2)
+            {
+                unresolved.Add(id);
+                continue;
+            }
+
+            var large = diameters.Max();
+            var small = diameters.Min();
+            members.Add(new PipeJointMemberInput(id, false, part, composition, large,
+                MaterialCode: MaterialCodeOf(shape.LookupParameter(PipeAlignmentParameters.Material)?.AsString())));
+            elements[id] = shape;
+            ends.Add(new PipeJointEndInput(id, 0, located.Large.X, located.Large.Y, located.Large.Z, large));
+            ends.Add(new PipeJointEndInput(id, 1, located.Small.X, located.Small.Y, located.Small.Z, small));
+        }
+        if (unresolved.Count > 0)
+            warnings.Add($"이경관 단부를 형상에서 찾지 못해 플랜지 연결에서 뺐습니다: {string.Join(", ", unresolved.Take(10))}{(unresolved.Count > 10 ? " …" : string.Empty)}");
+    }
+
+    private static IEnumerable<ReducerArc> ArcsOf(Element element)
+    {
+        foreach (var solid in RevitGeometryHelper.GetSolids(element))
+        foreach (Edge edge in solid.Edges)
+            if (edge.AsCurve() is Arc arc)
+                yield return new ReducerArc(new DHBIMWATER.Core.Geometry.Point3D(UC.FtToMm(arc.Center.X), UC.FtToMm(arc.Center.Y), UC.FtToMm(arc.Center.Z)),
+                    UC.FtToMm(arc.Radius));
+    }
+
+    /// <summary>`DN600×300`의 숫자 전부. 못 읽은 조각은 버린다.</summary>
+    private static List<double> DiametersFromText(string? text)
+        => text is null
+            ? []
+            : DiameterNumber.Matches(text).Cast<Match>()
+                .Select(match => double.TryParse(match.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : 0d)
+                .Where(value => value > 0d)
+                .ToList();
 
     /// <summary>`DH_호칭지름`(`DN300`)의 첫 숫자. 이경관(`DN600×300`)은 큰 쪽이 앞이다. 못 읽으면 0.</summary>
     private static double DiameterFromText(string? text)

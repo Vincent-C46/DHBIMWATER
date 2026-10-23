@@ -52,20 +52,42 @@ public sealed class ExcelAlignmentMappingViewModelTests
         Assert.False(vm.CanConfirm);
     }
 
-    private sealed class StubReader : IExcelAlignmentSourceReader
+    [Fact]
+    public void 밸브실모드_XY를_추정하면_기타열을_접어둔다()
+    {
+        var vm = new ExcelAlignmentMappingViewModel(new StubReader(), new StubDialog(), "sample.xlsx") { IsValveRoomMode = true };
+
+        vm.Sheets[0].IsChecked = true;
+
+        Assert.False(vm.IsOtherColumnsExpanded);
+        Assert.Equal("표고 (관중심) *", vm.ZLabel);
+    }
+
+    [Fact]
+    public void 밸브실모드_Y를_못_찾으면_기타열을_펼친다()
+    {
+        var vm = new ExcelAlignmentMappingViewModel(new StubReader([" East ", "북쪽", "표 고", "측점", "사용자 X", "곡관유형"]), new StubDialog(), "sample.xlsx") { IsValveRoomMode = true };
+
+        vm.Sheets[0].IsChecked = true;
+
+        Assert.Null(vm.YColumn);
+        Assert.True(vm.IsOtherColumnsExpanded);
+    }
+
+    private sealed class StubReader(string?[]? header = null) : IExcelAlignmentSourceReader
     {
         public bool CanRead(string filePath) => true;
         public IReadOnlyList<string> GetSheetNames(string filePath) => ["관로1", "관로2"];
         public IReadOnlyList<IReadOnlyList<string?>> PreviewRows(string filePath, string sheetName, int maxRows) =>
         [
-            [" East ", "NORTH", "표 고", "측점", "사용자 X", "곡관유형"],
+            header ?? [" East ", "NORTH", "표 고", "측점", "사용자 X", "곡관유형"],
             ["1", "2", "3", "0+000", "4", ""],
             ["5", "6", "7", "0+010", "8", "45˚"]
         ];
         public ShapefileReadResult Read(string filePath) => throw new NotSupportedException();
         public ShapefileReadResult Read(string filePath, ExcelAlignmentMapping mapping) => throw new NotSupportedException();
         public AlignmentProfileReadResult ReadProfile(string filePath, ExcelAlignmentMapping mapping) => throw new NotSupportedException();
-        public ValveRoomListReadResult ReadValveRoomList(string filePath, ExcelAlignmentMapping mapping) => throw new NotSupportedException();
+        public ValveRoomListReadResult ReadValveRoomList(string filePath, ExcelAlignmentMapping mapping, int? cumulativeDistanceColumn = null) => throw new NotSupportedException();
     }
 
     private sealed class StubDialog : IDialogService
