@@ -105,6 +105,9 @@ public class ValveRoomViewModel : ViewModelBase
     private int _beamCountY = 1;
     private double _beamOffsetY = 1000;
     private double _beamSpacingY = 1000;
+    // 사용자가 직접 고친 칸. true면 자동 계산(보 균등·중간벽 중앙·H1=H2)이 안 덮음. 유형 변경·[기본값]에서 해제.
+    private bool _beamOffsetXPinned, _beamSpacingXPinned, _beamOffsetYPinned, _beamSpacingYPinned;
+    private bool _intermediateWallOffsetPinned, _floor1InnerHeightPinned, _floor2InnerHeightPinned;
 
     private double _sharedCoordinateX;
     private double _sharedCoordinateY;
@@ -368,21 +371,22 @@ public class ValveRoomViewModel : ViewModelBase
     public double FoundationTopToPipeCenterDepth { get => _foundationTopToPipeCenterDepth; set => SetAndRefresh(ref _foundationTopToPipeCenterDepth, value); }
     public string SelectedVoidAxis { get => _selectedVoidAxis; set => SetAndRefresh(ref _selectedVoidAxis, value); }
     public double OuterWallThickness { get => _outerWallThickness; set => SetAndRefresh(ref _outerWallThickness, value); }
-    public double IntermediateWallThickness { get => _intermediateWallThickness; set => SetProperty(ref _intermediateWallThickness, value); }
+    public double IntermediateWallThickness { get => _intermediateWallThickness; set { if (SetProperty(ref _intermediateWallThickness, value)) ApplyAutoLayout(); } }
     public double UpperSlabThickness { get => _upperSlabThickness; set => SetProperty(ref _upperSlabThickness, value); }
-    public double IntermediateSlabThickness { get => _intermediateSlabThickness; set => SetProperty(ref _intermediateSlabThickness, value); }
-    public double InnerWidth { get => _innerWidth; set { SetAndRefresh(ref _innerWidth, value); ReanchorPlacementCorner(); } }
-    public double InnerLength { get => _innerLength; set { SetAndRefresh(ref _innerLength, value); ReanchorPlacementCorner(); } }
-    public double InnerHeight { get => _innerHeight; set => SetAndRefresh(ref _innerHeight, value); }
-    public double IntermediateWallOffset { get => _intermediateWallOffset; set => SetAndRefresh(ref _intermediateWallOffset, value); }
-    public double Floor1InnerHeight { get => _floor1InnerHeight; set => SetAndRefresh(ref _floor1InnerHeight, value); }
-    public double Floor2InnerHeight { get => _floor2InnerHeight; set => SetAndRefresh(ref _floor2InnerHeight, value); }
-    public int BeamCountX { get => _beamCountX; set => SetAndRefresh(ref _beamCountX, Math.Max(0, value)); }
-    public double BeamOffsetX { get => _beamOffsetX; set => SetProperty(ref _beamOffsetX, value); }
-    public double BeamSpacingX { get => _beamSpacingX; set => SetProperty(ref _beamSpacingX, value); }
-    public int BeamCountY { get => _beamCountY; set => SetAndRefresh(ref _beamCountY, Math.Max(0, value)); }
-    public double BeamOffsetY { get => _beamOffsetY; set => SetProperty(ref _beamOffsetY, value); }
-    public double BeamSpacingY { get => _beamSpacingY; set => SetProperty(ref _beamSpacingY, value); }
+    public double IntermediateSlabThickness { get => _intermediateSlabThickness; set { if (SetProperty(ref _intermediateSlabThickness, value)) ApplyAutoLayout(); } }
+    public double InnerWidth { get => _innerWidth; set { SetAndRefresh(ref _innerWidth, value); ApplyAutoLayout(); ReanchorPlacementCorner(); } }
+    public double InnerLength { get => _innerLength; set { SetAndRefresh(ref _innerLength, value); ApplyAutoLayout(); ReanchorPlacementCorner(); } }
+    public double InnerHeight { get => _innerHeight; set { SetAndRefresh(ref _innerHeight, value); ApplyAutoLayout(); } }
+    // 아래 칸은 손으로 고치면 pin — 자동 계산이 더는 안 덮는다. 짝 칸(Ox↔Sx, H1↔H2)은 남은 값으로 다시 맞춘다.
+    public double IntermediateWallOffset { get => _intermediateWallOffset; set => SetPinned(ref _intermediateWallOffset, value, ref _intermediateWallOffsetPinned); }
+    public double Floor1InnerHeight { get => _floor1InnerHeight; set => SetPinned(ref _floor1InnerHeight, value, ref _floor1InnerHeightPinned); }
+    public double Floor2InnerHeight { get => _floor2InnerHeight; set => SetPinned(ref _floor2InnerHeight, value, ref _floor2InnerHeightPinned); }
+    public int BeamCountX { get => _beamCountX; set { SetAndRefresh(ref _beamCountX, Math.Max(0, value)); ApplyAutoLayout(); } }
+    public double BeamOffsetX { get => _beamOffsetX; set => SetPinned(ref _beamOffsetX, value, ref _beamOffsetXPinned); }
+    public double BeamSpacingX { get => _beamSpacingX; set => SetPinned(ref _beamSpacingX, value, ref _beamSpacingXPinned); }
+    public int BeamCountY { get => _beamCountY; set { SetAndRefresh(ref _beamCountY, Math.Max(0, value)); ApplyAutoLayout(); } }
+    public double BeamOffsetY { get => _beamOffsetY; set => SetPinned(ref _beamOffsetY, value, ref _beamOffsetYPinned); }
+    public double BeamSpacingY { get => _beamSpacingY; set => SetPinned(ref _beamSpacingY, value, ref _beamSpacingYPinned); }
 
     // 손으로 고친 좌표·도북각은 자동지정 중심과 무관 — 중심 기억 해제.
     public double SharedCoordinateX { get => _sharedCoordinateX; set { if (SetProperty(ref _sharedCoordinateX, value)) _placementCenter = null; } }
@@ -429,6 +433,7 @@ public class ValveRoomViewModel : ViewModelBase
         set
         {
             if (!SetProperty(ref _hasIntermediateSlab, value)) return;
+            ApplyAutoLayout();
             OnPropertyChanged(nameof(IntermediateSlabVisibility));
             OnPropertyChanged(nameof(SingleHeightVisibility));
             OnPropertyChanged(nameof(Summary));
@@ -515,9 +520,9 @@ public class ValveRoomViewModel : ViewModelBase
             _foundationToe = 300; _foundationThickness = 500;
             // 타이밸브실은 중간벽·중간슬래브를 쓰지 않는다(docs/144 § 1). 유형이 바뀔 때마다 이 프리셋이
             // 다시 도는 덕에 "이토에서 켠 중간슬래브"가 타이로 넘어가지 않는다.
-            // 중간벽 오프셋은 L 정한 뒤 계산.
+            // 중간벽 오프셋은 아래 ApplyAutoLayout이 L·Tw로 정중앙 계산.
             ApplyStandardDimension(standard);
-            _hasIntermediateWall = !IsTie; _intermediateWallOffset = _innerLength / 2; _hasIntermediateSlab = false;
+            _hasIntermediateWall = !IsTie; _hasIntermediateSlab = false;
         }
         else if (IsSluice)
         {
@@ -540,6 +545,11 @@ public class ValveRoomViewModel : ViewModelBase
             _hasIntermediateWall = false; _hasIntermediateSlab = false;
         }
 
+        // 유형 변경·[기본값] = 손 수정 해제 후 자동 치수 다시.
+        _beamOffsetXPinned = _beamSpacingXPinned = _beamOffsetYPinned = _beamSpacingYPinned = false;
+        _intermediateWallOffsetPinned = _floor1InnerHeightPinned = _floor2InnerHeightPinned = false;
+        ApplyAutoLayout();
+
         OnPropertyChanged(nameof(InnerWidth));
         OnPropertyChanged(nameof(InnerLength));
         OnPropertyChanged(nameof(InnerHeight));
@@ -557,6 +567,36 @@ public class ValveRoomViewModel : ViewModelBase
         OnPropertyChanged(nameof(SingleHeightVisibility));
         OnPropertyChanged(nameof(Summary));
         ReanchorPlacementCorner();
+    }
+
+    /// <summary>보 Ox·Sx·Oy·Sy 균등분배, 중간벽 Lw 정중앙, 중간슬래브 H1=H2. pin된 칸은 안 덮는다.</summary>
+    private void ApplyAutoLayout()
+    {
+        // X방향 보는 내부 폭(W)에, Y방향 보는 내부 길이(L)에 놓인다(ValveRoomGeometryCalculator.CalculateBeams).
+        var (ox, sx) = ValveRoomLayoutDefaults.EqualBeamLayout(_beamCountX, _innerWidth, _beamOffsetX, _beamOffsetXPinned, _beamSpacingX, _beamSpacingXPinned);
+        var (oy, sy) = ValveRoomLayoutDefaults.EqualBeamLayout(_beamCountY, _innerLength, _beamOffsetY, _beamOffsetYPinned, _beamSpacingY, _beamSpacingYPinned);
+        SetAuto(ref _beamOffsetX, ox, nameof(BeamOffsetX));
+        SetAuto(ref _beamSpacingX, sx, nameof(BeamSpacingX));
+        SetAuto(ref _beamOffsetY, oy, nameof(BeamOffsetY));
+        SetAuto(ref _beamSpacingY, sy, nameof(BeamSpacingY));
+        if (!_intermediateWallOffsetPinned)
+            SetAuto(ref _intermediateWallOffset, ValveRoomLayoutDefaults.CenteredIntermediateWallOffset(_innerLength, _intermediateWallThickness), nameof(IntermediateWallOffset));
+        var (h1, h2) = ValveRoomLayoutDefaults.SplitFloorHeights(_innerHeight, _intermediateSlabThickness,
+            _floor1InnerHeight, _floor1InnerHeightPinned, _floor2InnerHeight, _floor2InnerHeightPinned);
+        SetAuto(ref _floor1InnerHeight, h1, nameof(Floor1InnerHeight));
+        SetAuto(ref _floor2InnerHeight, h2, nameof(Floor2InnerHeight));
+        OnPropertyChanged(nameof(Summary));
+    }
+
+    // 자동 값은 화면 표기(소수 3자리)에 맞춰 반올림. 세터 안 거침 — pin 안 걸림.
+    private void SetAuto(ref double field, double value, string propertyName) => SetProperty(ref field, Math.Round(value, 3), propertyName);
+
+    private void SetPinned(ref double field, double value, ref bool pinned, [System.Runtime.CompilerServices.CallerMemberName] string? propertyName = null)
+    {
+        if (!SetProperty(ref field, value, propertyName)) return;
+        pinned = true;
+        // 짝 칸이 남은 구간·높이를 다시 맞춘다.
+        ApplyAutoLayout();
     }
 
     /// <summary>
@@ -1004,11 +1044,17 @@ public class ValveRoomViewModel : ViewModelBase
         // setter가 지운 뒤 기억해야 한다 — 순서 바꾸지 말 것.
         _placementCenter = (resolution.Point.X, resolution.Point.Y, placement.TrueNorthToProjectNorthClockwiseDegrees);
         FoundationTopEl = placement.FoundationTopEl;
-        if (placement.Floor2InnerHeight is { } floor2) Floor2InnerHeight = floor2;
+        if (placement.Floor2InnerHeight is { } floor2)
+        {
+            // 전체 높이는 표고가 정함. 내부 높이 = H1 + Ts + H2로 넣고 H1=H2 분배는 ApplyAutoLayout에 맡김.
+            // H1·H2 둘 다 손 수정이면 합이 안 맞으므로 H2를 풀어 차이를 흡수(종전 동작과 같음).
+            if (_floor1InnerHeightPinned && _floor2InnerHeightPinned) _floor2InnerHeightPinned = false;
+            InnerHeight = Floor1InnerHeight + IntermediateSlabThickness + floor2;
+        }
         if (placement.InnerHeight is { } inner) InnerHeight = inner;
 
         var point = resolution.Point;
-        var height = placement.Floor2InnerHeight is { } h2 ? $"2F 내부 높이 {h2:N0} mm" : $"내부 높이 {placement.InnerHeight:N0} mm";
+        var height = placement.Floor2InnerHeight is not null ? $"1F 내부 높이 {Floor1InnerHeight:N0} · 2F 내부 높이 {Floor2InnerHeight:N0} mm" : $"내부 높이 {placement.InnerHeight:N0} mm";
         var dimension = standard is null
             ? $"제원표에 {SelectedValveRoomType} DN{PlacementPipeDiameter:0} 없음 — 내부 L·W 유지 ({innerLength:N0}×{innerWidth:N0} mm)"
             : $"제원표 {standard.RoomKind}{(standard.Variant is null ? string.Empty : " " + standard.Variant)} DN{standard.DiameterMm:0} → L {standard.LengthMm:N0} · W {standard.WidthMm:N0} mm (표 높이 {standard.HeightMm:N0}은 참고)";

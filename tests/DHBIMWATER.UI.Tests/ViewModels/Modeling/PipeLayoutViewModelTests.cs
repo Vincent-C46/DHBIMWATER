@@ -487,8 +487,68 @@ public sealed class PipeLayoutViewModelTests
         Assert.Equal(2, CountTicks(vm.SubLineTicks));
     }
 
+    // docs/314: 인라인 부속 중심점에서 정척을 다시 센다(폭 0).
+    [Theory]
+    [InlineData(15000, new double[0], new double[] { 6000, 12000 })]
+    [InlineData(15000, new[] { 0.5 }, new double[] { 6000, 13500 })]
+    [InlineData(30000, new[] { 0.2, 0.8 }, new double[] { 12000, 18000 })]
+    [InlineData(30000, new[] { 0.5, 0.5 }, new double[] { 6000, 12000, 21000, 27000 })]
+    public void StraightTicks_RestartAtInlineFitting(double lengthMm, double[] fittingTs, double[] expectedMm)
+    {
+        var vm = CreateDrawingViewModel();
+        vm.StraightLengthMm = 6000;
+
+        vm.ApplyPickedPiping(CreateImport(edges: [new ImportedEdge(new Point2D(0, 0), new Point2D(lengthMm, 0), 150)],
+            fittings: fittingTs.Select(t => new ImportedFitting(0, "밸브 : DN100", t)).ToList()));
+
+        Assert.Equal(expectedMm, TickDistances(vm, Assert.Single(vm.Edges)), new DoubleTolerance(1));
+    }
+
+    [Fact]
+    public void StraightTicks_FittingDrag_MovesRestartPoint()
+    {
+        var vm = CreateDrawingViewModel(["밸브 : DN100"]);
+        DisableOsnap(vm);
+        vm.StraightLengthMm = 6000;
+        Draw(vm, new Point2D(0, 0), new Point2D(20000, 0));
+        vm.SelectedFamilyTypeName = "밸브 : DN100";
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(8000, 0)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(8000, 0)));
+        vm.SelectedFamilyTypeName = null;
+        vm.Mode = PipeLayoutMode.Selection;
+        Assert.Equal([6000, 14000], TickDistances(vm, Assert.Single(vm.Edges)), new DoubleTolerance(1));
+
+        var fitting = Assert.Single(vm.InlineFittings);
+        Assert.True(vm.TryBeginFittingDrag(new Point(fitting.X, fitting.Y), fitting.Id));
+        vm.UpdateDrag(vm.Transform.ToScreen(new Point2D(10000, 0)));
+
+        Assert.Equal([6000, 16000], TickDistances(vm, Assert.Single(vm.Edges)), new DoubleTolerance(1));
+    }
+
     private static int CountTicks(System.Windows.Media.Geometry? geometry)
         => geometry is null ? 0 : System.Windows.Media.PathGeometry.CreateFromGeometry(geometry).Figures.Count;
+
+    /// <summary>눈금마다 엣지 시작점에서 눈금 중점까지 모델 거리(mm).</summary>
+    private static double[] TickDistances(PipeLayoutViewModel vm, PipeEdgeItem edge)
+    {
+        if (edge.StraightTicks is null) return [];
+        var origin = vm.Transform.ToModel(new Point(edge.X1, edge.Y1));
+        return System.Windows.Media.PathGeometry.CreateFromGeometry(edge.StraightTicks).Figures
+            .Select(f =>
+            {
+                var a = f.StartPoint;
+                var b = ((System.Windows.Media.LineSegment)f.Segments[0]).Point;
+                return vm.Transform.ToModel(new Point((a.X + b.X) / 2, (a.Y + b.Y) / 2)).DistanceTo(origin);
+            })
+            .OrderBy(x => x)
+            .ToArray();
+    }
+
+    private sealed class DoubleTolerance(double tolerance) : IEqualityComparer<double>
+    {
+        public bool Equals(double x, double y) => Math.Abs(x - y) <= tolerance;
+        public int GetHashCode(double obj) => 0;
+    }
 
     [Fact]
     public void Mode_DefaultsToDrawing()

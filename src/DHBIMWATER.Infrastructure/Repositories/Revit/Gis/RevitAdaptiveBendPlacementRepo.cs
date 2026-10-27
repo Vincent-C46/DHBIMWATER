@@ -44,6 +44,7 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
         // 패밀리별로 한 번만 경고하면 충분하다 — 절점마다 같은 파라미터 누락 메시지가 반복되면 오히려 안 읽힌다.
         var missingParameters = new HashSet<(string Family, string Type, string Parameter)>();
         var writer = new PipeParameterWriter(_rules);
+        var flangeWriter = new SteelFlangeParameterWriter();
         var catalog = info is { Enabled: true } ? _catalogSource.OpenCatalog() : null;
         var overrideWarnings = new List<string>();
         var exceededOverrides = new List<(ElementId ElementId, int NodeId)>();
@@ -162,6 +163,12 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
                     BendOrientation.ApplyProjectNorth(plan.RotXYDeg[i], origin.TrueNorthClockwiseDegrees));
                 SetRequiredAngleParameter(rotationParameters[i].Xz, plan, $"{RotationXzParameterPrefix}{i + 1}", plan.RotXZDeg[i]);
             }
+            // 단부 플랜지 가시성(docs/315). 주철관 소켓은 유형이 정함 — 안 씀.
+            PipeEndFlagWriter.Write(instance, PipeEndFlagParameters.Resolve(isBend: true,
+                PipeKindCatalog.MaterialOf(plan.PipeKind), info?.BendConnection ?? BendConnection.Socket));
+            // 강관 플랜지·볼트 치수 — 곡관 등급(F12/F15/F20)으로 조회.
+            flangeWriter.Write(instance, PipeKindCatalog.MaterialOf(plan.PipeKind),
+                info?.SteelFittingClass ?? SteelFittingClass.None, plan.DiameterMm);
             }
             // 각 곡관의 좌표·형상·회전값은 서로 독립적이고 배치 계획도 Revit 진입 전에 확정된다.
             // 2026-08-20 배치 처리 시 함께 발견된 좌표 확대는 Regenerate 타이밍이 아니라
@@ -198,6 +205,7 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
             warnings.Add($"직관 제원표에 외경 OD가 없어 곡관 형상이 패밀리 기본값으로 남은 관종/DN {missingOuterDiameter.Count}건: "
                 + string.Join(", ", missingOuterDiameter.OrderBy(x => x.PipeKind).ThenBy(x => x.DiameterMm).Select(x => $"{x.PipeKind}/DN{x.DiameterMm:0.##}")));
         warnings.AddRange(overrideWarnings);
+        if (flangeWriter.Warning("곡관") is { } flangeWarning) warnings.Add(flangeWarning);
         if (writer.Missing.Count > 0)
             warnings.Add($"프로젝트 매개변수 {string.Join(", ", writer.Missing.OrderBy(x => x))}를 곡관 인스턴스에 기록하지 못했습니다(바인딩 실패 또는 읽기전용).");
         if (info is { Enabled: true } && writer.UnmappedJointWarning is { } jointCountWarning)

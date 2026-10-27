@@ -1,5 +1,8 @@
 namespace DHBIMWATER.Core.Piping;
 
+public sealed record PipeEndComposition(int Socket, int Flange, bool HasEndFlags, bool AllOff,
+    IReadOnlyList<string> ConflictSides);
+
 /// <summary>
 /// 패밀리의 Yes/No 매개변수에서 접합 단부 수와 곡관 형식을 읽는다.
 /// <para><b>패밀리마다 분기하지 않는다.</b> `DH_플랜지_직관`은 `좌측_플랜지`·`우측_플랜지`로,
@@ -14,6 +17,72 @@ public static class PipeJointFlagReader
 {
     private const string SocketWord = "소켓";
     private const string FlangeWord = "플랜지";
+
+    /// <summary>좌·우 단부 가시성을 판독한다. 같은 단부에서 소켓과 플랜지가 모두 켜지면 플랜지로 계산한다.</summary>
+    public static PipeEndComposition? ComposeByEnd(IReadOnlyDictionary<string, bool> flags, PipeMaterial? material, int endCount)
+    {
+        var leftSocket = false;
+        var leftFlange = false;
+        var rightSocket = false;
+        var rightFlange = false;
+        var hasEndFlags = false;
+
+        foreach (var (name, value) in flags)
+        {
+            if (ParenLabel(name) is not null) continue;
+            if (name.StartsWith(PipeEndFlagParameters.LeftSocket, StringComparison.Ordinal))
+            {
+                leftSocket = value;
+                hasEndFlags = true;
+            }
+            else if (name.StartsWith(PipeEndFlagParameters.LeftFlange, StringComparison.Ordinal))
+            {
+                leftFlange = value;
+                hasEndFlags = true;
+            }
+            else if (name.StartsWith(PipeEndFlagParameters.RightSocket, StringComparison.Ordinal))
+            {
+                rightSocket = value;
+                hasEndFlags = true;
+            }
+            else if (name.StartsWith(PipeEndFlagParameters.RightFlange, StringComparison.Ordinal))
+            {
+                rightFlange = value;
+                hasEndFlags = true;
+            }
+        }
+
+        if (!hasEndFlags) return null;
+
+        var allOff = !leftSocket && !leftFlange && !rightSocket && !rightFlange;
+        var conflicts = new List<string>(2);
+        var socket = 0;
+        var flange = 0;
+        CountSide("좌측", leftSocket, leftFlange);
+        CountSide("우측", rightSocket, rightFlange);
+
+        if (allOff)
+        {
+            return new PipeEndComposition(0, 0, true, true, conflicts);
+        }
+        if (material == PipeMaterial.Steel && flange > 0)
+        {
+            socket = Math.Max(0, endCount - flange);
+        }
+
+        return new PipeEndComposition(socket, flange, true, allOff, conflicts);
+
+        void CountSide(string side, bool hasSocket, bool hasFlange)
+        {
+            if (hasSocket && hasFlange)
+            {
+                flange++;
+                conflicts.Add(side);
+            }
+            else if (hasFlange) flange++;
+            else if (hasSocket) socket++;
+        }
+    }
 
     /// <summary>
     /// 켜져 있는 단부 플래그를 센다. 정하지 못하면 null.

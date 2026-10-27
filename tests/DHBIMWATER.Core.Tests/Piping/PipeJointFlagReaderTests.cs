@@ -12,6 +12,67 @@ public sealed class PipeJointFlagReaderTests
         => flags.ToDictionary(flag => flag.Name, flag => flag.Value, StringComparer.Ordinal);
 
     [Fact]
+    public void ComposeByEnd_CountsSocketAndFlangeEnds()
+    {
+        var leftSocket = PipeJointFlagReader.ComposeByEnd(
+            Flags((PipeEndFlagParameters.LeftSocket, true)), PipeMaterial.DuctileIron, 2)!;
+        Assert.Equal((1, 0), (leftSocket.Socket, leftSocket.Flange));
+        var bothFlanges = PipeJointFlagReader.ComposeByEnd(Flags(
+            (PipeEndFlagParameters.LeftFlange, true), (PipeEndFlagParameters.RightFlange, true)), PipeMaterial.DuctileIron, 2)!;
+        Assert.Equal((0, 2), (bothFlanges.Socket, bothFlanges.Flange));
+        var twoSockets = PipeJointFlagReader.ComposeByEnd(Flags(
+            (PipeEndFlagParameters.LeftSocket, true), (PipeEndFlagParameters.RightSocket, true)), PipeMaterial.DuctileIron, 2)!;
+        Assert.Equal((2, 0), (twoSockets.Socket, twoSockets.Flange));
+    }
+
+    [Fact]
+    public void ComposeByEnd_CountsOneFlangeAndSteelRemainingEndAsSocket()
+    {
+        var castIron = PipeJointFlagReader.ComposeByEnd(Flags((PipeEndFlagParameters.LeftFlange, true)), PipeMaterial.DuctileIron, 2)!;
+        Assert.Equal((0, 1), (castIron.Socket, castIron.Flange));
+        var steel = PipeJointFlagReader.ComposeByEnd(Flags((PipeEndFlagParameters.RightFlange, true)), PipeMaterial.Steel, 2)!;
+        Assert.Equal((1, 1), (steel.Socket, steel.Flange));
+    }
+
+    [Fact]
+    public void ComposeByEnd_FlangedConflictPrefersFlangeAndReportsSide()
+    {
+        var oneSide = PipeJointFlagReader.ComposeByEnd(Flags(
+            (PipeEndFlagParameters.LeftSocket, true), (PipeEndFlagParameters.LeftFlange, true)), PipeMaterial.DuctileIron, 2)!;
+        Assert.Equal((0, 1), (oneSide.Socket, oneSide.Flange));
+        Assert.Equal(new[] { "좌측" }, oneSide.ConflictSides);
+
+        var bothSides = PipeJointFlagReader.ComposeByEnd(Flags(
+            (PipeEndFlagParameters.LeftSocket, true), (PipeEndFlagParameters.LeftFlange, true),
+            (PipeEndFlagParameters.RightSocket, true), (PipeEndFlagParameters.RightFlange, true)), PipeMaterial.DuctileIron, 2)!;
+        Assert.Equal((0, 2), (bothSides.Socket, bothSides.Flange));
+        Assert.Equal(new[] { "좌측", "우측" }, bothSides.ConflictSides);
+    }
+
+    [Fact]
+    public void ComposeByEnd_AllOffIsReportedForEveryMaterial()
+    {
+        var flags = Flags((PipeEndFlagParameters.LeftSocket, false), (PipeEndFlagParameters.RightFlange, false));
+        var castIron = PipeJointFlagReader.ComposeByEnd(flags, PipeMaterial.DuctileIron, 2)!;
+        Assert.Equal((0, 0, true), (castIron.Socket, castIron.Flange, castIron.AllOff));
+        Assert.True(castIron.HasEndFlags);
+        var steel = PipeJointFlagReader.ComposeByEnd(flags, PipeMaterial.Steel, 2)!;
+        Assert.True(steel.AllOff);
+        Assert.Equal((0, 0), (steel.Socket, steel.Flange));
+        var unknown = PipeJointFlagReader.ComposeByEnd(flags, null, 2)!;
+        Assert.Equal((0, 0), (unknown.Socket, unknown.Flange));
+        Assert.True(unknown.AllOff);
+    }
+
+    [Fact]
+    public void ComposeByEnd_ReturnsNullWithoutRecognizedSideFlags()
+    {
+        Assert.Null(PipeJointFlagReader.ComposeByEnd(Flags(("소켓곡관(A형)", true)), PipeMaterial.DuctileIron, 2));
+        Assert.Null(PipeJointFlagReader.ComposeByEnd(Flags(("분기_플랜지", true)), PipeMaterial.DuctileIron, 2));
+        Assert.Null(PipeJointFlagReader.ComposeByEnd(Flags(("기타", true)), PipeMaterial.DuctileIron, 2));
+    }
+
+    [Fact]
     public void Compose_CountsBothFlangeEnds()
         => Assert.Equal((0, 2), PipeJointFlagReader.Compose(
             Flags(("좌측_플랜지", true), ("우측_플랜지", true)), "DH_플랜지_직관", 2));

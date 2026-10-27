@@ -286,7 +286,7 @@
                             <TextBlock Text="곡관 접합 판정" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,8" Visibility="{Binding IsDirectShape, Converter={StaticResource BoolToVisibility}}"/>
                             <StackPanel Visibility="{Binding IsAdaptive, Converter={StaticResource BoolToVisibility}}">
                                     <TextBlock Text="곡관 패밀리 : 유형 (5점 가변)" Margin="0,0,0,3"/>
-                                    <ComboBox x:Name="BendFamilyCombo" ItemsSource="{Binding AdaptiveComponentTypeNames, Mode=OneWay}" SelectedItem="{Binding BendFamilyTypeName, Mode=TwoWay}">
+                                    <ComboBox x:Name="BendFamilyCombo" ItemsSource="{Binding BendFamilyTypeOptions, Mode=OneWay}" SelectedItem="{Binding BendFamilyTypeName, Mode=TwoWay}">
                                         <ComboBox.Style><Style TargetType="ComboBox" BasedOn="{StaticResource PrimaryComboBoxStyle}"><Style.Triggers><DataTrigger Binding="{Binding IsBendFamilyHighlighted}" Value="True"><Setter Property="BorderBrush" Value="#E67E22"/><Setter Property="BorderThickness" Value="2"/></DataTrigger></Style.Triggers></Style></ComboBox.Style>
                                     </ComboBox>
                                     <TextBlock Foreground="#B26B00" TextWrapping="Wrap" Margin="0,4,0,0" Text="{Binding BendPointCountNotice}" Visibility="{Binding HasBendPointCountNotice, Converter={StaticResource BoolToVisibility}}"/>
@@ -326,6 +326,7 @@
                             <ComboBox Style="{StaticResource PrimaryComboBoxStyle}"
                                       ItemsSource="{Binding BendFormOptions, Mode=OneWay}"
                                       SelectedItem="{Binding BendFormOption, Mode=TwoWay}"
+                                      IsEnabled="{Binding IsBendFormEnabled, Mode=OneWay}"
                                       ToolTip="A형: 양쪽 소켓(s=0, θ₁+θ₂) · B형: 한쪽 소켓(s=200) · 강관 미적용"/>
                             </StackPanel>
                             </StackPanel>
@@ -339,7 +340,7 @@
                                         Command="{Binding RefreshFamilyListsCommand}" ToolTip="패밀리·시스템·레벨 목록 다시 읽기"/>
                                 <TextBlock Text="직관 패밀리 : 유형 (2점 가변)" VerticalAlignment="Center"/>
                             </DockPanel>
-                            <ComboBox x:Name="StraightFamilyCombo" ItemsSource="{Binding AdaptiveComponentTypeNames, Mode=OneWay}" SelectedItem="{Binding StraightFamilyTypeName, Mode=TwoWay}">
+                            <ComboBox x:Name="StraightFamilyCombo" ItemsSource="{Binding StraightFamilyTypeOptions, Mode=OneWay}" SelectedItem="{Binding StraightFamilyTypeName, Mode=TwoWay}">
                                 <ComboBox.Style><Style TargetType="ComboBox" BasedOn="{StaticResource PrimaryComboBoxStyle}"><Style.Triggers><DataTrigger Binding="{Binding IsStraightFamilyHighlighted}" Value="True"><Setter Property="BorderBrush" Value="#E67E22"/><Setter Property="BorderThickness" Value="2"/></DataTrigger></Style.Triggers></Style></ComboBox.Style>
                             </ComboBox>
                             <TextBlock Foreground="#B26B00" TextWrapping="Wrap" Margin="0,4,0,0" Text="{Binding StraightPointCountNotice}" Visibility="{Binding HasStraightPointCountNotice, Converter={StaticResource BoolToVisibility}}"/>

@@ -2614,24 +2614,24 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     /// <summary>한 선에 그릴 정척 눈금 상한. 정척을 1mm처럼 잘못 넣고 긴 선을 그리면 눈금이 수만 개가 돼 UI가 멈춘다.</summary>
     private const int MaxStraightLengthTicks = 500;
 
-    /// <summary>정척 길이마다 SubLine A–B를 잇는 수직보조선(docs/245). 시작점부터 단순 간격이며
-    /// 부속 폭은 무시한다 — 실제 이음 위치(PipeSegmentPlan)와 어긋날 수 있는 참고 눈금이다.
+    /// <summary>정척 길이마다 SubLine A–B를 잇는 수직보조선(docs/245). 시작점부터 단순 간격이며,
+    /// 인라인 부속 중심점에서 정척을 다시 센다(docs/314, 폭은 0으로 봄) — 실제 이음 위치(PipeSegmentPlan)와
+    /// 부속 폭만큼 어긋날 수 있는 참고 눈금이다.
     /// 끝점과 겹치는 눈금은 그리지 않는다(PipeSegmentPlan의 허용오차 관례와 같다).</summary>
+    /// <param name="restartTs">정척을 다시 셀 엣지 위 비율(0~1). 부속 위치. null이면 재시작 없음.</param>
     private System.Windows.Media.Geometry? BuildStraightLengthTicks(
         DHBIMWATER.Core.Geometry.Point2D start,
         DHBIMWATER.Core.Geometry.Point2D end,
-        double diameterMm)
+        double diameterMm,
+        IEnumerable<double>? restartTs = null)
     {
-        const double tolerance = 1e-6;
-        var straightLengthMm = _straightLengthMm;
         var dx = end.X - start.X;
         var dy = end.Y - start.Y;
         var length = Math.Sqrt(dx * dx + dy * dy);
         if (length < double.Epsilon || !double.IsFinite(diameterMm) || diameterMm <= 0) return null;
-        if (!double.IsFinite(straightLengthMm) || straightLengthMm <= 0) return null;
 
-        var tickCount = (int)Math.Min(int.MaxValue, Math.Floor((length - tolerance) / straightLengthMm));
-        if (tickCount <= 0 || tickCount > MaxStraightLengthTicks) return null;
+        var distances = StraightLengthTickDistances(length, _straightLengthMm, restartTs);
+        if (distances is null) return null;
 
         var ux = dx / length;
         var uy = dy / length;
@@ -2639,10 +2639,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         var offsetX = -uy * radius;
         var offsetY = ux * radius;
         var path = new System.Text.StringBuilder();
-        for (var k = 1; k <= tickCount; k++)
+        foreach (var d in distances)
         {
-            var d = k * straightLengthMm;
-            if (d >= length - tolerance) break;
             var cx = start.X + ux * d;
             var cy = start.Y + uy * d;
             var a = Transform.ToScreen(new DHBIMWATER.Core.Geometry.Point2D(cx + offsetX, cy + offsetY));
@@ -2654,6 +2652,32 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         var geometry = System.Windows.Media.Geometry.Parse(path.ToString());
         geometry.Freeze();
         return geometry;
+    }
+
+    /// <summary>정척 눈금의 시작점 기준 거리(mm). 재시작 지점으로 구간을 나누고 구간마다 정척을 처음부터 센다(docs/314).
+    /// 구간 끝·부속 중심과 겹치는 눈금은 뺀다. 눈금이 없거나 상한을 넘으면 null.</summary>
+    private static List<double>? StraightLengthTickDistances(double length, double straightLengthMm, IEnumerable<double>? restartTs)
+    {
+        const double tolerance = 1e-6;
+        if (!double.IsFinite(straightLengthMm) || straightLengthMm <= 0) return null;
+
+        // 경계: 0, 부속 위치, 끝. 끝점 밖·같은 자리 부속은 버리고 하나로 합친다.
+        var bounds = new List<double> { 0 };
+        foreach (var d in (restartTs ?? []).Where(double.IsFinite).Select(t => t * length).OrderBy(x => x))
+            if (d > tolerance && d < length - tolerance && d - bounds[^1] > tolerance) bounds.Add(d);
+        bounds.Add(length);
+
+        // 상한은 엣지 전체 합으로 먼저 본다 — 정척을 1mm처럼 넣으면 루프 전에 끊는다.
+        var total = 0.0;
+        for (var i = 1; i < bounds.Count; i++)
+            total += Math.Max(0, Math.Floor((bounds[i] - bounds[i - 1] - tolerance) / straightLengthMm));
+        if (total <= 0 || total > MaxStraightLengthTicks) return null;
+
+        var distances = new List<double>((int)total);
+        for (var i = 1; i < bounds.Count; i++)
+            for (var k = 1; bounds[i - 1] + k * straightLengthMm < bounds[i] - tolerance; k++)
+                distances.Add(bounds[i - 1] + k * straightLengthMm);
+        return distances;
     }
 
     /// <summary>커서(또는 스냅된 점)에서 X·Y 각 방향으로 가장 가까운 외곽선까지의 중심선·SubLine 임시치수를 만든다.</summary>
@@ -4331,7 +4355,9 @@ public sealed class PipeLayoutViewModel : ViewModelBase
                 subLines?.BX1 ?? 0, subLines?.BY1 ?? 0, subLines?.BX2 ?? 0, subLines?.BY2 ?? 0,
                 _errorEdgeIds.Contains(edge.Id), edge.DiameterMm)
             {
-                StraightTicks = BuildStraightLengthTicks(start, end, edge.DiameterMm)
+                // 부속 자리에서 정척을 다시 센다 — 드래그 중인 부속은 미리보기 T를 따른다(docs/314).
+                StraightTicks = BuildStraightLengthTicks(start, end, edge.DiameterMm,
+                    edge.InlineFittings.Select(DisplayFittingT))
             });
         }
         foreach (var node in _network.Nodes)
@@ -4525,6 +4551,10 @@ public sealed class PipeLayoutViewModel : ViewModelBase
 
     /// <summary>전체 네트워크의 부속을 보여준다(선택된 엣지만이 아니라). 클릭-배치 흐름에는 엣지 선택 단계가 없으므로
     /// 배치 직후에도 캔버스·사이드바에 남아 있어야 한다.</summary>
+    /// <summary>화면에 그릴 부속 T. 드래그 중인 부속만 미리보기 T로 그린다. 그래프는 커밋 시점에만 바뀐다(docs/152 § E-1).</summary>
+    private double DisplayFittingT(InlineFitting fitting)
+        => _drag is { Exceeded: true, Kind: PipeDragKind.Fitting } drag && drag.FittingId == fitting.Id ? drag.T : fitting.T;
+
     private void RefreshFittings()
     {
         InlineFittings.Clear();
@@ -4534,9 +4564,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             if (display is null) continue;
             foreach (var fitting in edge.InlineFittings.OrderBy(x => x.Order))
             {
-                // 드래그 중인 부속만 미리보기 T로 그린다. 그래프는 커밋 시점에만 바뀐다(docs/152 § E-1).
-                var t = _drag is { Exceeded: true, Kind: PipeDragKind.Fitting } drag && drag.FittingId == fitting.Id
-                    ? drag.T : fitting.T;
+                var t = DisplayFittingT(fitting);
                 var item = new InlineFittingItem(fitting.Id, edge.Id, fitting.TypeKey, fitting.FamilyTypeName, t, fitting.Order,
                     display.X1 + (display.X2 - display.X1) * t, display.Y1 + (display.Y2 - display.Y1) * t,
                     SelectedFittingIds.Contains(fitting.Id))

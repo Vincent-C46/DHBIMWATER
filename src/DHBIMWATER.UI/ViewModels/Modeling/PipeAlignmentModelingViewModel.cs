@@ -272,7 +272,9 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
             var matches = AdaptiveComponentTypeNames
                 .Where(x => x.Contains(materialWord, StringComparison.Ordinal) && x.Contains(role, StringComparison.Ordinal)).ToList();
             if (matches.Count == 0) continue;
-            return (role == "곡관" ? matches.FirstOrDefault(x => x.Contains("B형", StringComparison.Ordinal)) : null) ?? matches.FirstOrDefault();
+            // 곡관은 지금 접합·형식 키워드 유형 우선(docs/315 § 2-4) — 종전 고정 'B형'은 기본 설정일 때와 같음.
+            var keyword = BendTypeKeyword(material, _settings.ActiveBendConnection, _settings.ActiveBendForm);
+            return (role == "곡관" ? matches.FirstOrDefault(x => TypePart(x).Contains(keyword, StringComparison.Ordinal)) : null) ?? matches.FirstOrDefault();
         }
         return null;
     }
@@ -282,6 +284,50 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
     {
         if (MaterialFamilyTypeName(_selectedMaterial, "곡관") is { } bend) BendFamilyTypeName = bend;
         if (MaterialFamilyTypeName(_selectedMaterial, "직관") is { } straight) StraightFamilyTypeName = straight;
+        SyncBendTypeToJoint();
+    }
+
+    /// <summary>
+    /// 곡관 유형명 키워드(docs/315 § 2-1). 주철관: 소켓 A형 `A형`·B형 `B형`, 플랜지 `플랜지`.
+    /// 강관: Socket(=용접) `용접`, 플랜지 `플랜지`.
+    /// </summary>
+    private static string BendTypeKeyword(PipeMaterial material, BendConnection connection, BendForm form)
+        => connection == BendConnection.Flanged ? "플랜지"
+            : material == PipeMaterial.Steel ? "용접"
+            : form == BendForm.AType ? "A형" : "B형";
+
+    /// <summary>"패밀리명 : 유형명"에서 패밀리명. 구분자는 마지막 " : "(직관 Repo ResolveSymbol 규칙과 같음).</summary>
+    private static string? FamilyPart(string familyTypeName)
+    {
+        var separator = familyTypeName.LastIndexOf(" : ", StringComparison.Ordinal);
+        return separator > 0 ? familyTypeName[..separator] : null;
+    }
+
+    private static string TypePart(string familyTypeName)
+    {
+        var separator = familyTypeName.LastIndexOf(" : ", StringComparison.Ordinal);
+        return separator > 0 ? familyTypeName[(separator + 3)..] : familyTypeName;
+    }
+
+    /// <summary>지금 곡관 패밀리 안에서 접합·형식 키워드에 맞는 첫 유형. 없으면 null(구 단일 유형 패밀리).
+    /// 이름만 봄 — EditFamily 안 부름(docs/209 § D).</summary>
+    private string? MatchingBendType()
+    {
+        if (_bendFamilyTypeName is null || FamilyPart(_bendFamilyTypeName) is not { } family) return null;
+        var keyword = BendTypeKeyword(_selectedMaterial, _settings.ActiveBendConnection, _settings.ActiveBendForm);
+        var prefix = family + " : ";
+        return AdaptiveComponentTypeNames.FirstOrDefault(x => x.StartsWith(prefix, StringComparison.Ordinal)
+            && x.Length > prefix.Length && TypePart(x).Contains(keyword, StringComparison.Ordinal));
+    }
+
+    /// <summary>접합 종류·곡관 형식에 맞춰 같은 패밀리의 유형으로 곡관 선택을 바꿈(docs/315 § 2-2).
+    /// 지금 유형이 이미 키워드를 품으면 그대로. 맞는 유형이 없으면 현재 선택 유지.</summary>
+    private void SyncBendTypeToJoint()
+    {
+        if (_bendFamilyTypeName is null) return;
+        var keyword = BendTypeKeyword(_selectedMaterial, _settings.ActiveBendConnection, _settings.ActiveBendForm);
+        if (TypePart(_bendFamilyTypeName).Contains(keyword, StringComparison.Ordinal)) return;
+        if (MatchingBendType() is { } matching) BendFamilyTypeName = matching;
     }
 
     /// <summary>
@@ -441,8 +487,12 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
             if (!SetProperty(ref _bendConnectionOption, value) || value is null) return;
             _settings = _settings with { ActiveBendConnection = value.Value };
             Summary = string.Empty;
+            OnPropertyChanged(nameof(IsBendFormEnabled));
+            SyncBendTypeToJoint();
         }
     }
+    /// <summary>플랜지곡관은 A/B형 구분 없음 → [곡관 형식] 콤보 잠금(docs/315 § 2-5).</summary>
+    public bool IsBendFormEnabled => _settings.ActiveBendConnection != BendConnection.Flanged;
     /// <summary>주철관 소켓 접합에 이탈방지압륜을 쓰는지. 산출서에서 `이탈방지압륜 접합 및 부설`이
     /// `KP접합 및 부설`과 별개 공종이라 개소를 다른 매개변수에 적어야 한다(docs/166 § 11-4).
     /// <para>형상·허용굴곡에는 영향이 없다. 강관·플랜지 접합에도 영향이 없다.</para></summary>
@@ -470,6 +520,7 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
             if (!SetProperty(ref _bendFormOption, value) || value is null) return;
             _settings = _settings with { ActiveBendForm = value.Value };
             Summary = string.Empty;
+            SyncBendTypeToJoint();
         }
     }
     /// <summary>주철관 소켓 허용굴곡·무게에 쓸 조인트 종류. [모델링 실행] 때 프로젝트에 저장된다.</summary>
@@ -502,6 +553,18 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
     public bool HasDiagnosisWarnings => DiagnosisWarnings.Count > 0;
     // [새로고침](docs/236 § D)이 통째로 바꾸므로 private set + 변경 알림(RefreshFamilyLists).
     public IReadOnlyList<string> AdaptiveComponentTypeNames { get; private set; }
+    /// <summary>곡관 콤보 목록 — 이름에 `곡관` 든 것만(docs/315 § 3). 0건이면 전체, 현재 선택이 빠지면 끝에 덧붙임.</summary>
+    public IReadOnlyList<string> BendFamilyTypeOptions => FamilyTypeOptions("곡관", _bendFamilyTypeName);
+    /// <summary>직관 콤보 목록 — 이름에 `직관` 든 것만. 규칙은 곡관과 같음.</summary>
+    public IReadOnlyList<string> StraightFamilyTypeOptions => FamilyTypeOptions("직관", _straightFamilyTypeName);
+    private IReadOnlyList<string> FamilyTypeOptions(string roleWord, string? selected)
+    {
+        var filtered = AdaptiveComponentTypeNames.Where(x => x.Contains(roleWord, StringComparison.Ordinal)).ToList();
+        if (filtered.Count == 0) return AdaptiveComponentTypeNames;
+        // 폴백 기본값(DefaultBendFamilyTypeName)이 역할 단어 없는 항목일 수 있음 — 콤보 빈칸 방지.
+        if (selected is not null && !filtered.Contains(selected, StringComparer.Ordinal)) filtered.Add(selected);
+        return filtered;
+    }
     public IReadOnlyList<string> PipingSystemTypeNames { get; private set; }
     public IReadOnlyList<string> PipeTypeNames { get; private set; }
     public IReadOnlyList<string> LevelNames { get; private set; }
@@ -533,8 +596,8 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         new ReducerFormOption("C형 (대경 쪽 직관부 200)", ReducerForm.CType)
     };
     public ReducerFormOption ReducerFormOption { get => _reducerFormOption; set => SetProperty(ref _reducerFormOption, value); }
-    public string? StraightFamilyTypeName { get => _straightFamilyTypeName; set { if (SetProperty(ref _straightFamilyTypeName, value)) { UpdateStraightParameterOptions(); RefreshPreflightIssues(); } } }
-    public string? BendFamilyTypeName { get => _bendFamilyTypeName; set { if (SetProperty(ref _bendFamilyTypeName, value)) { UpdateBendParameterOptions(); RefreshPreflightIssues(); } } }
+    public string? StraightFamilyTypeName { get => _straightFamilyTypeName; set { if (SetProperty(ref _straightFamilyTypeName, value)) { OnPropertyChanged(nameof(StraightFamilyTypeOptions)); UpdateStraightParameterOptions(); RefreshPreflightIssues(); } } }
+    public string? BendFamilyTypeName { get => _bendFamilyTypeName; set { if (SetProperty(ref _bendFamilyTypeName, value)) { OnPropertyChanged(nameof(BendFamilyTypeOptions)); UpdateBendParameterOptions(); RefreshPreflightIssues(); } } }
     public string? PipingSystemTypeName { get => _pipingSystemTypeName; set => SetProperty(ref _pipingSystemTypeName, value); }
     public string? PipeTypeName { get => _pipeTypeName; set => SetProperty(ref _pipeTypeName, value); }
     public string? LevelName { get => _levelName; set => SetProperty(ref _levelName, value); }
@@ -729,6 +792,9 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
             });
             AdaptiveComponentTypeNames = adaptive; PipingSystemTypeNames = systems; PipeTypeNames = pipes; LevelNames = levels;
             OnPropertyChanged(nameof(AdaptiveComponentTypeNames)); OnPropertyChanged(nameof(PipingSystemTypeNames));
+            OnPropertyChanged(nameof(BendFamilyTypeOptions)); OnPropertyChanged(nameof(StraightFamilyTypeOptions));
+            // 새로 로드한 유형(소켓_A형 등) 반영(docs/315 § 2-3). 바뀌면 setter가 파라미터 후보도 다시 읽음.
+            SyncBendTypeToJoint();
             OnPropertyChanged(nameof(PipeTypeNames)); OnPropertyChanged(nameof(LevelNames));
             // 캐시를 비웠으므로 지금 고른 패밀리의 파라미터 후보·점 개수도 다시 읽는다.
             UpdateStraightParameterOptions();
@@ -928,6 +994,13 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         if (IsAdaptive && string.IsNullOrWhiteSpace(BendFamilyTypeName)) issues.Add(new(PreflightSeverity.Blocking, "곡관 패밀리를 선택하세요.", PipeAlignmentTab.OutputMode, null));
         if (!string.IsNullOrWhiteSpace(StraightPointCountNotice)) issues.Add(new(PreflightSeverity.Warning, StraightPointCountNotice, PipeAlignmentTab.OutputMode, null));
         if (IsAdaptive && !string.IsNullOrWhiteSpace(BendPointCountNotice)) issues.Add(new(PreflightSeverity.Warning, BendPointCountNotice, PipeAlignmentTab.OutputMode, null));
+        // docs/315 § 2-6 — 맞는 유형이 패밀리에 있는데 다른 유형을 직접 골랐을 때만. 구 단일 유형 패밀리는 경고 안 함.
+        if (IsAdaptive && BendFamilyTypeName is { } bendType && MatchingBendType() is { } matching
+            && !string.Equals(matching, bendType, StringComparison.Ordinal)
+            && !TypePart(bendType).Contains(BendTypeKeyword(_selectedMaterial, _settings.ActiveBendConnection, _settings.ActiveBendForm), StringComparison.Ordinal))
+            issues.Add(new(PreflightSeverity.Warning,
+                $"곡관 유형 '{TypePart(bendType)}'이 접합 설정({BendConnectionOption?.Label}{(IsBendFormEnabled && IsDuctileIronSelected ? " · " + BendFormOption?.Label : string.Empty)})과 다릅니다. 이대로 배치하면 선택한 유형으로 배치됩니다.",
+                PipeAlignmentTab.OutputMode, null));
         AddMappingIssue(issues, DiameterMappings.Where(x => x.DiameterMm is null or <= 0), "확정 DN 미지정");
         AddMappingIssue(issues, DiameterMappings.Where(x => string.IsNullOrWhiteSpace(x.PipeKind)), "등급 미지정");
         // 표에 없는 (등급, DN)은 직관·곡관 외경이 갈려 생성 자체를 막는다(docs/212 § C, 2026-09-22 확정 3).
@@ -1329,6 +1402,9 @@ public sealed class PipeAlignmentModelingViewModel : ViewModelBase
         // 이 속성은 _settings를 직접 읽으므로 설정을 통째로 갈아끼운 뒤 알려주지 않으면 체크박스가 옛 값을 보여준다.
         OnPropertyChanged(nameof(UseRestraintGland));
         OnPropertyChanged(nameof(ActiveJointType));
+        OnPropertyChanged(nameof(IsBendFormEnabled));
+        // setter는 같은 값이면 안 탐 — 저장 설정 기준으로 한 번 더 맞춤(docs/315 § 2-3).
+        SyncBendTypeToJoint();
     }
     private void ShowDialog(System.Windows.Window dialog) { if (OwnerWindow is { } owner) dialog.Owner = owner; dialog.ShowDialog(); OwnerWindow?.Activate(); }
 

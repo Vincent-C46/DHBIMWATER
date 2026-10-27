@@ -124,8 +124,9 @@
                                     </Grid.RowDefinitions>
                                     <TextBlock Grid.Row="0" Style="{StaticResource RequiredLabelTextBlockStyle}" Text="측점 *" VerticalAlignment="Center"/>
                                     <ComboBox Grid.Row="0" Grid.Column="1" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,0,0,8" ItemsSource="{Binding OptionalColumnOptions}" SelectedItem="{Binding StationColumn}"/>
-                                    <TextBlock Grid.Row="1" Style="{StaticResource LabelTextBlockStyle}" Text="누가거리" VerticalAlignment="Center"/>
-                                    <ComboBox Grid.Row="1" Grid.Column="1" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,0,0,8" ItemsSource="{Binding OptionalColumnOptions}" SelectedItem="{Binding CumulativeDistanceColumn, Mode=TwoWay}"/>
+                                    <!-- 누가거리 칸 숨김. 목록 열도 뺐으니 쓸 곳 없음. 다시 쓰면 Visibility 지움. -->
+                                    <TextBlock Grid.Row="1" Visibility="Collapsed" Style="{StaticResource LabelTextBlockStyle}" Text="누가거리" VerticalAlignment="Center"/>
+                                    <ComboBox Grid.Row="1" Visibility="Collapsed" Grid.Column="1" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,0,0,8" ItemsSource="{Binding OptionalColumnOptions}" SelectedItem="{Binding CumulativeDistanceColumn, Mode=TwoWay}"/>
                                     <TextBlock Grid.Row="2" Style="{StaticResource RequiredLabelTextBlockStyle}" Text="{Binding ZLabel}" VerticalAlignment="Center"/>
                                     <ComboBox Grid.Row="2" Grid.Column="1" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,0,0,8" ItemsSource="{Binding ColumnOptions}" SelectedItem="{Binding ZColumn}"/>
                                     <TextBlock Grid.Row="3" Style="{StaticResource RequiredLabelTextBlockStyle}" Text="호칭지름(DN) *" VerticalAlignment="Center"/>
@@ -135,7 +136,7 @@
                                     <TextBlock Grid.Row="5" Style="{StaticResource RequiredLabelTextBlockStyle}" Text="원지반 EL *" VerticalAlignment="Center"/>
                                     <ComboBox Grid.Row="5" Grid.Column="1" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,0,0,8" ItemsSource="{Binding OptionalColumnOptions}" SelectedItem="{Binding GroundElColumn, Mode=TwoWay}"/>
                                     <TextBlock Grid.Row="6" Grid.Column="1" FontSize="11" Foreground="#7F8C8D" TextWrapping="Wrap"
-                                               Text="※ 선형 시트 1개만 고르세요. 밸브실 유형 칸이 채워진 행이 밸브실 위치입니다. 표고 = 관중심(m), 관저고 = 표고 − 호칭지름/2. 누가거리는 목록 표시용."/>
+                                               Text="※ 선형 시트 1개만 고르세요. 밸브실 유형 칸이 채워진 행이 밸브실 위치입니다. 표고 = 관중심(m), 관저고 = 표고 − 호칭지름/2."/>
                                 </Grid>
                                 <Expander Header="기타 열 (자동 지정)" Margin="0,8,0,0" IsExpanded="{Binding IsOtherColumnsExpanded, Mode=TwoWay}">
                                     <Grid Margin="0,8,0,0">
@@ -169,7 +170,7 @@
                         </StackPanel>
                     </GroupBox>
 
-                    <!-- 밸브실 모드 하단 목록(docs/304·310). 관저고 = 표고 − DN/2 계산값. 열 매핑에 따라 바로 갱신, 하나 골라 [확인]. -->
+                    <!-- 밸브실 모드 하단 목록(docs/304·310). 관저고 = 표고 − DN/2 계산값. 누가거리·DN·표고 열은 숨김(값은 행에 남아 자동지정에 씀). 열 매핑에 따라 바로 갱신, 하나 골라 [확인]. -->
                     <GroupBox Header="밸브실 목록 — 하나 선택" Style="{StaticResource PrimaryGroupBox}" Margin="0,0,0,10"
                               Visibility="{Binding IsValveRoomMode, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <StackPanel>
@@ -180,9 +181,6 @@
                                     <DataGridTextColumn Header="행" Binding="{Binding RowNumber}" Width="50"/>
                                     <DataGridTextColumn Header="밸브실 유형" Binding="{Binding RoomType}" Width="*"/>
                                     <DataGridTextColumn Header="측점" Binding="{Binding StationText}" Width="*"/>
-                                    <DataGridTextColumn Header="누가거리" Binding="{Binding CumulativeDistanceText}" Width="80"/>
-                                    <DataGridTextColumn Header="DN" Binding="{Binding DiameterMm, StringFormat=0}" Width="70"/>
-                                    <DataGridTextColumn Header="표고(관중심)" Binding="{Binding PipeCenterEl, StringFormat=0.000}" Width="95"/>
                                     <DataGridTextColumn Header="관저고(m)" Binding="{Binding PipeInvertEl, StringFormat=0.000}" Width="90"/>
                                     <DataGridTextColumn Header="원지반(m)" Binding="{Binding GroundEl, StringFormat=0.000}" Width="90"/>
                                 </DataGrid.Columns>

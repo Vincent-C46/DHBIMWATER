@@ -502,8 +502,74 @@ public class ValveRoomViewModelTests
         Assert.Equal(3000d, vm.InnerLength);
         Assert.Equal(2500d, vm.InnerWidth);
         Assert.Equal(4500d, vm.InnerHeight);
-        Assert.Equal(1500d, vm.IntermediateWallOffset);
+        // 중간벽 정중앙: (L 3000 − Tw 300)/2.
+        Assert.Equal(1350d, vm.IntermediateWallOffset);
         Assert.Equal(1200d, vm.PlacementPipeDiameter);
+    }
+
+    [Fact]
+    public void 중간벽_Lw는_L_Tw_따라가고_손으로_고치면_유지한다()
+    {
+        var vm = CreateViewModel(new StubElementTypeQueryRepo());
+
+        vm.InnerLength = 5000;
+        Assert.Equal(2350d, vm.IntermediateWallOffset);
+        vm.IntermediateWallThickness = 500;
+        Assert.Equal(2250d, vm.IntermediateWallOffset);
+
+        vm.IntermediateWallOffset = 1000;
+        vm.InnerLength = 6000;
+        Assert.Equal(1000d, vm.IntermediateWallOffset);
+
+        // [기본값]이면 손 수정 해제. Tw는 프리셋이 안 바꿈 → (3000 − 500)/2.
+        vm.ResetCommand.Execute(null);
+        Assert.Equal(1250d, vm.IntermediateWallOffset);
+    }
+
+    [Fact]
+    public void 중간슬래브_H1_H2는_내부높이_Ts로_반씩_나누고_한쪽을_고치면_나머지가_흡수한다()
+    {
+        var vm = CreateViewModel(new StubElementTypeQueryRepo());
+        vm.HasIntermediateSlab = true;
+
+        // (4500 − 300)/2.
+        Assert.Equal(2100d, vm.Floor1InnerHeight);
+        Assert.Equal(2100d, vm.Floor2InnerHeight);
+        vm.IntermediateSlabThickness = 500;
+        Assert.Equal(2000d, vm.Floor1InnerHeight);
+
+        vm.Floor1InnerHeight = 1500;
+        Assert.Equal(2500d, vm.Floor2InnerHeight);
+        vm.InnerHeight = 5000;
+        Assert.Equal(1500d, vm.Floor1InnerHeight);
+        Assert.Equal(3000d, vm.Floor2InnerHeight);
+    }
+
+    [Fact]
+    public void 제수_보_Ox_Sx_Oy_Sy는_개수로_균등분배하고_손으로_고친_값은_유지한다()
+    {
+        var vm = CreateViewModel(new StubElementTypeQueryRepo());
+        vm.SelectedValveRoomType = "제수밸브실";
+        vm.InnerWidth = 6000;
+        vm.InnerLength = 8000;
+
+        vm.BeamCountX = 2;
+        vm.BeamCountY = 3;
+        Assert.Equal(2000d, vm.BeamOffsetX);
+        Assert.Equal(2000d, vm.BeamSpacingX);
+        Assert.Equal(2000d, vm.BeamOffsetY);
+        Assert.Equal(2000d, vm.BeamSpacingY);
+
+        // Ox만 고치면 Sx = 남은 구간 균등 (6000 − 2×1000)/1.
+        vm.BeamOffsetX = 1000;
+        Assert.Equal(4000d, vm.BeamSpacingX);
+        // Sy만 고치면 Oy = 양쪽 여유 같게 (8000 − 1500×2)/2.
+        vm.BeamSpacingY = 1500;
+        Assert.Equal(2500d, vm.BeamOffsetY);
+
+        vm.InnerWidth = 8000;
+        Assert.Equal(1000d, vm.BeamOffsetX);
+        Assert.Equal(6000d, vm.BeamSpacingX);
     }
 
     [Fact]

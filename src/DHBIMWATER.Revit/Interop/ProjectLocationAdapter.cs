@@ -17,7 +17,12 @@ internal sealed class ProjectLocationAdapter : IProjectLocationCommandRepo,
 
     public void SetInternalOriginSharedPosition(double eastWestMeters, double northSouthMeters,
         double trueNorthToProjectNorthClockwiseDegrees)
-        => SetOrigin(eastWestMeters, northSouthMeters, trueNorthToProjectNorthClockwiseDegrees);
+    {
+        // 원점 공유좌표만 바꾸면 내부원점에서 떨어진 PBP는 옛 자리에 남아 입력값과 다른 값을 보인다(2026-10-23).
+        // PBP를 먼저 내부원점으로 옮기고 원점을 설정 — PBP 표시값 = 입력값.
+        MoveProjectBasePointToInternalOrigin();
+        SetOrigin(eastWestMeters, northSouthMeters, trueNorthToProjectNorthClockwiseDegrees);
+    }
 
     public void SetInternalOriginSharedPositionPreservingAngle(double eastWestMeters, double northSouthMeters)
         => SetOrigin(eastWestMeters, northSouthMeters, null);
@@ -60,6 +65,32 @@ internal sealed class ProjectLocationAdapter : IProjectLocationCommandRepo,
         if (!ProjectLocationInterop.SetOriginSharedPosition(document, eastWestMeters, northSouthMeters,
                 trueNorthClockwiseDeg, out var error))
             throw new DhbimwaterException(ErrorCodes.BasePointSetFailed, $"기준점 설정 실패: {error}");
+    }
+
+    /// <summary>PBP가 내부원점에 없으면 옮긴다. 모델·공유좌표는 안 바뀜. 트랜잭션은 호출 UseCase가 연다.</summary>
+    private void MoveProjectBasePointToInternalOrigin()
+    {
+        var document = GetDocument();
+        var basePoint = BasePoint.GetProjectBasePoint(document);
+        if (basePoint is null) return;
+        var offset = basePoint.Position;
+        if (offset.IsAlmostEqualTo(XYZ.Zero)) return;
+
+        // 고정된 PBP는 이동 전에 풀고 끝나면 되돌린다.
+        var wasPinned = basePoint.Pinned;
+        try
+        {
+            if (wasPinned) basePoint.Pinned = false;
+            ElementTransformUtils.MoveElement(document, basePoint.Id, offset.Negate());
+        }
+        catch (Exception ex)
+        {
+            throw new DhbimwaterException(ErrorCodes.BasePointSetFailed, $"프로젝트 기준점을 내부원점으로 옮기지 못했습니다: {ex.Message}");
+        }
+        finally
+        {
+            if (wasPinned) basePoint.Pinned = true;
+        }
     }
 
     private Document GetDocument()

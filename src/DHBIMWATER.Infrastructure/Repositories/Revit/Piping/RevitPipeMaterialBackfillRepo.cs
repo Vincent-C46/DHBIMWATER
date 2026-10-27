@@ -72,6 +72,8 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             : Candidates(document).Candidates;
         var warnings = new List<string>();
         var restored = new List<Restored>();
+        var compositionConflicts = new List<(long ElementId, IReadOnlyList<string> Sides)>();
+        var allOffDuctilePipeIds = new List<long>();
         var skipped = 0;
 
         foreach (var instance in candidates)
@@ -114,6 +116,7 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             var endCount = PipeMaterialSpecText.EndCountFor(part.Name);
             var flags = PipeJointCountWriter.ReadFlags(part.Instance);
             flagsById[part.Instance.Id] = flags;
+            RecordCompositionConflict(part.Instance, flags, materials[part.Instance.Id], endCount, compositionConflicts);
             var composition = PipeJointCountWriter.ResolveComposition(part.Instance, materials[part.Instance.Id], connection,
                 PipeJointCountWriter.ReadRestraintGland(part.Instance), endCount, _rules, flags);
             connections[part.Instance.Id] = connection;
@@ -186,14 +189,17 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
         {
             // 개수 재계산(docs/267 § 1) — 이미 태깅된 부재도 규칙 값으로 다시 쓴다. 개수는 이웃 연결에 따라 바뀌어 문서 전체를 봐야 맞다.
             var restoredIds = restored.Select(x => x.Instance.Id).ToHashSet();
-            recounted = restored.Count + RecountTagged(document, restoredIds, failed, diagnostics);
+            recounted = restored.Count + RecountTagged(document, restoredIds, failed, diagnostics, compositionConflicts);
             // 직접 배치한 계획관로 가변 패밀리 자동입력(docs/267 § 2).
-            adaptiveFilled = FillAdaptivePipes(document, warnings, failed);
+            adaptiveFilled = FillAdaptivePipes(document, warnings, failed, compositionConflicts, allOffDuctilePipeIds);
+            RecountAdaptivePipes(document, warnings, failed, compositionConflicts, allOffDuctilePipeIds);
             // 연결 기준 개수(플랜지 접합 · 유입부 절단) — 부재별 기록이 슬롯을 다시 쓴 뒤에 돈다(docs/266 § 1).
             PipeJointConnectionRecorder.Apply(document, warnings, _rules);
         }
 
         if (diagnostics.Warning is { } jointWarning) warnings.Add(jointWarning);
+        AddCompositionConflictWarning(compositionConflicts, warnings);
+        AddAllOffDuctileWarning(allOffDuctilePipeIds, warnings);
 
         var distinct = failed.Distinct(StringComparer.Ordinal).ToList();
         if (distinct.Count > 0)
@@ -205,7 +211,8 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
 
     /// <summary>배관 이음쇠·밸브류 전체(DH_Addin 무관, docs/287 § B1)의 개수 값을 수량 규칙으로 다시 쓴다(docs/267 § 1).
     /// 명칭·규격·번호는 건드리지 않는다. 압륜 플래그는 기록 전에 읽는다 — 기록이 슬롯을 덮는다(docs/170 § D-3).</summary>
-    private int RecountTagged(Document document, IReadOnlySet<ElementId> skip, ICollection<string> failed, JointCountDiagnostics diagnostics)
+    private int RecountTagged(Document document, IReadOnlySet<ElementId> skip, ICollection<string> failed,
+        JointCountDiagnostics diagnostics, ICollection<(long ElementId, IReadOnlyList<string> Sides)> conflicts)
     {
         var count = 0;
         foreach (var instance in PipeMaterialPartCollector.AllPipingInstances(document))
@@ -216,6 +223,7 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             var gland = PipeJointCountWriter.ReadRestraintGland(instance);
             var flags = PipeJointCountWriter.ReadFlags(instance);
             var endCount = PipeMaterialSpecText.EndCountFor(instance.LookupParameter(ValvePipingParameters.Part)?.AsString());
+            RecordCompositionConflict(instance, flags, material, endCount, conflicts);
             var composition = PipeJointCountWriter.ResolveComposition(instance, material, connection, gland, endCount, _rules, flags);
             PipeJointCountWriter.Write(instance, material, connection, gland, composition, failed, diagnostics, _rules, flags);
             count++;
@@ -237,16 +245,22 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
     }
 
     private static List<FamilyInstance> AdaptiveCandidatesIn(FilteredElementCollector collector)
+        => AdaptiveInstancesIn(collector)
+            .Where(x => string.IsNullOrWhiteSpace(x.LookupParameter(PipeAlignmentParameters.Addin)?.AsString()))
+            .OrderBy(x => x.Id.Value)
+            .ToList();
+
+    private static List<FamilyInstance> AdaptiveInstancesIn(FilteredElementCollector collector)
         => collector.OfCategory(BuiltInCategory.OST_GenericModel).OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>()
             .Where(AdaptiveComponentInstanceUtils.IsAdaptiveComponentInstance)
-            .Where(x => string.IsNullOrWhiteSpace(x.LookupParameter(PipeAlignmentParameters.Addin)?.AsString()))
             .Where(x => AdaptiveComponentInstanceUtils.GetInstancePlacementPointElementRefIds(x).Count is 2 or 5)
             .OrderBy(x => x.Id.Value)
             .ToList();
 
     /// <summary>직접 배치한 계획관로 가변 패밀리에 값을 채운다(docs/267 § 2-2). 값의 출처는 패밀리 매개변수(이름 목록은 설정 파일) →
     /// 없으면 배치점 기하다. 관종·호칭지름은 못 찾으면 비우고 경고한다 — 지어내지 않는다(docs/141 § 2 판단 5). 개수는 수량 규칙이 정한다.</summary>
-    private int FillAdaptivePipes(Document document, ICollection<string> warnings, ICollection<string> failed)
+    private int FillAdaptivePipes(Document document, ICollection<string> warnings, ICollection<string> failed,
+        ICollection<(long ElementId, IReadOnlyList<string> Sides)> conflicts, ICollection<long> allOffDuctilePipeIds)
     {
         var candidates = AdaptiveCandidates(document);
         if (candidates.Count == 0) return 0;
@@ -268,10 +282,37 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             var materialCode = PipeAlignmentParameters.MaterialFromModelValue(rawMaterial) is { } material
                 ? PipeAlignmentParameters.Code(material) : rawMaterial;
             var diameterText = ReadDiameterText(instance, names.NominalDiameter);
-            var ends = PipeJointFlagReader.Compose(PipeJointCountWriter.ReadFlags(instance), instance.Symbol?.Family?.Name, 2);
-            var composition = ends is { } value
-                ? _rules.EncodeComposition(value.Socket, value.Flange)
-                : _rules.DefaultPlannedComposition(part);
+            var flags = PipeJointCountWriter.ReadFlags(instance);
+            var parsedMaterial = PipeAlignmentParameters.MaterialFromModelValue(rawMaterial);
+            RecordCompositionConflict(instance, flags, parsedMaterial, 2, conflicts);
+            var ends = PipeJointFlagReader.ComposeByEnd(flags, parsedMaterial, 2);
+            if (ends is { AllOff: true } && ShouldWarnAllOff(parsedMaterial))
+                allOffDuctilePipeIds.Add(instance.Id.Value);
+            string? composition;
+            var keepComposition = false;
+            if (ends is { AllOff: true })
+            {
+                // 강관 전부 꺼짐 = 용접. 가시성 신호 없음 → 종전 기본 구성(docs/316 § 3).
+                // 주철관·관종 미상 전부 꺼짐 = 접합 없음 표현 불가 → 구성·슬롯 기존 값 유지, 부설·절단만 씀(docs/316 개정 1, docs/317).
+                if (parsedMaterial == PipeMaterial.Steel) composition = _rules.DefaultPlannedComposition(part);
+                else
+                {
+                    composition = instance.LookupParameter(PipeAlignmentParameters.JointComposition)?.AsString();
+                    keepComposition = true;
+                }
+            }
+            else if (ends is { } activeEnds)
+            {
+                composition = _rules.EncodeComposition(activeEnds.Socket, activeEnds.Flange);
+            }
+            else if (PipeJointFlagReader.Compose(flags, instance.Symbol?.Family?.Name, 2) is { } fallback)
+            {
+                composition = _rules.EncodeComposition(fallback.Socket, fallback.Flange);
+            }
+            else
+            {
+                composition = _rules.DefaultPlannedComposition(part);
+            }
             var counts = _rules.CountPlannedMember(part, composition, materialCode);
 
             writer.Text(instance, PipeAlignmentParameters.Addin, PipeAlignmentParameters.AddinValue);
@@ -283,11 +324,15 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             if (points.Count == 2) writer.LengthM(instance, PipeAlignmentParameters.Length, lengthMm / 1000d);
             else if ((ReadAngleDeg(instance, names.BendAngle) ?? BendAngleFromPoints(points[0]!, points[2]!, points[4]!)) is { } angleDeg)
                 writer.AngleDeg(instance, PipeAlignmentParameters.StandardAngle, angleDeg);
-            writer.Text(instance, PipeAlignmentParameters.JointComposition, composition);
-            writer.JointSlots(instance, counts.SocketSlots.Select(x => (x.Kind, x.Spec, x.Count)).ToList());
+            if (!keepComposition)
+            {
+                writer.Text(instance, PipeAlignmentParameters.JointComposition, composition);
+                writer.JointSlots(instance, counts.SocketSlots.Select(x => (x.Kind, x.Spec, x.Count)).ToList());
+                if (counts.MaterialUnknown) unknownSlot++;
+            }
+            // 부설·절단은 부재 종류가 정함 — 구성 유지 시에도 씀.
             writer.Integer(instance, PipeAlignmentParameters.LayingCount, counts.LayingCount);
             writer.Integer(instance, PipeAlignmentParameters.CutCount, counts.CutCount);
-            if (counts.MaterialUnknown) unknownSlot++;
             filled++;
         }
 
@@ -301,6 +346,93 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             warnings.Add($"매개변수 이름은 {AdaptivePipeParameterNamesStore.FilePath}에서 바꿀 수 있습니다.");
         foreach (var name in writer.Missing) failed.Add(name);
         return filled;
+    }
+
+    private void RecountAdaptivePipes(Document document, ICollection<string> warnings, ICollection<string> failed,
+        ICollection<(long ElementId, IReadOnlyList<string> Sides)> conflicts, ICollection<long> allOffDuctilePipeIds)
+    {
+        var instances = AdaptiveInstancesIn(new FilteredElementCollector(document))
+            .Where(x => string.Equals(x.LookupParameter(PipeAlignmentParameters.Addin)?.AsString(),
+                PipeAlignmentParameters.AddinValue, StringComparison.Ordinal))
+            .ToList();
+        if (instances.Count == 0) return;
+
+        var names = AdaptivePipeParameterNamesStore.Load(out var nameWarning);
+        if (nameWarning is not null) warnings.Add(nameWarning);
+        var writer = new PipeParameterWriter(_rules);
+        foreach (var instance in instances)
+        {
+            var pointIds = AdaptiveComponentInstanceUtils.GetInstancePlacementPointElementRefIds(instance);
+            var points = pointIds.Select(id => (document.GetElement(id) as ReferencePoint)?.Position).ToList();
+            if (points.Any(x => x is null)) continue;
+
+            var lengthMm = ReadLengthMm(instance, names.Length)
+                ?? (points.Count == 2 ? UC.FtToMm(points[0]!.DistanceTo(points[1]!)) : 0d);
+            if (_rules.AdaptivePartFor(points.Count, lengthMm) is not { } part) continue;
+
+            var material = PipeAlignmentParameters.MaterialFromModelValue(
+                instance.LookupParameter(PipeAlignmentParameters.Material)?.AsString());
+            var materialCode = material is { } knownMaterial ? PipeAlignmentParameters.Code(knownMaterial)
+                : instance.LookupParameter(PipeAlignmentParameters.Material)?.AsString();
+            var flags = PipeJointCountWriter.ReadFlags(instance);
+            RecordCompositionConflict(instance, flags, material, 2, conflicts);
+            var ends = PipeJointFlagReader.ComposeByEnd(flags, material, 2);
+            if (ends is null) continue;
+            if (ends.AllOff)
+            {
+                if (ShouldWarnAllOff(material)) allOffDuctilePipeIds.Add(instance.Id.Value);
+                continue;
+            }
+
+            var composition = _rules.EncodeComposition(ends.Socket, ends.Flange);
+            if (string.IsNullOrWhiteSpace(composition)) continue;
+            var parameter = instance.LookupParameter(PipeAlignmentParameters.JointComposition);
+            if (parameter is null || parameter.IsReadOnly || parameter.StorageType != StorageType.String)
+            {
+                failed.Add(PipeAlignmentParameters.JointComposition);
+                continue;
+            }
+            if (string.Equals(parameter.AsString(), composition, StringComparison.Ordinal)) continue;
+
+            writer.Text(instance, PipeAlignmentParameters.JointComposition, composition);
+            if (!string.Equals(parameter.AsString(), composition, StringComparison.Ordinal)) continue;
+            var counts = _rules.CountPlannedMember(part, composition, materialCode);
+            writer.JointSlots(instance, counts.SocketSlots.Select(x => (x.Kind, x.Spec, x.Count)).ToList());
+            writer.Integer(instance, PipeAlignmentParameters.LayingCount, counts.LayingCount);
+            writer.Integer(instance, PipeAlignmentParameters.CutCount, counts.CutCount);
+        }
+
+        foreach (var name in writer.Missing) failed.Add(name);
+    }
+
+    private static bool ShouldWarnAllOff(PipeMaterial? material)
+        => material is null or PipeMaterial.DuctileIron;
+
+    private static void RecordCompositionConflict(FamilyInstance instance, IReadOnlyDictionary<string, bool> flags,
+        PipeMaterial? material, int endCount, ICollection<(long ElementId, IReadOnlyList<string> Sides)> conflicts)
+    {
+        if (PipeJointFlagReader.ComposeByEnd(flags, material, endCount) is { ConflictSides.Count: > 0 } composition)
+            conflicts.Add((instance.Id.Value, composition.ConflictSides));
+    }
+
+    private static void AddCompositionConflictWarning(IEnumerable<(long ElementId, IReadOnlyList<string> Sides)> conflicts,
+        ICollection<string> warnings)
+    {
+        var items = conflicts.GroupBy(x => x.ElementId)
+            .Select(group => (ElementId: group.Key, Sides: group.SelectMany(x => x.Sides).Distinct(StringComparer.Ordinal).ToList()))
+            .ToList();
+        if (items.Count == 0) return;
+        var examples = string.Join("; ", items.Take(3).SelectMany(item => item.Sides
+            .Select(side => $"ElementId {item.ElementId} {side}")).Take(3));
+        warnings.Add($"부재 {items.Count:N0}개는 한 단부에 소켓과 플랜지가 동시에 켜져 있습니다(예: {examples}). 한쪽만 남기도록 가시성 매개변수를 수정하세요. 이번 집계는 해당 단부를 플랜지로 계산했습니다.");
+    }
+
+    private static void AddAllOffDuctileWarning(IEnumerable<long> elementIds, ICollection<string> warnings)
+    {
+        var ids = elementIds.Distinct().OrderBy(x => x).ToList();
+        if (ids.Count == 0) return;
+        var examples = string.Join(", ", ids.Take(3).Select(id => $"ElementId {id}"));
+        warnings.Add($"부재 {ids.Count:N0}개는 소켓·플랜지가 모두 꺼져 있습니다(예: {examples}). 접합 없음은 수량산출에서 표현되지 않아 기존 접합구성을 유지했습니다.");
     }
 
     /// <summary>패밀리 매개변수(인스턴스 → 유형)를 이름 목록 순서로 찾는다.</summary>

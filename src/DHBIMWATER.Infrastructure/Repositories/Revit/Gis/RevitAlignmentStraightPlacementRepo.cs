@@ -84,6 +84,7 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
         // 패밀리별로 한 번만 경고하면 충분하다 — 세그먼트마다 같은 누락 메시지가 반복되면 오히려 안 읽힌다.
         var missingParameters = new HashSet<string>();
         var writer = new PipeParameterWriter(_rules);
+        var flangeWriter = new SteelFlangeParameterWriter();
         var catalog = info is { Enabled: true } ? _catalogSource.OpenCatalog() : null;
         var snapshotWarnings = new HashSet<string>();
 
@@ -203,6 +204,12 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
             if (outerDiameterMm is { } od && outerDiameterParameterName is not null) SetParameter(instance, outerDiameterParameterName, od, missingParameters);
             if (spec is not null && thicknessParameterName is not null) SetParameter(instance, thicknessParameterName, spec.ThicknessMm, missingParameters);
             if (!TrySetRotations(instance, startDirection, endDirection, origin.TrueNorthClockwiseDegrees)) missingParameters.Add("rot_XY_n/rot_XZ_n");
+            // 단부 가시성 = 형상. 정보 기록 여부와 무관하게 씀(docs/315). 좌측 = P1 = segment.Start.
+            PipeEndFlagWriter.Write(instance, PipeEndFlagParameters.Resolve(isBend: false,
+                PipeKindCatalog.MaterialOf(alignment.PipeKind), info?.BendConnection ?? BendConnection.Socket));
+            // 강관 플랜지·볼트 치수(SteelFlangeSpecTable·SteelFlangeBoltSpecTable). 형상이라 정보 기록 여부와 무관.
+            flangeWriter.Write(instance, PipeKindCatalog.MaterialOf(alignment.PipeKind),
+                info?.SteelFittingClass ?? SteelFittingClass.None, diameterMm);
             cursor.PreviousEnd = segment.End;
             cursor.PreviousOwnDirection = ownDirection;
             cursor.PreviousIsDatumStep = segment.IsDatumStep;
@@ -273,6 +280,7 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
 
         var warnings = new List<string>();
         warnings.AddRange(snapshotWarnings);
+        if (flangeWriter.Warning("직관") is { } flangeWarning) warnings.Add(flangeWarning);
         if (missingSpecs.Count > 0)
         {
             var values = string.Join(", ", missingSpecs.OrderBy(x => x.PipeKind).ThenBy(x => x.DiameterMm)

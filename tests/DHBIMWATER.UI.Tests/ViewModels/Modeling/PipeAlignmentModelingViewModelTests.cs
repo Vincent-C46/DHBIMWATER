@@ -333,6 +333,88 @@ public sealed class PipeAlignmentModelingViewModelTests
         Assert.Contains(vm.DiameterMappings[0].DiameterOptions, x => x.DiameterMm == 3000);
     }
 
+    // docs/315 — 5P_주철관_곡관 유형 3종을 접합·형식으로 고른다.
+    private static readonly string[] DuctileFamilyTypes =
+    [
+        "2P_주철관_직관 : 기본",
+        "5P_주철관_곡관 : 소켓_A형",
+        "5P_주철관_곡관 : 소켓_B형",
+        "5P_주철관_곡관 : 플랜지",
+    ];
+
+    [Theory]
+    [InlineData(BendConnection.Socket, BendForm.BType, "5P_주철관_곡관 : 소켓_B형")]
+    [InlineData(BendConnection.Socket, BendForm.AType, "5P_주철관_곡관 : 소켓_A형")]
+    [InlineData(BendConnection.Flanged, BendForm.AType, "5P_주철관_곡관 : 플랜지")]
+    [InlineData(BendConnection.Flanged, BendForm.BType, "5P_주철관_곡관 : 플랜지")]
+    public void MatchingBendType_PicksTypeByConnectionAndForm(BendConnection connection, BendForm form, string expected)
+    {
+        var vm = CreateForFamilyTest(DuctileFamilyTypes, "5P_주철관_곡관 : 소켓_B형", BendSettings.Default with { ActiveBendConnection = connection, ActiveBendForm = form });
+
+        Assert.Equal(expected, InvokePrivate<string?>(vm, "MatchingBendType"));
+    }
+
+    [Fact]
+    public void MatchingBendType_ReturnsNull_ForLegacySingleTypeFamily()
+    {
+        var vm = CreateForFamilyTest(["DH_소켓_곡관 : 90도", "DH_소켓_직관 : 80A-1000A"], "DH_소켓_곡관 : 90도",
+            BendSettings.Default with { ActiveBendConnection = BendConnection.Flanged });
+
+        Assert.Null(InvokePrivate<string?>(vm, "MatchingBendType"));
+    }
+
+    [Fact]
+    public void MatchingBendType_SteelUsesWeldKeyword()
+    {
+        var vm = CreateForFamilyTest(["5P_강관곡관 : 용접", "5P_강관곡관 : 플랜지"], "5P_강관곡관 : 플랜지", BendSettings.Default);
+        SetField(vm, "_selectedMaterial", PipeMaterial.Steel);
+
+        Assert.Equal("5P_강관곡관 : 용접", InvokePrivate<string?>(vm, "MatchingBendType"));
+    }
+
+    [Fact]
+    public void IsBendFormEnabled_FalseOnlyForFlanged()
+    {
+        var vm = CreateForFamilyTest(DuctileFamilyTypes, null, BendSettings.Default with { ActiveBendConnection = BendConnection.Flanged });
+        Assert.False(vm.IsBendFormEnabled);
+        SetField(vm, "_settings", BendSettings.Default with { ActiveBendConnection = BendConnection.Socket });
+        Assert.True(vm.IsBendFormEnabled);
+    }
+
+    [Fact]
+    public void FamilyTypeOptions_FilterByRoleWord()
+    {
+        var vm = CreateForFamilyTest(DuctileFamilyTypes, "5P_주철관_곡관 : 소켓_B형", BendSettings.Default);
+        SetField(vm, "_straightFamilyTypeName", "2P_주철관_직관 : 기본");
+
+        Assert.All(vm.BendFamilyTypeOptions, x => Assert.Contains("곡관", x));
+        Assert.Equal(3, vm.BendFamilyTypeOptions.Count);
+        Assert.Equal(["2P_주철관_직관 : 기본"], vm.StraightFamilyTypeOptions);
+    }
+
+    [Fact]
+    public void FamilyTypeOptions_FallsBackToAll_WhenNoRoleWord_AndKeepsSelection()
+    {
+        var vm = CreateForFamilyTest(["Bend : 90", "Straight : A"], "Bend : 90", BendSettings.Default);
+        Assert.Equal(2, vm.BendFamilyTypeOptions.Count);
+
+        var mixed = CreateForFamilyTest(["5P_주철관_곡관 : 소켓_B형", "기타 : X"], "기타 : X", BendSettings.Default);
+        Assert.Equal(["5P_주철관_곡관 : 소켓_B형", "기타 : X"], mixed.BendFamilyTypeOptions);
+    }
+
+    private static PipeAlignmentModelingViewModel CreateForFamilyTest(string[] typeNames, string? bendType, BendSettings settings)
+    {
+        var vm = CreateWithoutServices();
+        SetAutoProperty<IReadOnlyList<string>>(vm, "AdaptiveComponentTypeNames", typeNames);
+        if (bendType is not null) SetField(vm, "_bendFamilyTypeName", bendType);
+        SetField(vm, "_settings", settings);
+        SetField(vm, "_selectedMaterial", PipeMaterial.DuctileIron);
+        return vm;
+    }
+
+    private static T InvokePrivate<T>(PipeAlignmentModelingViewModel vm, string method)
+        => (T)typeof(PipeAlignmentModelingViewModel).GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, null)!;
+
     private static PipeAlignmentSourceFileItem ShpItemWithDiameter(string diameterRaw, string? kind = null)
     {
         var attributes = new Dictionary<string, string> { ["DIA"] = diameterRaw };
