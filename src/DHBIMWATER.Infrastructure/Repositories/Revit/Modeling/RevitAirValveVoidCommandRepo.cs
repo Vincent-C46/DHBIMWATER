@@ -9,7 +9,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling;
 /// <summary><c>void_면기반</c>을 공기밸브실 독립기초의 X/Y 측면에 호스팅한다.</summary>
 public sealed class RevitAirValveVoidCommandRepo : IAirValveVoidCommandRepo
 {
-    private const string FamilyName = "void_면기반_2025";
+    private const string FamilyNamePrefix = "void_면기반";
     private const string DepthParameterName = "Depth";
 
     /// <summary>Void가 기초 반대편을 빠져나가도록 관통 길이에 더하는 여유(mm).</summary>
@@ -24,9 +24,7 @@ public sealed class RevitAirValveVoidCommandRepo : IAirValveVoidCommandRepo
         var doc = _doc() ?? throw new DhbimwaterException(ErrorCodes.NoActiveDocument, "활성 Revit 문서가 없습니다.");
         var foundation = doc.GetElement(new ElementId(foundationElementId))
             ?? throw new DhbimwaterException(ErrorCodes.VR_FoundationTypeNotFound, "공기밸브실 독립기초를 찾을 수 없습니다.");
-        var symbol = new FilteredElementCollector(doc).OfClass(typeof(FamilySymbol)).WhereElementIsElementType().OfType<FamilySymbol>()
-            .FirstOrDefault(item => item.FamilyName.Equals(FamilyName, StringComparison.OrdinalIgnoreCase));
-        if (symbol == null) throw new DhbimwaterException(ErrorCodes.VR_VoidFamilyNotLoaded, $"면기반 Void 패밀리 '{FamilyName}'을(를) 프로젝트에 로드해야 합니다.");
+        var symbol = FindVoidSymbol(doc);
         if (!symbol.IsActive) { symbol.Activate(); doc.Regenerate(); }
 
         var box = foundation.get_BoundingBox(null) ?? throw new DhbimwaterException(ErrorCodes.VR_FoundationGeometryUnreadable, "독립기초의 형상 정보를 읽을 수 없습니다.");
@@ -47,7 +45,7 @@ public sealed class RevitAirValveVoidCommandRepo : IAirValveVoidCommandRepo
         // 모델 좌표다. 심볼 좌표를 넘기면 인스턴스가 회전·이동량만큼 평면에서 어긋난 위치에 떨어진다.
         var instance = doc.Create.NewFamilyInstance(host.Face.Reference, host.ModelPoint, XYZ.BasisZ, symbol);
         var radius = instance.LookupParameter("r");
-        if (radius == null || radius.IsReadOnly) throw new DhbimwaterException(ErrorCodes.VR_VoidParameterUnwritable, $"면기반 Void 패밀리 '{FamilyName}'에서 읽기 가능한 인스턴스 매개변수 'r'을 찾을 수 없습니다.");
+        if (radius == null || radius.IsReadOnly) throw new DhbimwaterException(ErrorCodes.VR_VoidParameterUnwritable, $"면기반 Void 패밀리 '{symbol.FamilyName}'에서 읽기 가능한 인스턴스 매개변수 'r'을 찾을 수 없습니다.");
         radius.Set(UC.MmToFt(definition.Radius));
 
         // 관통 길이는 기초의 해당 축 방향 전체 길이 + 여유. 시작면에서 기초 안쪽으로 돌출하므로
@@ -56,7 +54,7 @@ public sealed class RevitAirValveVoidCommandRepo : IAirValveVoidCommandRepo
         var depth = instance.LookupParameter(DepthParameterName);
         if (depth == null || depth.IsReadOnly)
             throw new DhbimwaterException(ErrorCodes.VR_VoidParameterUnwritable,
-                $"면기반 Void 패밀리 '{FamilyName}'에서 쓰기 가능한 인스턴스 매개변수 '{DepthParameterName}'을(를) 찾을 수 없습니다. " +
+                $"면기반 Void 패밀리 '{symbol.FamilyName}'에서 쓰기 가능한 인스턴스 매개변수 '{DepthParameterName}'을(를) 찾을 수 없습니다. " +
                 $"유형 매개변수로 되어 있으면 인스턴스 매개변수로 변경해야 합니다.");
         depth.Set(hostLength + UC.MmToFt(PenetrationMarginMm));
         doc.Regenerate();
@@ -69,6 +67,28 @@ public sealed class RevitAirValveVoidCommandRepo : IAirValveVoidCommandRepo
         instance.LookupParameter("DH_Addin")?.Set("DHBIMWATER");
         instance.LookupParameter("DH_Category")?.Set("개구부");
         instance.LookupParameter("DH_Part")?.Set("본관 관통 Void");
+    }
+
+    /// <summary>이름이 <see cref="FamilyNamePrefix"/>로 시작하는 Void 심볼. 연도 접미어 달라도 같은 패밀리로 본다.</summary>
+    private FamilySymbol FindVoidSymbol(Document doc)
+    {
+        var candidates = new FilteredElementCollector(doc).OfClass(typeof(FamilySymbol)).WhereElementIsElementType().OfType<FamilySymbol>()
+            .Where(item => item.FamilyName.StartsWith(FamilyNamePrefix, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (candidates.Count == 0)
+            throw new DhbimwaterException(ErrorCodes.VR_VoidFamilyNotLoaded, $"이름이 '{FamilyNamePrefix}'(으)로 시작하는 면기반 Void 패밀리를 프로젝트에 로드해야 합니다.");
+
+        // 이름 여러 개면 내림차순 첫 번째 = 연도 접미어 큰 쪽(_2026 > _2025 > 접미어 없음).
+        var familyNames = candidates.Select(item => item.FamilyName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var selected = familyNames[0];
+        if (familyNames.Count > 1)
+            _warnings.Add($"'{FamilyNamePrefix}'(으)로 시작하는 Void 패밀리가 여러 개 로드되어 있어 '{selected}'을(를) 사용했습니다. (후보: {string.Join(", ", familyNames)})");
+
+        // 같은 패밀리 안 유형 여러 개면 기존처럼 첫 유형.
+        return candidates.First(item => item.FamilyName.Equals(selected, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>법선 일치 판정 허용오차. 기초 회전(-90°) 시 발생하는 부동소수 오차를 흡수한다.</summary>
@@ -186,7 +206,7 @@ public sealed class RevitAirValveVoidCommandRepo : IAirValveVoidCommandRepo
             // 자동 절단도 안 됐고 명시적 절단도 거부된 상태. 배치점·관통 길이는 앞 단계에서 확정했으므로
             // 남는 원인은 RFA 쪽 Void 설정이다.
             WarnCutFailed(
-                $"패밀리 '{FamilyName}'의 Void 폼이 패밀리 내부 솔리드에 이미 붙어 있거나(Cut Geometry 적용됨), " +
+                $"패밀리 '{voidInstance.Symbol.FamilyName}'의 Void 폼이 패밀리 내부 솔리드에 이미 붙어 있거나(Cut Geometry 적용됨), " +
                 $"패밀리 유형 속성의 '로드할 때 보이드로 절단(Cut with Voids When Loaded)'이 꺼져 있는지 확인해야 합니다.\n\n({exception.Message})");
             return;
         }

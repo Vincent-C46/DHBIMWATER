@@ -17,6 +17,8 @@ using DHBIMWATER.Infrastructure.Services.Revit.Parameter;
 using DHBIMWATER.Infrastructure.Transactions;
 using Microsoft.Extensions.DependencyInjection;
 using DHBIMWATER.Infrastructure.Repositories.Local;
+using DHBIMWATER.Application.Interfaces.Families;
+using DHBIMWATER.Infrastructure.Repositories.Revit.Families;
 
 namespace DHBIMWATER.Infrastructure.DependencyInjection;
 
@@ -46,6 +48,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IPipeMaterialScheduleRepo, RevitPipeMaterialScheduleRepo>();
         services.AddTransient<IPipeMaterialDraftingRepo, RevitPipeMaterialDraftingRepo>();
         services.AddTransient<IJunctionDetailRepo, RevitJunctionDetailRepo>();
+        services.AddTransient<IJunctionDetailSheetRepo, RevitJunctionDetailSheetRepo>();
         services.AddTransient<IJunctionSymbolShapeRepo, RevitJunctionSymbolShapeRepo>();
         services.AddTransient<IPipeMaterialBackfillRepo, RevitPipeMaterialBackfillRepo>();
         services.AddTransient<IPipeJointConnectionRepo, RevitPipeJointConnectionRepo>();   // docs/266 § 1 연결 패스
@@ -87,6 +90,10 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IValveRoomOutlinePickRepo, RevitValveRoomOutlinePickRepo>();
         services.AddTransient<IValveRoomPipingPickRepo, RevitValveRoomPipingPickRepo>();
         services.AddTransient<IVerticalBranchPickRepo, RevitValveRoomPipingPickRepo>();
+        // 패밀리 유형 이미지 일괄 지정(docs/309)
+        services.AddTransient<IFamilyDocumentSessionFactory, RevitFamilyDocumentSessionFactory>();
+        services.AddTransient<IFamilyTypeImageRepo, RevitFamilyTypeImageRepo>();
+        services.AddTransient<ITypeImageMappingStore, TypeImageMappingStore>();
         #endregion
 
         services.AddTransient<IExcelReader, ExcelReader>();
@@ -131,6 +138,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IPipeMaterialScheduleRepo, MockPipeMaterialScheduleRepo>();
         services.AddTransient<IPipeMaterialDraftingRepo, MockPipeMaterialDraftingRepo>();
         services.AddTransient<IJunctionDetailRepo, MockJunctionDetailRepo>();
+        services.AddTransient<IJunctionDetailSheetRepo, MockJunctionDetailSheetRepo>();
         services.AddTransient<IJunctionSymbolShapeRepo, MockJunctionSymbolShapeRepo>();
         services.AddTransient<IPipeMaterialBackfillRepo, MockPipeMaterialBackfillRepo>();
         services.AddTransient<IPipeJointConnectionRepo, MockPipeJointConnectionRepo>();

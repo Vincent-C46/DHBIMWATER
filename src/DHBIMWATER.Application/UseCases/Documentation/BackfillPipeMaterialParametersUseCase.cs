@@ -52,6 +52,62 @@ public sealed class BackfillPipeMaterialParametersUseCase
         }
     }
 
+    /// <summary>부재 정보 갱신 창 기본 모드. 값 빈 배관 부재 + 값 빈 계획관로 가변 패밀리만 채움.
+    /// 손으로 고친 개수 덮는 문서 전체 재산정은 <see cref="Execute"/>.</summary>
+    /// <param name="fallbackMaterialCode">재질로 관종 못 정한 부재에 일괄로 쓸 DH_관종 코드. null = 비움.</param>
+    public PipeMaterialBackfillResult ExecuteEmpty(string? fallbackMaterialCode = null)
+    {
+        using (_transaction)
+        {
+            try
+            {
+                _transaction.Begin("배관 부재 정보 채움");
+                EnsureBindings();
+                var result = _repo.BackfillEmpty(_bendSettings.Load().Settings, fallbackMaterialCode);
+                _transaction.Commit();
+                return result;
+            }
+            catch
+            {
+                _transaction.Rollback();
+                throw;
+            }
+        }
+    }
+
+    /// <summary>문서 전체 재산정 + 빈 DH_관종·수동 MEP 배관 채움(부재 정보 갱신 창 재산정 모드).</summary>
+    public PipeMaterialBackfillResult Execute(string? fallbackMaterialCode)
+    {
+        using (_transaction)
+        {
+            try
+            {
+                _transaction.Begin("배관재료표 값 재기록");
+                EnsureBindings();
+                var result = _repo.Backfill(_bendSettings.Load().Settings, fallbackMaterialCode);
+                _transaction.Commit();
+                return result;
+            }
+            catch
+            {
+                _transaction.Rollback();
+                throw;
+            }
+        }
+    }
+
+    // 배관 이음쇠·밸브 바인딩 필수. 가변 패밀리·MEP 배관은 후보 있을 때만 — 밸브실 문서에 DH_* 칸 안 늘림(docs/267 § 2)
+    private void EnsureBindings()
+    {
+        _sharedParameterRepo.EnsureParameters(ValvePipingParameters.Definitions);
+        var scan = _repo.ScanCandidates();
+        if (scan.AdaptiveCandidateCount > 0)
+            _sharedParameterRepo.EnsureParameters(DHBIMWATER.Core.Gis.PipeAlignmentParameters.Definitions);
+        if (scan.MepPipeCandidateCount > 0)
+            _sharedParameterRepo.EnsureParameters(DHBIMWATER.Core.Gis.PipeAlignmentParameters.MepPipeDefinitions);
+    }
+
+    // 격점상세도 옵션 경로(종전 동작 유지). 관종·MEP 배관 채움 없음
     public PipeMaterialBackfillResult Execute()
     {
         using (_transaction)

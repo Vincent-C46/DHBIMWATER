@@ -8,6 +8,7 @@ using DHBIMWATER.UI.Base;
 using DHBIMWATER.UI.Commands;
 using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Parameters;
+using DHBIMWATER.Core.Piping;
 using DHBIMWATER.Core.Structures;
 using DHBIMWATER.UI.Utilities;
 using System.Collections.ObjectModel;
@@ -87,6 +88,7 @@ public class ValveRoomViewModel : ViewModelBase
     private double _mainPipeDiameter = 100;
     private double _foundationTopToPipeCenterDepth = 250;
     private string _selectedVoidAxis = "X";
+    private string _selectedVoidPipeMaterial = VoidMaterialDuctile;
     private double _outerWallThickness = 400;
     private double _intermediateWallThickness = 300;
     private double _upperSlabThickness = 400;
@@ -161,6 +163,7 @@ public class ValveRoomViewModel : ViewModelBase
         ColumnTypeNames = new ObservableCollection<string>(new[] { NotUsed });
         BeamTypeNames = new ObservableCollection<string>(new[] { NotUsed });
         VoidAxes = new ObservableCollection<string>(new[] { "X", "Y" });
+        VoidPipeMaterials = new ObservableCollection<string>(new[] { VoidMaterialDuctile, VoidMaterialSteel });
         DrainPitCorners = new ObservableCollection<string>(new[] { "좌상단", "좌하단", "우상단", "우하단" });
         DrainPitVoidFamilyNames = new ObservableCollection<string>(new[] { NotSelected });
         DrainPitVoidParameterNames = new ObservableCollection<string>(new[] { NotSelected });
@@ -183,6 +186,27 @@ public class ValveRoomViewModel : ViewModelBase
     public ObservableCollection<string> ColumnTypeNames { get; }
     public ObservableCollection<string> BeamTypeNames { get; }
     public ObservableCollection<string> VoidAxes { get; }
+
+    // 공기밸브실 Void 관종(2026-10-29). Void 지름 = 이 관종 외경 + 여유(MainPipeVoidSizing).
+    private const string VoidMaterialDuctile = "덕타일주철관";
+    private const string VoidMaterialSteel = "강관";
+    public ObservableCollection<string> VoidPipeMaterials { get; }
+    public string SelectedVoidPipeMaterial
+    {
+        get => _selectedVoidPipeMaterial;
+        set { if (SetProperty(ref _selectedVoidPipeMaterial, value)) NotifyVoidDiameter(); }
+    }
+    private PipeMaterial VoidPipeMaterial => _selectedVoidPipeMaterial == VoidMaterialSteel ? PipeMaterial.Steel : PipeMaterial.DuctileIron;
+    /// <summary>실제 Void 지름(mm) = 외경 + 여유. 외경 미등록 DN이면 DN.</summary>
+    public double VoidDiameter => MainPipeVoidSizing.VoidDiameterMm(MainPipeDiameter, VoidPipeMaterial);
+    public string VoidDiameterText => MainPipeVoidSizing.OuterDiameterMm(MainPipeDiameter, VoidPipeMaterial) is { } od
+        ? $"Void 지름 {VoidDiameter:0.#} mm = 외경 {od:0.#} + 여유 {MainPipeVoidSizing.ClearanceMm:0}"
+        : $"Void 지름 {VoidDiameter:0.#} mm — 규격표에 DN{MainPipeDiameter:0} 외경 없음, 본관 직경 그대로";
+    private void NotifyVoidDiameter()
+    {
+        OnPropertyChanged(nameof(VoidDiameter));
+        OnPropertyChanged(nameof(VoidDiameterText));
+    }
     public ObservableCollection<string> DrainPitCorners { get; }
     public ObservableCollection<string> DrainPitVoidFamilyNames { get; }
     public ObservableCollection<string> DrainPitVoidParameterNames { get; }
@@ -360,6 +384,7 @@ public class ValveRoomViewModel : ViewModelBase
         set
         {
             if (!SetProperty(ref _mainPipeDiameter, value)) return;
+            NotifyVoidDiameter();
             if (IsAir && value > 0)
             {
                 FoundationThickness = ValveRoomPlacementRules.AirValveFoundationThicknessMm(value);
@@ -537,7 +562,7 @@ public class ValveRoomViewModel : ViewModelBase
         {
             _innerWidth = 1500; _innerLength = 1800; _innerHeight = 2000;
             ApplyStandardDimension(standard);
-            _foundationToe = 100; _selectedVoidAxis = "X";
+            _foundationToe = 100; _selectedVoidAxis = "X"; _selectedVoidPipeMaterial = VoidMaterialDuctile;
             // 본관 기준관경 + 기초두께·Hp 공식(docs/311).
             _mainPipeDiameter = ValveRoomPlacementRules.DefaultPipeDiameterMm;
             _foundationThickness = ValveRoomPlacementRules.AirValveFoundationThicknessMm(_mainPipeDiameter);
@@ -559,6 +584,8 @@ public class ValveRoomViewModel : ViewModelBase
         OnPropertyChanged(nameof(MainPipeDiameter));
         OnPropertyChanged(nameof(FoundationTopToPipeCenterDepth));
         OnPropertyChanged(nameof(SelectedVoidAxis));
+        OnPropertyChanged(nameof(SelectedVoidPipeMaterial));
+        NotifyVoidDiameter();
         OnPropertyChanged(nameof(HasIntermediateWall));
         OnPropertyChanged(nameof(IntermediateWallOffset));
         OnPropertyChanged(nameof(HasIntermediateSlab));
@@ -669,7 +696,7 @@ public class ValveRoomViewModel : ViewModelBase
 
         // 반경까지 더해 기초 아래로 빠지는 Void를 막는다(docs/207 § A-2).
         if (IsAir && (MainPipeDiameter <= 0 || FoundationTopToPipeCenterDepth <= 0
-            || FoundationTopToPipeCenterDepth + MainPipeDiameter / 2 >= FoundationThickness))
+            || FoundationTopToPipeCenterDepth + VoidDiameter / 2 >= FoundationThickness))
         {
             _dialogService.Warn("입력 확인", $"[{ErrorCodes.VR_InvalidAirValveSpec}] 공기밸브실 본관 직경은 0보다 크고, 본관 중심 깊이는 기초 두께 범위 안이어야 합니다.");
             return;
@@ -729,7 +756,7 @@ public class ValveRoomViewModel : ViewModelBase
                     DepthParameterName = SelectedDrainPitDepthParam
                 }
                 : null,
-            AirSpec = IsAir ? new AirValveRoomSpecDto(MainPipeDiameter, FoundationTopToPipeCenterDepth, SelectedVoidAxis) : null,
+            AirSpec = IsAir ? new AirValveRoomSpecDto(MainPipeDiameter, FoundationTopToPipeCenterDepth, SelectedVoidAxis, VoidDiameter) : null,
             // 타입 전용 입력은 선택된 밸브실 타입에 해당하는 쪽만 채운다.
             // 타이밸브실도 IsMud라 MudSpec을 반드시 넘긴다 — GeometryType이 "이토밸브실"로 정규화되므로
             // null이면 ValveRoomGeometryCalculator.Validate가 예외를 던진다(docs/144 § 1-3).

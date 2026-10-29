@@ -10,16 +10,19 @@ public sealed class RunJunctionDetailUseCase
     private readonly CreatePipeMaterialScheduleUseCase _schedule;
     private readonly CreatePipeMaterialDraftingUseCase _drafting;
     private readonly CreateJunctionDetailViewUseCase _plan;
+    private readonly CreateJunctionDetailSheetUseCase _sheet;
     private readonly BackfillPipeMaterialParametersUseCase _backfill;
     private readonly IPipeCatalogSource _catalog;
 
     public RunJunctionDetailUseCase(CreatePipeMaterialScheduleUseCase schedule,
         CreatePipeMaterialDraftingUseCase drafting, CreateJunctionDetailViewUseCase plan,
+        CreateJunctionDetailSheetUseCase sheet,
         BackfillPipeMaterialParametersUseCase backfill, IPipeCatalogSource catalog)
     {
         _schedule = schedule;
         _drafting = drafting;
         _plan = plan;
+        _sheet = sheet;
         _backfill = backfill;
         _catalog = catalog;
     }
@@ -30,6 +33,7 @@ public sealed class RunJunctionDetailUseCase
         PipeMaterialScheduleResult? schedule = null;
         PipeMaterialScheduleResult? drafting = null;
         JunctionDetailResult? plan = null;
+        JunctionDetailSheetResult? sheet = null;
         var warnings = new List<string>();
 
         // 체크 = 문서 전체 재산정 포함 재기록. 미체크여도 값 빈 부재(수동 배치 밸브 등)는 자동 기록 — 재료표에 빠지지 않게.
@@ -69,6 +73,12 @@ public sealed class RunJunctionDetailUseCase
             catch (Exception ex) { warnings.Add($"평면 상세도 생성 실패: {ex.Message}"); }
         }
 
-        return new JunctionDetailRunResult(backfill, schedule, drafting, plan, warnings);
+        // 평면·도면 만든 뒤 배치. 평면 끈 실행은 시트도 안 건드림
+        if (options.CreatePlan && options.CreateSheet)
+            try { sheet = _sheet.Execute(); }
+            catch (DhbimwaterException ex) when (ex.Code == ErrorCodes.NoActiveDocument) { throw; }
+            catch (Exception ex) { warnings.Add($"시트 생성 실패: {ex.Message}"); }
+
+        return new JunctionDetailRunResult(backfill, schedule, drafting, plan, warnings, sheet);
     }
 }

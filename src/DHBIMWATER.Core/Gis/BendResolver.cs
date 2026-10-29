@@ -57,7 +57,10 @@ public static class BendResolver
         => BendingRuleCatalog.For(MaterialOf(node)).Resolve(node, settings, forcedAngleDeg);
 
     public static IReadOnlyList<BendResolution> ResolveAll(IReadOnlyList<NodeClassification> nodes, BendSettings settings, IReadOnlyDictionary<int, double>? forcedAngles = null)
-        => nodes.Where(x => x.Kind == NodeKind.Bend).Select(x => Resolve(x, settings, forcedAngles?.GetValueOrDefault(x.NodeId))).ToList();
+        // GetValueOrDefault는 키 없으면 0 반환 → 0˚ 지정이 되어 자동판정이 안 돎. 키 없음 = null로 넘김.
+        => nodes.Where(x => x.Kind == NodeKind.Bend)
+            .Select(x => Resolve(x, settings, forcedAngles is not null && forcedAngles.TryGetValue(x.NodeId, out var forced) ? forced : null))
+            .ToList();
 
     public static double TangentLength(double radiusMm, double angleDeg)
         => radiusMm * Math.Tan(angleDeg * Math.PI / 360d);

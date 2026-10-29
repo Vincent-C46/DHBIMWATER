@@ -22,21 +22,19 @@
             <TabControl Style="{StaticResource PrimaryTabControlStyle}">
                 <TabItem Header="패밀리" Style="{StaticResource PrimaryTabItemStyle}">
                     <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="0,10,0,0">
-            <TextBlock Text="여기서 고른 패밀리·파라미터는 [저장]을 누르면 프로젝트에 남고, 다음에 창을 열 때 그대로 돌아옵니다. 저장값이 없는 칸만 이름으로 추정합니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,6"><TextBlock Text="저장 범위" FontSize="11" Foreground="#7F8C8D" VerticalAlignment="Center"/><ContentControl Style="{StaticResource HelpIconStyle}" Tag="여기서 고른 패밀리·파라미터는 [저장]을 누르면 프로젝트에 남고, 다음에 창을 열 때 그대로 돌아옵니다. 저장값이 없는 칸만 이름으로 추정합니다."/></StackPanel>
             <Border Background="#F7F9FB" BorderBrush="#DCE6EE" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,10"><StackPanel>
                 <TextBlock Text="관" FontWeight="Bold" Foreground="#4A6FA5" Margin="0,0,0,6"/>
                 <TextBlock Text="관 패밀리 (배관 부속류)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding SegmentFamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding SegmentFamilyTypeName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,8"/>
                 <TextBlock Text="관 길이 파라미터" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding LengthParameterNames, Mode=OneWay}" SelectedItem="{Binding LengthParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,8"/>
-                <TextBlock Text="직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding LengthParameterNames, Mode=OneWay}" SelectedItem="{Binding DiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
-                <TextBlock Text="숫자(무차원) 파라미터를 고르면 관경 값을 mm 숫자 그대로 씁니다. 길이형이면 단위를 자동 변환합니다. 곡관·이형관·밸브 직경은 길이형만 지원합니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                <StackPanel Orientation="Horizontal"><TextBlock Text="직경 파라미터 (선택)" FontWeight="SemiBold"/><ContentControl Style="{StaticResource HelpIconStyle}" Tag="숫자(무차원) 파라미터를 고르면 관경 값을 mm 숫자 그대로 씁니다. 길이형이면 단위를 자동 변환합니다. 곡관·이형관·밸브 직경은 길이형만 지원합니다."/></StackPanel><ComboBox ItemsSource="{Binding LengthParameterNames, Mode=OneWay}" SelectedItem="{Binding DiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
                 <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions><TextBlock Text="정척 길이" VerticalAlignment="Center"/><TextBox Grid.Column="1" Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding StraightLengthMm, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="2" Text="mm" Margin="4,0"/></Grid>
             </StackPanel></Border>
             <Border Background="#F7F9FB" BorderBrush="#DCE6EE" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,10"><StackPanel>
-                <TextBlock Text="곡관" FontWeight="Bold" Foreground="#4A6FA5" Margin="0,0,0,6"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="곡관" FontWeight="Bold" Foreground="#4A6FA5"/><ContentControl Style="{StaticResource HelpIconStyle}" Tag="각도 구분 없이 모든 절점에 이 패밀리 하나를 씁니다. 배관망에 여러 꺾임각이 섞여 있으면 이 패밀리의 실제 형상과 다른 각도에서 커넥터가 어긋날 수 있습니다."/></StackPanel>
                 <TextBlock Text="곡관 패밀리 (배관 부속류)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding SegmentFamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding BendFamilyTypeName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
                 <TextBlock Text="곡관 직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding BendParameterNames, Mode=OneWay}" SelectedItem="{Binding BendDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
                 <TextBlock Text="곡관 각도 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding BendParameterNames, Mode=OneWay}" SelectedItem="{Binding BendAngleParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
-                <TextBlock Text="각도 구분 없이 모든 절점에 이 패밀리 하나를 씁니다. 배관망에 여러 꺾임각이 섞여 있으면 이 패밀리의 실제 형상과 다른 각도에서 커넥터가 어긋날 수 있습니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
             </StackPanel></Border>
             <Border Background="#F7F9FB" BorderBrush="#DCE6EE" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,10"><StackPanel>
                 <TextBlock Text="T형관" FontWeight="Bold" Foreground="#4A6FA5" Margin="0,0,0,6"/>
@@ -45,7 +43,7 @@
                 <TextBlock Text="T형관 분기 직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding TeeBranchParameterNames, Mode=OneWay}" SelectedItem="{Binding TeeBranchDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,10"/>
             </StackPanel></Border>
             <Border Background="#F7F9FB" BorderBrush="#DCE6EE" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,10"><StackPanel>
-                <TextBlock Text="Y형관 (경사 분기)" FontWeight="Bold" Foreground="#4A6FA5" Margin="0,0,0,6"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="Y형관 (경사 분기)" FontWeight="Bold" Foreground="#4A6FA5"/><ContentControl Style="{StaticResource HelpIconStyle}" Tag="분기각 30~60°인 절점에 이 패밀리를 놓습니다. 90°는 T형관이 맡습니다."/></StackPanel>
                 <TextBlock Text="Y형관 패밀리 (배관 부속류)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding SegmentFamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding WyeFamilyTypeName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,10"/>
                 <TextBlock Text="Y형관 주관 직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding WyeParameterNames, Mode=OneWay}" SelectedItem="{Binding WyeDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,10"/>
                 <TextBlock Text="Y형관 분기 직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding WyeBranchParameterNames, Mode=OneWay}" SelectedItem="{Binding WyeBranchDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,10"/>
@@ -56,7 +54,6 @@
                     <TextBlock Text="Y형관 분기각 파라미터 (선택)" FontWeight="SemiBold"/>
                     <ComboBox ItemsSource="{Binding WyeAngleParameterNames, Mode=OneWay}" SelectedItem="{Binding WyeBranchAngleParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
                 </StackPanel>
-                <TextBlock Text="분기각 30~60°인 절점에 이 패밀리를 놓습니다. 90°는 T형관이 맡습니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
             </StackPanel></Border>
             <!-- 밸브부관 A·B 카드는 오른쪽 "5. 바이패스 세트" 섹션으로 옮겼다(docs/229 § B). -->
             <Border Background="#F7F9FB" BorderBrush="#DCE6EE" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,10"><StackPanel>
@@ -66,11 +63,10 @@
                 <TextBlock Text="십자관 분기 직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding CrossBranchParameterNames, Mode=OneWay}" SelectedItem="{Binding CrossBranchDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,10"/>
             </StackPanel></Border>
             <Border Background="#F7F9FB" BorderBrush="#DCE6EE" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,10"><StackPanel>
-                <TextBlock Text="이경관" FontWeight="Bold" Foreground="#4A6FA5" Margin="0,0,0,6"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="이경관" FontWeight="Bold" Foreground="#4A6FA5"/><ContentControl Style="{StaticResource HelpIconStyle}" Tag="동심·편심을 한 칸으로 통합했습니다. 쓰는 이경관 패밀리 하나를 고르세요."/></StackPanel>
                 <TextBlock Text="이경관 패밀리 (배관 부속류)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding SegmentFamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding ReducerFamilyTypeName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,10"/>
                 <TextBlock Text="이경관 큰 쪽 직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding ReducerLargeParameterNames, Mode=OneWay}" SelectedItem="{Binding ReducerLargeDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,10"/>
                 <TextBlock Text="이경관 작은 쪽 직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding ReducerSmallParameterNames, Mode=OneWay}" SelectedItem="{Binding ReducerSmallDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
-                <TextBlock Text="동심·편심을 한 칸으로 통합했습니다. 쓰는 이경관 패밀리 하나를 고르세요." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
                 <TextBlock Text="이경관은 아직 자동 배치하지 않습니다. 매핑만 저장됩니다." Foreground="#B03A2E" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,0"/>
             </StackPanel></Border>
                     </StackPanel></ScrollViewer>
@@ -100,10 +96,9 @@
                             <CheckBox Content="· 근처점" Style="{StaticResource PrimaryCheckBoxStyle}" IsChecked="{Binding SnapNearest, Mode=TwoWay}" Margin="0,0,10,0"/>
                         </WrapPanel>
                         <CheckBox Content="외곽선에도 OSNAP 적용" Style="{StaticResource PrimaryCheckBoxStyle}" IsChecked="{Binding SnapOutline, Mode=TwoWay}" Margin="0,6,0,12"/>
-                        <TextBlock Text="기준점 좌표" FontWeight="SemiBold"/>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="기준점 좌표" FontWeight="SemiBold"/><ContentControl Style="{StaticResource HelpIconStyle}" Tag="스냅·기준점은 이번 세션에만 적용됩니다. [저장]은 패밀리·파라미터 매핑만 프로젝트에 기록합니다."/></StackPanel>
                         <Grid Margin="0,4,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions><TextBlock Text="X" VerticalAlignment="Center"/><TextBox Grid.Column="1" Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding ReferenceX, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="2" Text="mm" Margin="4,0"/></Grid>
                         <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions><TextBlock Text="Y" VerticalAlignment="Center"/><TextBox Grid.Column="1" Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding ReferenceY, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="2" Text="mm" Margin="4,0"/></Grid>
-                        <TextBlock Text="스냅·기준점은 이번 세션에만 적용됩니다. [저장]은 패밀리·파라미터 매핑만 프로젝트에 기록합니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"/>
                     </StackPanel></ScrollViewer>
                 </TabItem>
             </TabControl>

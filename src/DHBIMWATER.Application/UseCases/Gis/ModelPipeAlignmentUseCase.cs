@@ -128,6 +128,14 @@ public sealed class ModelPipeAlignmentUseCase
         var (settings, settingsSource) = settingsResolution;
         // docs/148: 원본 XY·편각 보존. 배치 시 DN별 Global Z 보정.
         var alignments = loaded.Alignments;
+        // 붙은 곡관 쌍(한 칸 각도 2개·다리보다 가까운 지정 정점)을 연속 곡관 두 정점으로 나눈다 — 이후 계획·직관·이경관이 같은 정점을 본다.
+        IReadOnlyList<string> compoundWarnings = Array.Empty<string>();
+        if (UsesBends(request.OutputMode))
+        {
+            var compound = CompoundBendSplitter.Split(alignments, (alignment, vertex, angle) => CompoundLegs(alignment, vertex, angle, settings));
+            alignments = compound.Alignments;
+            compoundWarnings = compound.Warnings;
+        }
         var stepVertices = alignments.Select(_ => (IReadOnlySet<int>)new HashSet<int>()).ToList();
         var origin = new AlignmentPlacementOrigin(reference?.X ?? 0, reference?.Y ?? 0, request.ZDatum, settings.StraightPipes);
         var infoContext = new PipeInfoParameterContext(settings.ActiveJointType, settings.ApplicationMode, request.ZDatum,
@@ -144,6 +152,7 @@ public sealed class ModelPipeAlignmentUseCase
             (bendPlan, bendWarnings) = UsesBends(request.OutputMode)
                 ? PlanBends(alignments, stepVertices, request, settings, settingsSource == BendSettingsSource.BuiltInDefault)
                 : (null, Array.Empty<string>());
+        if (compoundWarnings.Count > 0) bendWarnings = compoundWarnings.Concat(bendWarnings).ToList();
         IReadOnlyList<string> infeasibleWarnings = Array.Empty<string>();
         if (bendPlan is not null)
         {
@@ -301,6 +310,17 @@ public sealed class ModelPipeAlignmentUseCase
     /// 엑셀 곡관유형 열에 값이 있는 정점 수. 단부 정점(0, n-1)은 편각이 정의되지 않아
     /// <see cref="BendTrimPlanner"/>와 같은 범위(1 ~ n-2)로 센다. 곡관유형 열이 없는 선형은 제외한다.
     /// </summary>
+    /// <summary>쌍 분할용 다리 길이 — 계획(BendTrimPlanner)과 같은 판정 규칙으로 지정각 곡관을 고른다. 치수 없으면 null.</summary>
+    private static CompoundBendLegs? CompoundLegs(PipeAlignment alignment, int vertex, double angleDeg, BendSettings settings)
+    {
+        var diameter = AlignmentDiameterProfile.DiameterAtVertex(alignment, vertex);
+        var node = new NodeClassification(-1, alignment.Vertices[vertex], DHBIMWATER.Core.Gis.NodeKind.Bend, 2, angleDeg, diameter, diameter, alignment.PipeKind);
+        var resolution = BendResolver.Resolve(node, settings, angleDeg);
+        return resolution.HasFittingSize && resolution.LayingLengthMm > 0
+            ? new CompoundBendLegs(resolution.LayingLengthMm, resolution.LongLegLengthMm)
+            : null;
+    }
+
     private static int CountDeclaredBends(IReadOnlyList<PipeAlignment> alignments)
     {
         var count = 0;

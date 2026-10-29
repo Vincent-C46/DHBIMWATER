@@ -93,7 +93,7 @@ internal sealed class PipeQuantityRulesAdapter : IPipeQuantityRules
             input.Material is null ? null : Parse<PipeMaterialCode>(input.Material.Value),
             Parse<JointConnectionCode>(input.Connection), Parse<SteelClassCode>(input.SteelClass),
             input.PipeKind, input.DiameterMm, input.BranchDiameterMm, input.LengthMm,
-            input.DeflectionDeg, input.WyeAngleDeg));
+            input.DeflectionDeg, input.WyeAngleDeg, input.FlangeCount));
         return new RuleDtos.FittingWeight(result.WeightKg, result.UnitWeightKgPerM);
     }
     public string? ResolveGrade(PipeMaterial material, string? pipeKind, double diameterMm)
@@ -101,16 +101,18 @@ internal sealed class PipeQuantityRulesAdapter : IPipeQuantityRules
     public RuleDtos.FittingWeightPart PartOf(string? strippedName)
         => Parse<RuleDtos.FittingWeightPart>(PipeQuantityRulesInterop.PartOf(strippedName));
     public double? StraightWeightKg(IPipeCatalog catalog, string pipeKind,
-        double diameterMm, double lengthM, string? jointType)
-        => PipeQuantityRulesInterop.StraightWeightKg(Handle(catalog), pipeKind, diameterMm, lengthM, jointType);
+        double diameterMm, double lengthM, string? jointType,
+        SteelFittingClass steelClass = SteelFittingClass.None, int flangeCount = 0)
+        => PipeQuantityRulesInterop.StraightWeightKg(Handle(catalog), pipeKind, diameterMm, lengthM, jointType,
+            Parse<SteelClassCode>(steelClass), flangeCount);
     public double? DuctileBendWeightKg(IPipeCatalog catalog, BendConnection connection, BendForm form,
         string? jointType, double diameterMm, double angleDeg)
         => PipeQuantityRulesInterop.DuctileBendWeightKg(Handle(catalog), Parse<JointConnectionCode>(connection),
             Parse<BendFormCode>(form), jointType, diameterMm, angleDeg);
     public double? SteelBendWeightKg(IPipeCatalog catalog, BendConnection connection,
-        SteelFittingClass steelClass, double diameterMm, double angleDeg)
+        SteelFittingClass steelClass, double diameterMm, double angleDeg, int flangeCount = 0)
         => PipeQuantityRulesInterop.SteelBendWeightKg(Handle(catalog), Parse<JointConnectionCode>(connection),
-            Parse<SteelClassCode>(steelClass), diameterMm, angleDeg);
+            Parse<SteelClassCode>(steelClass), diameterMm, angleDeg, flangeCount);
     public double? ReducerWeightKg(IPipeCatalog catalog, PipeMaterial material, BendConnection connection,
         ReducerForm form, string? jointType, SteelFittingClass steelClass, double largeMm, double smallMm)
         => PipeQuantityRulesInterop.ReducerWeightKg(Handle(catalog), Parse<PipeMaterialCode>(material),

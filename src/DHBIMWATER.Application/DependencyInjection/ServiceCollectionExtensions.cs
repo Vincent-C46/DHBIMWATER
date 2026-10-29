@@ -17,6 +17,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<CreatePumpingStationUseCase>();
         services.AddTransient<CreateValvePipingUseCase>();
         services.AddTransient<PlaceVerticalBranchUseCase>();
+        services.AddTransient<DHBIMWATER.Application.UseCases.Families.ApplyFamilyTypeImagesUseCase>();   // docs/309
         services.AddTransient<SavePipeLayoutFamilySettingsUseCase>();
         services.AddTransient<SaveConcreteSettingsUseCase>();
         services.AddTransient<SaveValveRoomDimensionCatalogUseCase>();
@@ -34,6 +35,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<CreatePipeMaterialScheduleUseCase>();
         services.AddTransient<CreatePipeMaterialDraftingUseCase>();
         services.AddTransient<CreateJunctionDetailViewUseCase>();
+        services.AddTransient<CreateJunctionDetailSheetUseCase>();
         services.AddTransient<RunJunctionDetailUseCase>();
         services.AddTransient<BuildJunctionDetailPreviewUseCase>();
         services.AddTransient<BackfillPipeMaterialParametersUseCase>();

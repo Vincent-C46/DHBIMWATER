@@ -30,11 +30,14 @@ public interface IPipeQuantityRules
     A.FittingWeight ResolveFittingWeight(IPipeCatalog catalog, A.FittingWeightInput input);
     string? ResolveGrade(PipeMaterial material, string? pipeKind, double diameterMm);
     A.FittingWeightPart PartOf(string? strippedName);
-    double? StraightWeightKg(IPipeCatalog catalog, string pipeKind, double diameterMm, double lengthM, string? jointType);
+    /// <summary>직관 무게. 강관은 플랜지 단부 수 × 플랜지 개당 무게(<paramref name="steelClass"/> 등급)를 더함.</summary>
+    double? StraightWeightKg(IPipeCatalog catalog, string pipeKind, double diameterMm, double lengthM, string? jointType,
+        SteelFittingClass steelClass = SteelFittingClass.None, int flangeCount = 0);
     double? DuctileBendWeightKg(IPipeCatalog catalog, BendConnection connection, BendForm form,
         string? jointType, double diameterMm, double angleDeg);
+    /// <summary>강관 곡관 무게 + 플랜지 단부 수 × 플랜지 개당 무게.</summary>
     double? SteelBendWeightKg(IPipeCatalog catalog, BendConnection connection,
-        SteelFittingClass steelClass, double diameterMm, double angleDeg);
+        SteelFittingClass steelClass, double diameterMm, double angleDeg, int flangeCount = 0);
     double? ReducerWeightKg(IPipeCatalog catalog, PipeMaterial material, BendConnection connection,
         ReducerForm form, string? jointType, SteelFittingClass steelClass, double largeMm, double smallMm);
 }

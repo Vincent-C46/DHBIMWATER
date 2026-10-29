@@ -34,7 +34,7 @@ public sealed class ExcelAlignmentMappingViewModelTests
         vm.Sheets[0].IsChecked = true;
         vm.XColumn = vm.ColumnOptions.Single(x => x.Index == 4);
 
-        vm.DataStartRow = 3;
+        vm.DataStartRow = 6;
 
         Assert.Equal(4, vm.XColumn?.Index);
     }
@@ -53,34 +53,70 @@ public sealed class ExcelAlignmentMappingViewModelTests
     }
 
     [Fact]
-    public void 밸브실모드_XY를_추정하면_기타열을_접어둔다()
+    public void 기본값은_헤더4행_데이터시작5행()
     {
-        var vm = new ExcelAlignmentMappingViewModel(new StubReader(), new StubDialog(), "sample.xlsx") { IsValveRoomMode = true };
+        var vm = new ExcelAlignmentMappingViewModel(new StubReader(), new StubDialog(), "sample.xlsx");
 
-        vm.Sheets[0].IsChecked = true;
-
-        Assert.False(vm.IsOtherColumnsExpanded);
-        Assert.Equal("표고 (관중심) *", vm.ZLabel);
+        Assert.Equal(4, vm.HeaderRow);
+        Assert.Equal(5, vm.DataStartRow);
     }
 
     [Fact]
-    public void 밸브실모드_Y를_못_찾으면_기타열을_펼친다()
+    public void 관로모드_필수열을_다_추정하면_열지정을_접어둔다()
     {
-        var vm = new ExcelAlignmentMappingViewModel(new StubReader([" East ", "북쪽", "표 고", "측점", "사용자 X", "곡관유형"]), new StubDialog(), "sample.xlsx") { IsValveRoomMode = true };
+        var vm = new ExcelAlignmentMappingViewModel(new StubReader(), new StubDialog(), "sample.xlsx");
+
+        vm.Sheets[0].IsChecked = true;
+
+        Assert.False(vm.IsColumnMappingExpanded);
+    }
+
+    [Fact]
+    public void 관로모드_Y를_못_찾으면_열지정을_펼친다()
+    {
+        var vm = new ExcelAlignmentMappingViewModel(new StubReader([" East ", "북쪽", "표 고", "측점", "사용자 X", "곡관유형"]), new StubDialog(), "sample.xlsx");
 
         vm.Sheets[0].IsChecked = true;
 
         Assert.Null(vm.YColumn);
-        Assert.True(vm.IsOtherColumnsExpanded);
+        Assert.True(vm.IsColumnMappingExpanded);
+    }
+
+    [Fact]
+    public void 밸브실모드_필수열을_다_추정하면_열지정을_접어둔다()
+    {
+        var vm = new ExcelAlignmentMappingViewModel(
+            new StubReader([" East ", "NORTH", "표 고", "측점", "DN", "곡관유형", "밸브실", "원지반"]), new StubDialog(), "sample.xlsx") { IsValveRoomMode = true };
+
+        vm.Sheets[0].IsChecked = true;
+
+        Assert.False(vm.HasMissingRequiredColumn);
+        Assert.False(vm.IsColumnMappingExpanded);
+        Assert.Equal("표고 (관중심) *", vm.ZLabel);
+    }
+
+    [Fact]
+    public void 밸브실모드_필수열_하나라도_없으면_열지정을_펼친다()
+    {
+        // 밸브실 유형·원지반 열 없음.
+        var vm = new ExcelAlignmentMappingViewModel(new StubReader(), new StubDialog(), "sample.xlsx") { IsValveRoomMode = true };
+
+        vm.Sheets[0].IsChecked = true;
+
+        Assert.True(vm.IsColumnMappingExpanded);
     }
 
     private sealed class StubReader(string?[]? header = null) : IExcelAlignmentSourceReader
     {
         public bool CanRead(string filePath) => true;
         public IReadOnlyList<string> GetSheetNames(string filePath) => ["관로1", "관로2"];
+        // 관로 정보 보고서 꼴 — 1~3행 제목·빈 행, 4행 헤더, 5행부터 데이터.
         public IReadOnlyList<IReadOnlyList<string?>> PreviewRows(string filePath, string sheetName, int maxRows) =>
         [
-            header ?? [" East ", "NORTH", "표 고", "측점", "사용자 X", "곡관유형"],
+            ["관로 정보 보고서"],
+            [],
+            [],
+            header ??[" East ", "NORTH", "표 고", "측점", "사용자 X", "곡관유형"],
             ["1", "2", "3", "0+000", "4", ""],
             ["5", "6", "7", "0+010", "8", "45˚"]
         ];

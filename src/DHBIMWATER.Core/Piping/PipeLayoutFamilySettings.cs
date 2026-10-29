@@ -65,7 +65,9 @@ public sealed record PipeLayoutFamilySettings(
     /// <summary>상대값 기준 레벨 ElementId. 이름 변경에 견디도록 Id로 저장한다.</summary>
     long? ElevationLevelId = null,
     /// <summary>레벨로부터 Offset(mm).</summary>
-    double? ElevationOffsetMm = null)
+    double? ElevationOffsetMm = null,
+    /// <summary>함께 가져온 기초 ElementId(2026-10-29). 공기밸브실 IN/OUT을 기초 외측면에 맞출 때 쓴다.</summary>
+    IReadOnlyList<long>? OutlineFoundationElementIds = null)
 {
     public static PipeLayoutFamilySettings Empty { get; } = new();
 

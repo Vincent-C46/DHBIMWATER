@@ -1,52 +1,74 @@
 namespace DHBIMWATER.Core.Piping;
 
-/// <summary>내장 프리셋 카탈로그. 1차는 전부 직관만이다(docs/172 § 0-3 Q1).
+/// <summary>내장 프리셋 카탈로그. 제수·공기·이토는 K-water 표준도(docs/01.*.pdf) 판독값이다(2026-10-28).
 /// 사용자가 유형별 밸브·분기 구성을 확정하면 <b>이 목록만</b> 바꾼다 — 코드 구조는 그대로다.</summary>
 public static class ValveRoomPipingTemplateCatalog
 {
     public static IReadOnlyList<ValveRoomPipingTemplate> BuiltIn { get; } =
     [
-        Straight("이토밸브실"),
-        Straight("공기밸브실"),
-        // 샘플(2026-10-08 Claude 제안) — 본관 IN→OUT 중간 T 2개에서 위로 올라가 우회하는 연결(타이) 루프.
-        // 선5(우회 상단) 중앙에 밸브 1개, 선2(본관) 중앙에 바이패스 세트 1개(아래쪽=진행 방향 오른쪽). 패밀리는 사용자가 고른다.
-        new("타이밸브실", "타이밸브실 샘플(본관+우회 루프)",
+        // K-water 표준도 이토밸브실(3.0×2.5, D900~1200, 2026-10-28). 외곽은 밸브실 + 중간벽 + 방류실 전체로 잡힘.
+        // 이토관은 중간벽을 지나 방류실 쪽 면에서 끝남(표준도 이토밸브 유출부). 방류관(높이 다름)은 그리지 않음(사용자 결정).
+        // 끝점은 피킹한 중간벽에서 찾음(EndAtInteriorWall) — 중간벽 위치는 밸브실 창에서 바뀌므로 비율로 고정하지 않음.
+        // 중간벽 없으면 x 0.5(창 기본 = 중간벽 정중앙)에서 끝. y 0.45 = 관경별 (W1+D/2)/W 0.42(DN900)~0.48(DN1200)의 중간값.
+        // 슬루스 T 0.35 = 표준도 1140 / 관 길이 3300.
+        new("이토밸브실", "이토밸브실 표준도(이토관+슬루스)",
+            Ports: [new(PortFlow.In, OutlineSide.Left, 0.45, "IN")],
+            Segments: [new(TemplatePoint.Port("IN"), TemplatePoint.Relative(0.5, 0.45), EndAtInteriorWall: true)],
+            Valves: [new(0, 0.35, ValveRole.Sluice)]),
+        // K-water 표준도 공기밸브실(2.0×2.0, D1500~1600, 2026-10-28). 중앙 수직 공기밸브는 프리셋 범위 밖 — 수직분기(docs/301)로 직접 넣음.
+        // 외곽에 본관 관통 Void가 있으면 이 직관 대신 ForMainPipeVoid를 씀(2026-10-29). 이건 Void 없을 때 폴백.
+        Straight(AirValveRoom),
+        // 표준도 없음 — 2026-10-08 임의 샘플(우회 루프) 삭제, 도면 받을 때까지 직관만(2026-10-28 사용자 결정).
+        Straight("타이밸브실"),
+        // K-water 표준도 제수밸브실(7.0×5.0, D1600~1650, 2026-10-28). IN2는 표준도에 없어 뺌(사용자 결정).
+        // y 0.55 = (W1 709 + W4 1247 + D/2 800)/5000. 본관 밸브(버터플라이) = 우회 분기 두 점 정중앙 x 0.443.
+        // 부제수밸브 우회관 = 바이패스 세트(+1 = 진행 방향 왼쪽 = 도면 상단 W2 측). 분기 간격·우회 관경은 세트가 핸드북으로 정함.
+        // 분기점 수직 공기밸브 2개는 프리셋 범위 밖 — 수직분기(docs/301)로 직접 넣음. 신축관(x 0.77~0.88)도 미포함.
+        new("제수밸브실", "제수밸브실 표준도(본관 밸브+부제수 바이패스)",
             Ports:
             [
-                new(PortFlow.In, OutlineSide.Left, 0.5, "IN"),
-                new(PortFlow.Out, OutlineSide.Right, 0.5, "OUT"),
+                new(PortFlow.In, OutlineSide.Left, 0.55, "IN"),
+                new(PortFlow.Out, OutlineSide.Right, 0.55, "OUT"),
             ],
-            Segments:
-            [
-                new(TemplatePoint.Port("IN"), TemplatePoint.Relative(0.30, 0.5)),            // 1) 입구 → T1
-                new(TemplatePoint.Relative(0.30, 0.5), TemplatePoint.Relative(0.70, 0.5)),   // 2) 본관 T1 → T2
-                new(TemplatePoint.Relative(0.70, 0.5), TemplatePoint.Port("OUT")),           // 3) T2 → 출구
-                new(TemplatePoint.Relative(0.30, 0.5), TemplatePoint.Relative(0.30, 0.8)),   // 4) T1 → 위로(곡관)
-                new(TemplatePoint.Relative(0.30, 0.8), TemplatePoint.Relative(0.70, 0.8)),   // 5) 우회 상단
-                new(TemplatePoint.Relative(0.70, 0.8), TemplatePoint.Relative(0.70, 0.5)),   // 6) 아래로(곡관) → T2
-            ],
-            Valves: [new(4, 0.5, ValveRole.Sluice)],
-            BypassSets: [new(1, 0.5, -1)]),
-        // IN 2개는 제수밸브실이다(2026-09-15 사용자 수정 — 종전 이토밸브실에 두었던 것을 옮김). 배관 구성은 미확정 자리표시자.
-        new("제수밸브실", "제수밸브실 기본(직관)",
-            Ports:
-            [
-                new(PortFlow.In, OutlineSide.Left, 0.5, "IN"),
-                new(PortFlow.In, OutlineSide.Left, 0.75, "IN2"),
-                new(PortFlow.Out, OutlineSide.Right, 0.5, "OUT"),
-            ],
-            Segments:
-            [
-                new(TemplatePoint.Port("IN"), TemplatePoint.Port("OUT")),
-                new(TemplatePoint.Port("IN2"), TemplatePoint.Relative(1.0, 0.75)),   // 우측 벽면까지. 포트 없음
-            ],
-            Valves: []),
+            Segments: [new(TemplatePoint.Port("IN"), TemplatePoint.Port("OUT"))],
+            Valves: [new(0, 0.443, ValveRole.Other)],
+            BypassSets: [new(0, 0.443, +1)]),
     ];
 
     /// <summary>유형의 기본 프리셋. 없으면 null — 적용 버튼이 비활성된다.</summary>
     public static ValveRoomPipingTemplate? Default(string? zone)
         => string.IsNullOrWhiteSpace(zone) ? null
          : BuiltIn.FirstOrDefault(x => string.Equals(x.Zone, zone, StringComparison.Ordinal));
+
+    /// <summary>공기밸브실 유형명. 추천 배치가 고정 프리셋 대신 Void 자리를 쓰는 유형이다(2026-10-29).</summary>
+    public const string AirValveRoom = "공기밸브실";
+
+    /// <summary>공기밸브실 — 기초 본관 관통 Void 자리를 지나는 직관 1본(2026-10-29). 외곽이 비었으면 null.
+    /// 끝 = 포트 접점 면(외곽이 기초 외측면 모드면 기초까지, 2026-10-29).
+    /// X축 관통 = 좌→우 IN/OUT 포트(Void Y). Y축 = 하→상 선만, 포트 없음 — 캔버스가 Top/Bottom 화살표 미지원(docs/172 § 0-5).
+    /// 관경 = Void 지름에서 역산한 DN(기본 관경 대비 비율로 넣음).</summary>
+    public static ValveRoomPipingTemplate? ForMainPipeVoid(string zone, ValveRoomOutline outline, MainPipeVoid pipeVoid, double defaultDiameterMm)
+    {
+        if (outline.IsEmpty || outline.WidthMm <= 0 || outline.HeightMm <= 0 || defaultDiameterMm <= 0) return null;
+        var ratio = pipeVoid.AlongX
+            ? (pipeVoid.Center.Y - outline.MinY) / outline.HeightMm
+            : (pipeVoid.Center.X - outline.MinX) / outline.WidthMm;
+        ratio = Math.Clamp(ratio, 0, 1);
+        // Y축은 포트가 없어 끝점을 비율로 줌 — 기초 외측면 사용 시 0~1 밖(기초까지 연장).
+        var face = outline.PortFaceBounds;
+        var bottom = (face.MinY - outline.MinY) / outline.HeightMm;
+        var top = (face.MaxY - outline.MinY) / outline.HeightMm;
+        var diameterRatio = pipeVoid.NominalDiameterMm / defaultDiameterMm;
+        var name = $"{zone} 본관 관통 Void(DN{pipeVoid.NominalDiameterMm:0})";
+        return pipeVoid.AlongX
+            ? new(zone, name,
+                [new(PortFlow.In, OutlineSide.Left, ratio, "IN"), new(PortFlow.Out, OutlineSide.Right, ratio, "OUT")],
+                [new(TemplatePoint.Port("IN"), TemplatePoint.Port("OUT"), diameterRatio)],
+                [])
+            : new(zone, name, [],
+                [new(TemplatePoint.Relative(ratio, bottom), TemplatePoint.Relative(ratio, top), diameterRatio)],
+                []);
+    }
 
     /// <summary>IN(좌, 중앙) → OUT(우, 중앙) 직관 1본.</summary>
     private static ValveRoomPipingTemplate Straight(string zone) => new(zone, $"{zone} 기본(직관)",

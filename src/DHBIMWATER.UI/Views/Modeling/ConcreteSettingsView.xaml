@@ -16,9 +16,7 @@
         <controls:TitleBar/>
         <Border Grid.Row="1" Background="White" CornerRadius="12" Margin="20,12" Padding="16">
             <StackPanel>
-                <TextBlock Text="부재별 콘크리트 재료" Style="{StaticResource SubHeadingTextBlockStyle}" Foreground="#4A6FA5"/>
-                <TextBlock Text="이 문서의 펌프장·토출조·배수지·밸브실 생성에 공통으로 쓰입니다. 이미 만든 부재는 바뀌지 않습니다. 보·기둥은 사용한 패밀리 유형의 구조 재료가 바뀝니다."
-                           Style="{StaticResource CaptionTextBlockStyle}" Margin="0,0,0,10"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,10"><TextBlock Text="부재별 콘크리트 재료" Style="{StaticResource SubHeadingTextBlockStyle}" Foreground="#4A6FA5" Margin="0"/><ContentControl Style="{StaticResource HelpIconStyle}" Tag="이 문서의 펌프장·토출조·배수지·밸브실 생성에 공통으로 쓰입니다. 이미 만든 부재는 바뀌지 않습니다. 보·기둥은 사용한 패밀리 유형의 구조 재료가 바뀝니다.&#x0a;&#x0a;같은 두께의 바닥에 강도가 다른 부재가 섞이면 유형 이름 뒤에 강도가 붙습니다(예: 일반 - 200mm_18MPa)."/></StackPanel>
                 <DataGrid Style="{StaticResource PrimaryDataGridStyle}" ItemsSource="{Binding Rows}" MinHeight="230" Margin="0,0,0,8">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="부재" Binding="{Binding MemberName, Mode=OneWay}" IsReadOnly="True" Width="110"/>
@@ -28,8 +26,6 @@
                         <DataGridTextColumn Header="재료명" Binding="{Binding MaterialName, Mode=OneWay}" IsReadOnly="True" Width="*"/>
                     </DataGrid.Columns>
                 </DataGrid>
-                <TextBlock Text="같은 두께의 바닥에 강도가 다른 부재가 섞이면 유형 이름 뒤에 강도가 붙습니다(예: 일반 - 200mm_18MPa)."
-                           Style="{StaticResource CaptionTextBlockStyle}"/>
             </StackPanel>
         </Border>
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="20,0,20,16">

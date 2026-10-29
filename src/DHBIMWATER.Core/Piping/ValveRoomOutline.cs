@@ -30,6 +30,29 @@ public sealed record OutlineWall(
 /// 나머지는 헌치 등 덧붙은 단면으로 보고 캔버스에 점선으로 그린다(docs/189 § B-2).</param>
 public sealed record OutlineColumn(long ElementId, IReadOnlyList<Point2D> Corners, bool IsCore = true);
 
+/// <summary>공기밸브실 기초를 관통하는 본관 Void(밸브실 모델링 산출물, 2026-10-29). 좌표 mm.</summary>
+/// <param name="Center">평면 관통 중심.</param>
+/// <param name="AlongX">true = X축 관통(관이 X 방향), false = Y축.</param>
+/// <param name="DiameterMm">Void 지름(2r) = 관 외경 + 여유. 2026-10-29 전 모델은 DN 그대로.</param>
+/// <param name="CenterElevationMm">관 중심 절대 표고.</param>
+/// <param name="RunStart">관 중심선이 기초 솔리드를 지나는 구간의 한 끝(평면). 교점 못 구했으면 null(2026-10-29).</param>
+/// <param name="RunEnd">같은 구간의 다른 끝.</param>
+public sealed record MainPipeVoid(Point2D Center, bool AlongX, double DiameterMm, double CenterElevationMm,
+    Point2D? RunStart = null, Point2D? RunEnd = null)
+{
+    /// <summary>기초 관통 구간 양 끝을 다 아는지.</summary>
+    public bool HasRun => RunStart is not null && RunEnd is not null;
+
+    /// <summary>배치할 관 호칭지름. Void 지름을 외경·DN 표에서 역산, 못 찾으면 Void 지름 그대로.</summary>
+    public double NominalDiameterMm => MainPipeVoidSizing.NominalFromVoidDiameter(DiameterMm) ?? DiameterMm;
+
+    /// <summary>역산이 표에서 DN을 찾았는지.</summary>
+    public bool HasKnownNominal => MainPipeVoidSizing.NominalFromVoidDiameter(DiameterMm) is not null;
+}
+
+/// <summary>함께 가져온 기초의 평면 경계상자(mm, 2026-10-29). 공기밸브실 IN/OUT 접점을 기초 외측면에 둘 때 쓴다.</summary>
+public sealed record OutlineFoundation(long ElementId, double MinX, double MinY, double MaxX, double MaxY);
+
 /// <summary>외곽선까지의 임시치수 한 방향. <see cref="Hit"/>는 외곽선 위의 도달점이다.</summary>
 public readonly record struct OutlineMeasure(Point2D From, Point2D Hit, double DistanceMm);
 
@@ -45,10 +68,14 @@ public sealed class ValveRoomOutline
 
     public static ValveRoomOutline Empty { get; } = new([]);
 
-    public ValveRoomOutline(IReadOnlyList<OutlineWall> walls, IReadOnlyList<OutlineColumn>? columns = null)
+    public ValveRoomOutline(IReadOnlyList<OutlineWall> walls, IReadOnlyList<OutlineColumn>? columns = null, MainPipeVoid? mainPipeVoid = null,
+        IReadOnlyList<OutlineFoundation>? foundations = null, bool useFoundationFaces = false)
     {
         Walls = walls;
         Columns = columns ?? [];
+        MainPipeVoid = mainPipeVoid;
+        Foundations = foundations ?? [];
+        UseFoundationFaces = useFoundationFaces && (Foundations.Count > 0 || mainPipeVoid is { HasRun: true });
         if (walls.Count == 0) return;
 
         var xs = walls.SelectMany(w => new[] { w.InnerStart.X, w.InnerEnd.X }).ToList();
@@ -62,6 +89,39 @@ public sealed class ValveRoomOutline
     /// OSNAP 스냅 후보에도 들어가지 않는다.
     /// <para><b>항목 수 ≠ 기둥 본 수</b> — 한 본이 단면 개수만큼 쪼개져 들어 있다(<see cref="OutlineColumn"/>).</para></summary>
     public IReadOnlyList<OutlineColumn> Columns { get; }
+
+    /// <summary>함께 가져온 기초(표시·접점 전용). 외곽 치수(MinX 등)에는 안 들어감.</summary>
+    public IReadOnlyList<OutlineFoundation> Foundations { get; }
+
+    /// <summary>true면 포트 접점(<see cref="AnchorOf"/>)을 벽 내측면 대신 기초 외측면(경계상자 합)에 둔다. 공기밸브실 전용(2026-10-29).
+    /// 기초가 없으면 항상 false. 포트 이격(상하 위치)은 그대로 벽 내측 기준.</summary>
+    public bool UseFoundationFaces { get; }
+
+    /// <summary>접점 기준 면 경계(기초 사용 시 기초 합, 아니면 벽 내측 경계상자).</summary>
+    public (double MinX, double MinY, double MaxX, double MaxY) PortFaceBounds
+    {
+        get
+        {
+            if (!UseFoundationFaces) return (MinX, MinY, MaxX, MaxY);
+            var (minX, minY, maxX, maxY) = Foundations.Count > 0
+                ? (Foundations.Min(f => f.MinX), Foundations.Min(f => f.MinY), Foundations.Max(f => f.MaxX), Foundations.Max(f => f.MaxY))
+                : (MinX, MinY, MaxX, MaxY);
+            // 관통 축 방향은 솔리드 교점(실제 기초 외측면)이 경계상자보다 우선 — 회전·헌치에 안 끌려감.
+            if (MainPipeVoid is { RunStart: { } a, RunEnd: { } b } v)
+            {
+                if (v.AlongX) { minX = Math.Min(a.X, b.X); maxX = Math.Max(a.X, b.X); }
+                else { minY = Math.Min(a.Y, b.Y); maxY = Math.Max(a.Y, b.Y); }
+            }
+            return (minX, minY, maxX, maxY);
+        }
+    }
+
+    /// <summary>접점 기준만 바꾼 사본.</summary>
+    public ValveRoomOutline WithFoundationFaces(bool use)
+        => use == UseFoundationFaces || IsEmpty ? this : new ValveRoomOutline(Walls, Columns, MainPipeVoid, Foundations, use);
+
+    /// <summary>외곽 범위 안 본관 관통 Void(공기밸브실). 없으면 null. 외곽 치수·스냅에는 안 씀.</summary>
+    public MainPipeVoid? MainPipeVoid { get; }
 
     /// <summary>외곽이 비었는지 — <b>벽</b> 기준이다. 기둥만 골라서는 외곽을 잡을 수 없다(docs/184 § C-5).</summary>
     public bool IsEmpty => Walls.Count == 0;
@@ -105,7 +165,15 @@ public sealed class ValveRoomOutline
             OuterEnd = Shift(w.OuterEnd, offset),
             // 기둥도 같이 옮기지 않으면 기준점을 바꿨을 때 벽만 움직이고 기둥이 제자리에 남는다(docs/184 § A-4).
         }).ToList(),
-        Columns.Select(c => c with { Corners = c.Corners.Select(p => Shift(p, offset)).ToList() }).ToList());
+        Columns.Select(c => c with { Corners = c.Corners.Select(p => Shift(p, offset)).ToList() }).ToList(),
+        MainPipeVoid is { } v ? v with
+        {
+            Center = Shift(v.Center, offset),
+            RunStart = v.RunStart is { } a ? Shift(a, offset) : null,
+            RunEnd = v.RunEnd is { } b ? Shift(b, offset) : null,
+        } : null,
+        Foundations.Select(f => f with { MinX = f.MinX + offset.X, MaxX = f.MaxX + offset.X, MinY = f.MinY + offset.Y, MaxY = f.MaxY + offset.Y }).ToList(),
+        UseFoundationFaces);
     }
 
     private static Point2D Shift(Point2D p, Point2D offset) => new(p.X + offset.X, p.Y + offset.Y);
@@ -199,12 +267,14 @@ public sealed class ValveRoomOutline
     public Point2D AnchorOf(PipePort port, bool fromFarEdge)
     {
         if (IsEmpty) return new Point2D(0, 0);
+        // 면 위치만 기초 외측면으로 바뀜(UseFoundationFaces). 이격은 벽 내측 경계 기준 그대로.
+        var face = PortFaceBounds;
         return port.Side switch
         {
-            OutlineSide.Left => new Point2D(MinX, fromFarEdge ? MaxY - port.OffsetMm : MinY + port.OffsetMm),
-            OutlineSide.Right => new Point2D(MaxX, fromFarEdge ? MaxY - port.OffsetMm : MinY + port.OffsetMm),
-            OutlineSide.Top => new Point2D(fromFarEdge ? MaxX - port.OffsetMm : MinX + port.OffsetMm, MaxY),
-            OutlineSide.Bottom => new Point2D(fromFarEdge ? MaxX - port.OffsetMm : MinX + port.OffsetMm, MinY),
+            OutlineSide.Left => new Point2D(face.MinX, fromFarEdge ? MaxY - port.OffsetMm : MinY + port.OffsetMm),
+            OutlineSide.Right => new Point2D(face.MaxX, fromFarEdge ? MaxY - port.OffsetMm : MinY + port.OffsetMm),
+            OutlineSide.Top => new Point2D(fromFarEdge ? MaxX - port.OffsetMm : MinX + port.OffsetMm, face.MaxY),
+            OutlineSide.Bottom => new Point2D(fromFarEdge ? MaxX - port.OffsetMm : MinX + port.OffsetMm, face.MinY),
             _ => throw new ArgumentOutOfRangeException(nameof(port), port.Side, "지원하지 않는 변"),
         };
     }

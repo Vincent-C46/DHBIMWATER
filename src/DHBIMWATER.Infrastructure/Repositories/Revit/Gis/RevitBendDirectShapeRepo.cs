@@ -142,7 +142,9 @@ internal sealed class RevitBendDirectShapeRepo : IBendDirectShapeRepo
         writer.Integer(shape, PipeAlignmentParameters.CutCount, _rules.PlannedBendCutCount);
         writer.JointComposition(shape, info.BendConnection, endCount: 2, socketEnds: socketEnds);   // A형 `2S` · B형 `1S`(docs/199 § 2)
         var weight = isSteel
-            ? _rules.SteelBendWeightKg(catalog, info.BendConnection, info.SteelFittingClass, plan.DiameterMm, plan.StandardAngleDeg)
+            // 강관 곡관 + 플랜지 단부 수 × 개당 무게(None→F12, 형상 등급과 같음).
+            ? _rules.SteelBendWeightKg(catalog, info.BendConnection, ValveBypassSpecTable.NormalizeSteelClass(info.SteelFittingClass),
+                plan.DiameterMm, plan.StandardAngleDeg, PipeEndFlagParameters.SteelFlangeCount(PipeMaterial.Steel, info.BendConnection))
             : _rules.DuctileBendWeightKg(catalog, info.BendConnection, plan.Form, info.JointType, plan.DiameterMm, plan.StandardAngleDeg);
         if (weight is { } weightKg) writer.MassKg(shape, PipeAlignmentParameters.Weight, weightKg);
         // DirectShape는 측점편집 대상이 아니다(docs/214, 2026-09-22 사용자 확정) — 갱신용 태그는 적지 않는다.

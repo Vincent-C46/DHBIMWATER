@@ -26,4 +26,9 @@ public static class PipeEndFlagParameters
         var leftSocket = !flanged && !isSteel && !isBend;
         return (leftSocket, false, flanged, flanged);
     }
+
+    /// <summary>계획관로 강관 플랜지 단부 수 — 무게 산출용. 플랜지 접합 = 양끝 2, 용접 = 0. 강관 외 0.
+    /// <see cref="Resolve"/>의 좌·우 플랜지 켬과 같은 축.</summary>
+    public static int SteelFlangeCount(PipeMaterial? material, BendConnection connection)
+        => material == PipeMaterial.Steel && connection == BendConnection.Flanged ? 2 : 0;
 }

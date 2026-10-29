@@ -795,8 +795,12 @@ public class ValveRoomViewModelTests
     {
         public bool CanRead(string filePath) => true;
         public IReadOnlyList<string> GetSheetNames(string filePath) => ["선형"];
+        // 매핑 창 기본값(헤더 4행·시작 5행)에 맞춘 관로 정보 보고서 꼴.
         public IReadOnlyList<IReadOnlyList<string?>> PreviewRows(string filePath, string sheetName, int maxRows) =>
         [
+            ["관로 정보 보고서"],
+            [],
+            [],
             ["측점", "X", "Y", "Z", "호칭지름(DN)", "밸브실유형", "원지반"],
             ["0+000", "0", "0", "10", "DN300", "", ""],
             ["0+050", "50", "0", "10", "DN300", "이토밸브실", "15"]

@@ -46,6 +46,20 @@ public sealed class BendAuthorityPolicyTests
         Assert.Contains(result.Warnings, x => x.Contains("비표준") && x.Contains("자동판정"));
     }
 
+    // 지정각 없는 절점이 0˚ 지정으로 판정돼 곡관 치수 없이 빠지던 회귀(2026-10-27) — 개수만 보면 못 잡아 각도·치수까지 본다.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("30˚")]
+    [InlineData("22.5˚, 11.25˚")]
+    public void AutomaticJudgement_ResolvesNearestStandardAngle(string? kind)
+    {
+        var result = Evaluate(Alignment(kind is null ? null : [null, kind, null]));
+
+        var bend = Assert.Single(result.Kept);
+        Assert.Equal(90, bend.StandardAngleDeg);
+        Assert.True(bend.HasFittingSize);
+    }
+
     [Fact]
     public void SharedNonAuthoritativeAlignment_PreventsSuppression()
     {

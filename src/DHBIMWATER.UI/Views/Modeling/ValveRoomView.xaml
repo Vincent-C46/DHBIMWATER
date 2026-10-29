@@ -242,6 +242,8 @@
                                             <Button DockPanel.Dock="Left" Style="{StaticResource PrimaryButtonStyle}" Content="위치 자동지정" Command="{Binding AutoPlaceCommand}" Margin="0,0,8,0"
                                                     ToolTip="엑셀 선형 좌표표와 밸브실측점으로 좌표·도북각·기초 상부 EL·내부 높이를 계산합니다."/>
                                             <Button DockPanel.Dock="Left" Style="{StaticResource CancelButtonStyle}" Content="엑셀 다시 지정" Command="{Binding RemapPlacementExcelCommand}" Margin="0,0,8,0"/>
+                                            <!-- 표고 규칙 안내는 툴팁으로(H1 값 따라 바뀜) -->
+                                            <ContentControl DockPanel.Dock="Left" Style="{StaticResource HelpIconStyle}" Margin="0,0,8,0" Tag="{Binding PlacementRuleText}"/>
                                             <TextBlock Text="{Binding PlacementSourceText}" Foreground="#7F8C8D" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                                         </DockPanel>
                                         <!-- docs/310: 본관 관경·관저고·원지반은 엑셀 행에서만 받는다(칸 없음 — 틀리면 엑셀을 고친다). 사용자 조정값은 H1 하나. -->
@@ -267,10 +269,6 @@
                                             <TextBlock Grid.Column="1" Text="제원표 형식"/>
                                             <ComboBox Grid.Column="2" Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding SluiceVariants}" SelectedItem="{Binding SelectedSluiceVariant, Mode=TwoWay}"/>
                                         </Grid>
-                                        <TextBlock Margin="0,8,0,0" Text="{Binding PlacementRuleText}" FontSize="11" Foreground="#7F8C8D" TextWrapping="Wrap"/>
-                                        <TextBlock Margin="0,4,0,0" Text="※ 내부 L·W는 표준도 제원표(유형 + 관경)에서 채웁니다. 표에 없으면 지금 값을 유지합니다." FontSize="11" Foreground="#7F8C8D" TextWrapping="Wrap"/>
-                                        <TextBlock Margin="0,4,0,0" Text="※ 공기밸브실은 기초 상면 = 관중심(엑셀 표고) + 본관 중심 깊이(Hp)입니다." FontSize="11" Foreground="#7F8C8D"
-                                                   TextWrapping="Wrap" Visibility="{Binding AirValveVisibility}"/>
                                         <Separator Margin="0,10,0,10"/>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
@@ -304,7 +302,11 @@
                                                 <ColumnDefinition Width="35"/>
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="EL"/>
-                                            <TextBlock Grid.Column="1" Text="기초 상부 표고"/>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+                                                <TextBlock Text="기초 상부 표고" VerticalAlignment="Center"/>
+                                                <ContentControl Style="{StaticResource HelpIconStyle}" Visibility="{Binding AirValveVisibility}"
+                                                                Tag="공기밸브실은 기초 상면 = 관중심(엑셀 표고) + 본관 중심 깊이(Hp)입니다."/>
+                                            </StackPanel>
                                             <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding FoundationTopEl, StringFormat={}{0:0.###}, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
                                             <TextBlock Grid.Column="3" Text="m" Margin="8,0"/>
                                         </Grid>
@@ -322,7 +324,11 @@
                                         </Grid>
                                     </StackPanel>
                                 </Border>
-                                <TextBlock Text="평면 · 높이 (내부 유효)" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,8"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <TextBlock Text="평면 · 높이 (내부 유효)" FontWeight="SemiBold" Foreground="#4A6FA5"/>
+                                    <ContentControl Style="{StaticResource HelpIconStyle}"
+                                                    Tag="위치 자동지정 시 내부 L·W는 표준도 제원표(유형 + 관경)에서 채웁니다. 표에 없으면 지금 값을 유지합니다."/>
+                                </StackPanel>
                                 <Border Background="#EEF2F7" CornerRadius="8" Padding="14" Margin="0,0,0,12">
                                     <StackPanel>
                                         <Grid>
@@ -410,7 +416,10 @@
                                 </Border>
                                 <Border Background="#EEF2F7" CornerRadius="8" Padding="14" Visibility="{Binding SluiceVisibility}">
                                     <StackPanel>
-                                        <TextBlock Text="제수밸브실 보 · 기둥 배치" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,8"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                            <TextBlock Text="제수밸브실 보 · 기둥 배치" FontWeight="SemiBold" Foreground="#4A6FA5"/>
+                                            <ContentControl Style="{StaticResource HelpIconStyle}" Tag="X·Y 방향 보가 직교하는 중심점마다 기둥을 자동 배치합니다."/>
+                                        </StackPanel>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*"/>
@@ -479,12 +488,11 @@
                                             <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding BeamSpacingY, StringFormat={}{0:0.###}, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
                                             <TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                         </Grid>
-                                        <TextBlock Text="※ X·Y 방향 보가 직교하는 중심점마다 기둥을 자동 배치합니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,10,0,0"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Background="#EEF2F7" CornerRadius="8" Padding="14" Margin="0,12,0,0" Visibility="{Binding DrainPitVisibility}">
                                     <StackPanel>
-                                        <DockPanel Margin="0,0,0,8"><TextBlock Text="드레인 피트" FontWeight="SemiBold" Foreground="#4A6FA5" DockPanel.Dock="Left"/><CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" Content="드레인 피트 생성" IsChecked="{Binding HasDrainPit, Mode=TwoWay}" HorizontalAlignment="Right" VerticalAlignment="Center"/></DockPanel>
+                                        <DockPanel Margin="0,0,0,8"><TextBlock Text="드레인 피트" FontWeight="SemiBold" Foreground="#4A6FA5" DockPanel.Dock="Left"/><ContentControl Style="{StaticResource HelpIconStyle}" DockPanel.Dock="Left" Tag="드레인 피트는 밸브실당 1개입니다. 텍스트 상자 값이 mm 단위 실치수이며, Depth가 기초 상면 기준 굴착 깊이입니다. 콤보 상자는 그 값을 기록할 Void 패밀리의 인스턴스 매개변수로, 기본값은 자동 추정되고 직접 고르면 그 선택이 유지됩니다. Void는 기초 상단 EL에 자동 배치되며, Depth가 기초 두께를 넘으면 버림콘크리트까지 함께 절단합니다. '로드할 때 보이드로 절단'이 켜진 Void 패밀리를 고르면 기초를 절단하고, 꺼진 실물 피트 패밀리를 고르면 절단 없이 배치만 합니다."/><CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" Content="드레인 피트 생성" IsChecked="{Binding HasDrainPit, Mode=TwoWay}" HorizontalAlignment="Right" VerticalAlignment="Center"/></DockPanel>
                                         <StackPanel IsEnabled="{Binding HasDrainPit}">
                                             <Border Padding="10" BorderBrush="#C7D3E0" BorderThickness="1" CornerRadius="4">
                                                 <StackPanel>
@@ -530,7 +538,6 @@
                                                 <TextBlock Grid.Column="3" Text="mm" Margin="8,0" VerticalAlignment="Center"/>
                                             </Grid>
                                         </StackPanel>
-                                        <TextBlock Text="드레인 피트는 밸브실당 1개입니다. 텍스트 상자 값이 mm 단위 실치수이며, Depth가 기초 상면 기준 굴착 깊이입니다. 콤보 상자는 그 값을 기록할 Void 패밀리의 인스턴스 매개변수로, 기본값은 자동 추정되고 직접 고르면 그 선택이 유지됩니다. Void는 기초 상단 EL에 자동 배치되며, Depth가 기초 두께를 넘으면 버림콘크리트까지 함께 절단합니다. '로드할 때 보이드로 절단'이 켜진 Void 패밀리를 고르면 기초를 절단하고, 꺼진 실물 피트 패밀리를 고르면 절단 없이 배치만 합니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"/>
                                     </StackPanel>
                                 </Border>
                             </StackPanel>
@@ -556,14 +563,16 @@
                                 <!-- 헌치는 모든 밸브실 유형에 적용되므로 FrameVisibility(제수 전용)를 걸지 않는다(docs/153 § D-2). -->
                                 <Border Background="#EEF2F7" CornerRadius="8" Padding="14" Margin="0,0,0,12">
                                     <StackPanel>
-                                        <TextBlock Text="헌치" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,8"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                            <TextBlock Text="헌치" FontWeight="SemiBold" Foreground="#4A6FA5"/>
+                                            <ContentControl Style="{StaticResource HelpIconStyle}" Tag="헌치는 외벽 4면 내측과 이토실 중간벽 양측을 따라, 기초 상단과 상부슬래브 하단에 배치됩니다. 목록은 '패밀리명 : 타입명'으로 표시되며, DH_헌치 패밀리가 로드돼 있으면 자동으로 선택됩니다. 유형이 (자동 탐색)이면 이름에 '헌치'가 든 구조 프레임 유형을 자동으로 찾습니다."/>
+                                        </StackPanel>
                                         <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" Content="상부 헌치 배치 (상부슬래브 하단)" IsChecked="{Binding HasUpperHaunch, Mode=TwoWay}" Margin="0,0,0,6"/>
                                         <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" Content="하부 헌치 배치 (기초 상단)" IsChecked="{Binding HasLowerHaunch, Mode=TwoWay}" Margin="0,0,0,8"/>
                                         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="260"/></Grid.ColumnDefinitions>
                                             <TextBlock Text="헌치 유형" VerticalAlignment="Center"/>
                                             <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Grid.Column="1" ItemsSource="{Binding HaunchTypeNames}" SelectedItem="{Binding SelectedHaunchTypeName, Mode=TwoWay}"/>
                                         </Grid>
-                                        <TextBlock Text="헌치는 외벽 4면 내측과 이토실 중간벽 양측을 따라, 기초 상단과 상부슬래브 하단에 배치됩니다. 목록은 '패밀리명 : 타입명'으로 표시되며, DH_헌치 패밀리가 로드돼 있으면 자동으로 선택됩니다. 유형이 (자동 탐색)이면 이름에 '헌치'가 든 구조 프레임 유형을 자동으로 찾습니다." Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Background="#EEF2F7" CornerRadius="8" Padding="14">
@@ -578,9 +587,12 @@
                                         <StackPanel Margin="0,8,0,0" Visibility="{Binding AirValveVisibility}">
                                             <TextBlock Text="본관 관통 Void" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,6"/>
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="45"/><ColumnDefinition Width="*"/><ColumnDefinition Width="110"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
-                                                <TextBlock Text="D"/><TextBlock Grid.Column="1" Text="본관 직경"/><TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding MainPipeDiameter, StringFormat={}{0:0.###}, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
+                                                <TextBlock Text="D"/><StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top"><TextBlock Text="본관 직경" VerticalAlignment="Center"/><ContentControl Style="{StaticResource HelpIconStyle}" Tag="본관 직경(호칭지름 DN)을 바꾸면 기초두께 = D + 500, Hp = 200 + D/2 로 다시 맞춥니다."/></StackPanel><TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding MainPipeDiameter, StringFormat={}{0:0.###}, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                             </Grid>
-                                            <TextBlock Margin="0,4,0,0" Text="본관 직경을 바꾸면 기초두께 = D + 500, Hp = 200 + D/2 로 다시 맞춥니다." FontSize="11" Foreground="#7F8C8D" TextWrapping="Wrap"/>
+                                            <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="45"/><ColumnDefinition Width="*"/><ColumnDefinition Width="145"/></Grid.ColumnDefinitions>
+                                                <TextBlock Text="관종"/><TextBlock Grid.Column="1" Text="본관 관종"/><ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Grid.Column="2" ItemsSource="{Binding VoidPipeMaterials}" SelectedItem="{Binding SelectedVoidPipeMaterial}"/>
+                                            </Grid>
+                                            <TextBlock Margin="0,4,0,0" Text="{Binding VoidDiameterText}" FontSize="11" Foreground="#7F8C8D" TextWrapping="Wrap"/>
                                             <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="45"/><ColumnDefinition Width="*"/><ColumnDefinition Width="110"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
                                                 <TextBlock Text="Hp"/><TextBlock Grid.Column="1" Text="기초 상부~본관 중심 깊이"/><TextBox Style="{StaticResource PrimaryTextBoxStyle}" Grid.Column="2" Text="{Binding FoundationTopToPipeCenterDepth, StringFormat={}{0:0.###}, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/><TextBlock Grid.Column="3" Text="mm" Margin="8,0"/>
                                             </Grid>

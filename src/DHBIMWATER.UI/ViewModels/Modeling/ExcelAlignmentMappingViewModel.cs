@@ -30,12 +30,13 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
 {
     private readonly IExcelAlignmentSourceReader _reader;
     private readonly IDialogService _dialog;
-    private int _headerRow = 1, _dataStartRow = 2;
+    // 기본 헤더 4 · 시작 5 — 관로 정보 보고서(코리더 점 보고서) 표 위치(사용자 지시 2026-10-29).
+    private int _headerRow = 4, _dataStartRow = 5;
     private ExcelSheetPickItem? _previewSheet;
     private ExcelColumnOption? _xColumn, _yColumn, _zColumn, _stationColumn, _bendKindColumn, _vertexDiameterColumn, _valveRoomTypeColumn, _groundElColumn, _cumulativeDistanceColumn;
     private bool _isValveRoomMode;
-    // 밸브실 모드 "기타 열" Expander(docs/310). X·Y 추정 실패 시 펼친다.
-    private bool _isOtherColumnsExpanded;
+    // "열 지정" Expander — 두 모드 공통, 기본 접힘(입력 칸 많아 보인다는 피드백, 2026-10-29). 필수 열 추정 실패 시 펼친다.
+    private bool _isColumnMappingExpanded;
     // 밸브실 모드 하단 목록(docs/304). 미리보기 갱신 중엔 열 세터마다 파일을 다시 읽지 않게 막는다.
     private ValveRoomListRow? _selectedValveRoomRow;
     private bool _suspendValveRoomRefresh;
@@ -115,8 +116,12 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
     public ExcelColumnOption? GroundElColumn { get => _groundElColumn; set { if (SetProperty(ref _groundElColumn, value)) NotifyConfirmState(); } }
     /// <summary>누가거리 열(docs/310). 밸브실 목록 표시용만 — 위치는 측점 텍스트로 찾는다. 매핑 레코드에 안 넣는다.</summary>
     public ExcelColumnOption? CumulativeDistanceColumn { get => _cumulativeDistanceColumn; set { if (SetProperty(ref _cumulativeDistanceColumn, value)) RefreshValveRoomRows(); } }
-    /// <summary>밸브실 모드에서 X·Y·Station 방식·곡관 종류를 담은 "기타 열" 펼침 상태.</summary>
-    public bool IsOtherColumnsExpanded { get => _isOtherColumnsExpanded; set => SetProperty(ref _isOtherColumnsExpanded, value); }
+    /// <summary>"열 지정" 영역 펼침 상태. 자동 매핑이 다 잡히면 접힌 채, 필수 열 하나라도 못 잡으면 펼침. 자동으로 다시 접지는 않음.</summary>
+    public bool IsColumnMappingExpanded { get => _isColumnMappingExpanded; set => SetProperty(ref _isColumnMappingExpanded, value); }
+    /// <summary>현재 모드의 필수 열 중 빈 것이 있는가. 밸브실 행 선택은 안 봄 — 열 지정만.</summary>
+    public bool HasMissingRequiredColumn => XColumn is null || YColumn is null || ZColumn is null
+        || (IsValveRoomMode && (UsedIndex(StationColumn) is null || UsedIndex(VertexDiameterColumn) is null
+            || UsedIndex(ValveRoomTypeColumn) is null || UsedIndex(GroundElColumn) is null));
     /// <summary>true = 밸브실 위치 자동지정(docs/304). 선형 시트 1장에 밸브실 행을 끼운 표 — Z는 관중심으로 읽고(docs/310),
     /// 측점·직경(DN)·밸브실 유형·원지반 열을 필수로 본다. 관로 모델링은 false.</summary>
     public bool IsValveRoomMode
@@ -127,7 +132,7 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
             if (!SetProperty(ref _isValveRoomMode, value)) return;
             OnPropertyChanged(nameof(ZLabel));
             OnPropertyChanged(nameof(IsPipeMode));
-            if (value && PreviewSheet is not null && (XColumn is null || YColumn is null)) IsOtherColumnsExpanded = true;
+            if (PreviewSheet is not null && HasMissingRequiredColumn) IsColumnMappingExpanded = true;
             NotifyConfirmState();
         }
     }
@@ -284,8 +289,8 @@ public sealed class ExcelAlignmentMappingViewModel : ViewModelBase
         CumulativeDistanceColumn = previousCumulative is null
             ? OptionalMatch(GuessColumn(headers, CumulativeDistanceKeywords))
             : OptionalColumnOptions.FirstOrDefault(x => x.Index == previousCumulative) ?? OptionalColumnOptions.First();
-        // 접힌 X·Y를 못 잡았으면 펼쳐서 보여준다(docs/310).
-        if (IsValveRoomMode && (XColumn is null || YColumn is null)) IsOtherColumnsExpanded = true;
+        // 접힌 열 지정에서 필수 열을 못 잡았으면 펼쳐서 보여준다.
+        if (HasMissingRequiredColumn) IsColumnMappingExpanded = true;
         OnPropertyChanged(nameof(CanConfirm)); OnPropertyChanged(nameof(StatusText));
     }
 

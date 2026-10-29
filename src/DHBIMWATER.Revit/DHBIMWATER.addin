@@ -8,4 +8,15 @@
 		<VendorId>MYCO</VendorId>
 		<VendorDescription>DOHWA</VendorDescription>
 	</AddIn>
+	<!-- 애드인 탭 → 외부 도구(docs/309). 패밀리 폴더 .rfa 유형 이미지 일괄 지정. -->
+	<AddIn Type="Command">
+		<Text>유형 이미지 일괄 지정</Text>
+		<Description>폴더의 패밀리(.rfa) 모든 유형에 유형 이미지를 넣습니다.</Description>
+		<Assembly>DHBIMWATER\DHBIMWATER.Revit.dll</Assembly>
+		<AddInId>eb55246b-c56f-439d-ac18-e55f7c598695</AddInId>
+		<FullClassName>DHBIMWATER.Revit.Commands.Families.FamilyTypeImageCommand</FullClassName>
+		<AvailabilityClassName>DHBIMWATER.Revit.Commands.Families.FamilyTypeImageCommandAvailability</AvailabilityClassName>
+		<VendorId>MYCO</VendorId>
+		<VendorDescription>DOHWA</VendorDescription>
+	</AddIn>
 </RevitAddIns>

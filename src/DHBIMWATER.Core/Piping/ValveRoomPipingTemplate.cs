@@ -15,7 +15,9 @@ public sealed record TemplatePoint(TemplatePointKind Kind, string? PortLabel, do
 }
 
 /// <param name="DiameterRatio">기본 관경 대비 비율. null = 기본 관경.</param>
-public sealed record TemplateSegment(TemplatePoint Start, TemplatePoint End, double? DiameterRatio = null);
+/// <param name="EndAtInteriorWall">true면 Start→End 방향 반직선이 처음 만나는 내부 벽(이토실 중간벽 등)의 먼 면에서 끝냄.
+/// 외곽에 내부 벽 없으면 End 그대로(2026-10-28).</param>
+public sealed record TemplateSegment(TemplatePoint Start, TemplatePoint End, double? DiameterRatio = null, bool EndAtInteriorWall = false);
 
 /// <summary>밸브 역할. 1차 카탈로그는 비어 있다 — 패밀리 매칭·배치는 후속 지시서(docs/171 § 2-2, docs/172 § 0-5).</summary>
 public enum ValveRole { Sluice, Air, Mud, Check, Other }

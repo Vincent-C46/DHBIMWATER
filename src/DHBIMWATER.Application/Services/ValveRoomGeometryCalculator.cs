@@ -90,7 +90,7 @@ public class ValveRoomGeometryCalculator
         return new AirValveVoidPlacementDefinition(
             new Point3D(isYAxis ? plan.InnerLength / 2 : 0, isYAxis ? 0 : plan.InnerWidth / 2,
                 BaseElevation(dto) - air.FoundationTopToPipeCenterDepth),
-            air.MainPipeDiameter / 2,
+            air.EffectiveVoidDiameter / 2,
             isYAxis ? "Y" : "X");
     }
 

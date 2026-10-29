@@ -580,7 +580,13 @@ public sealed class JunctionDetailViewModel : ViewModelBase
                 ResultLines.Add($"평면 상세도: 생성 {plan.Created.Count}개, 갱신 {plan.Updated.Count}개, 건너뜀 {plan.Skipped.Count}개");
                 foreach (var skipped in plan.Skipped) ResultLines.Add("  건너뜀: " + skipped);
             }
-            foreach (var warning in result.Warnings.Concat(result.Plan?.Warnings ?? [])) ResultLines.Add("경고: " + warning);
+            if (result.Sheet is { } sheet)
+            {
+                ResultLines.Add($"시트: 생성 {sheet.Created.Count}개, 갱신 {sheet.Updated.Count}개, 그대로 {sheet.Unchanged.Count}개, 건너뜀 {sheet.Skipped.Count}개");
+                foreach (var skipped in sheet.Skipped) ResultLines.Add("  건너뜀: " + skipped);
+            }
+            foreach (var warning in result.Warnings.Concat(result.Plan?.Warnings ?? []).Concat(result.Sheet?.Warnings ?? []))
+                ResultLines.Add("경고: " + warning);
             if (ResultLines.Count == 0) ResultLines.Add("요청한 작업 결과가 없습니다.");
             ResultText = string.Join(Environment.NewLine, ResultLines);
             StatusText = "완료";

@@ -82,6 +82,7 @@ namespace DHBIMWATER.Core.Parameters
         Views,                  // OST_Views
         PipeAccessory,          // OST_PipeAccessory
         PipeFitting,            // OST_PipeFitting
+        Pipes,                  // OST_PipeCurves (MEP 배관)
     }
     public record SharedParameterDefinition
     {

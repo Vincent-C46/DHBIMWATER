@@ -434,10 +434,8 @@
 
                             <Border Style="{StaticResource SectionCardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="상부 개구부" Style="{StaticResource SectionHeadStyle}"/>
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="상부 개구부" Style="{StaticResource SectionHeadStyle}"/><ContentControl Style="{StaticResource HelpIconStyle}" VerticalAlignment="Top" Tag="펌프 N대 중 1개소만 TOB1 × TOL2, 나머지는 TOB1 × TOL1"/></StackPanel>
                                     <ItemsControl ItemsSource="{Binding OpeningRows}" ItemTemplate="{StaticResource ValueRowTemplate}"/>
-                                    <TextBlock Text="※ 펌프 N대 중 1개소만 TOB1 × TOL2, 나머지는 TOB1 × TOL1"
-                                               FontSize="11" Foreground="#7F8C8D" TextWrapping="Wrap" Margin="0,4,0,0"/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>

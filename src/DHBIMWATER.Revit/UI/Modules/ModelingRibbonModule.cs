@@ -24,6 +24,12 @@ namespace DHBIMWATER.Revit.UI.Modules
                 LongDescription = "작성 항목, 심볼 오프셋 간격과 축척, 번호 태그, 형상 이미지, 기존 도면 뷰 처리 방법을 설정합니다."
             };
 
+            PushButtonData pipeMaterialRefreshBtn = new PushButtonData("PipeMaterialRefreshCommand", "부재 정보\n갱신", Assembly.GetExecutingAssembly().Location, RevitCommandType<PipeMaterialRefreshCommand>.FullName)
+            {
+                ToolTip = "수동으로 배치한 배관 이음쇠·밸브류·계획관로 가변 패밀리에 수량산출용 매개변수 값을 채웁니다.",
+                LongDescription = "부재를 선택하고 실행하면 선택 범위만, 선택이 없으면 문서 전체가 대상입니다. 이미 값 있는 부재의 개수 재산정은 창에서 따로 켭니다."
+            };
+
             PushButtonData coordinateLinkBtn = new PushButtonData("CoordinateLinkCommand", "기준점\n통합 링크", Assembly.GetExecutingAssembly().Location, RevitCommandType<CoordinateLinkCommand>.FullName);
             PushButtonData placementStationBtn = new PushButtonData("PlacementStationCommand", "측점 편집", Assembly.GetExecutingAssembly().Location, RevitCommandType<PlacementStationCommand>.FullName)
             {
@@ -37,6 +43,7 @@ namespace DHBIMWATER.Revit.UI.Modules
             valveRoomBtn.LargeImage = RibbonButtonImages.GetIcon("valve.png");
             pipeLayoutBtn.LargeImage = RibbonButtonImages.GetIcon("pipe.png");
             junctionDetailBtn.LargeImage = RibbonButtonImages.GetIcon("valve_symbol.png");
+            pipeMaterialRefreshBtn.LargeImage = RibbonButtonImages.GetIcon("Quantity.png");
             coordinateLinkBtn.LargeImage = RibbonButtonImages.GetIcon("link.png");
             placementStationBtn.LargeImage = RibbonButtonImages.GetIcon("link.png");
 
@@ -48,6 +55,7 @@ namespace DHBIMWATER.Revit.UI.Modules
                 panel.AddItem(valveRoomBtn),
                 panel.AddItem(pipeLayoutBtn),
                 panel.AddItem(junctionDetailBtn),
+                panel.AddItem(pipeMaterialRefreshBtn),
                 panel.AddItem(coordinateLinkBtn),
                 //panel.AddItem(placementStationBtn),
             ];

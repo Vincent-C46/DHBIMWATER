@@ -9,10 +9,12 @@ public static class PipeMaterialViewName
     // Revit이 뷰 이름에 허용하지 않는 문자(RevitAPI: "Names cannot contain \ : { } [ ] | ; < > ? ` ~").
     private static readonly char[] Forbidden = ['\\', ':', '{', '}', '[', ']', '|', ';', '<', '>', '?', '`', '~'];
 
-    public static string For(string prefix, string junctionId)
+    public static string For(string prefix, string junctionId) => $"{prefix}_{Sanitize(junctionId)}";
+
+    // 금지 문자 '_' 치환 + 앞뒤 공백 제거만. 시트 이름처럼 접두어 형식 다른 곳용
+    public static string Sanitize(string junctionId)
     {
         var trimmed = junctionId.Trim();
-        var chars = trimmed.Select(c => Array.IndexOf(Forbidden, c) >= 0 ? '_' : c).ToArray();
-        return $"{prefix}_{new string(chars)}";
+        return new string(trimmed.Select(c => Array.IndexOf(Forbidden, c) >= 0 ? '_' : c).ToArray());
     }
 }

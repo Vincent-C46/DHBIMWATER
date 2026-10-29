@@ -74,32 +74,110 @@ public sealed class ValveRoomPipingTemplateResolverTests
     // ── § B-4 Resolve ──────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Resolve_MudRoom_OneStraightRunBetweenInAndOut()
+    public void Resolve_MudRoom_RunEndsAtFarFaceOfPickedMiddleWall()
     {
+        // 중간벽(두께 300, 좌측면 x 2500)을 피킹한 외곽 — 관은 중간벽을 지나 방류실 쪽 면(x 2800)에서 끝남. 비율 위치와 무관.
         var template = ValveRoomPipingTemplateCatalog.Default("이토밸브실")!;
+        var outline = new ValveRoomOutline([.. Outline().Walls,
+            new(5, new Point2D(2500, 0), new Point2D(2500, Height), new Point2D(2800, 0), new Point2D(2800, Height), 300)]);
 
-        var resolved = ValveRoomPipingTemplateResolver.Resolve(template, Outline(), fromFarEdge: false, Diameter);
+        var resolved = ValveRoomPipingTemplateResolver.Resolve(template, outline, fromFarEdge: false, Diameter);
 
-        Assert.Equal(2, resolved.Ports.Count);
+        var port = Assert.Single(resolved.Ports);
+        Assert.Equal(PortFlow.In, port.Flow);
         var run = Assert.Single(resolved.Segments);
-        Assert.Equal(new Point2D(0, 1500), run.Start);
-        Assert.Equal(new Point2D(Width, 1500), run.End);
-        Assert.Equal(Diameter, run.DiameterMm);
+        Assert.Equal(0, run.Start.X, 6);
+        Assert.Equal(1350, run.Start.Y, 6);
+        Assert.Equal(2800, run.End.X, 6);
+        Assert.Equal(1350, run.End.Y, 6);
+        var valve = Assert.Single(resolved.Fittings!);
+        Assert.False(valve.IsBypassSet);
+        Assert.Equal(0.35, valve.T, 6);
     }
 
     [Fact]
-    public void Resolve_SluiceRoom_TwoInletsAndTwoRuns_SecondRunReachesRightFace()
+    public void Resolve_MudRoom_NoMiddleWall_EndsAtCenter()
     {
-        // IN 2개 기본 배치는 제수밸브실이다(사용자 수정 2026-09-15).
+        var template = ValveRoomPipingTemplateCatalog.Default("이토밸브실")!;
+
+        var run = Assert.Single(ValveRoomPipingTemplateResolver.Resolve(template, Outline(), fromFarEdge: false, Diameter).Segments);
+
+        Assert.Equal(Width / 2, run.End.X, 6);
+    }
+
+    [Fact]
+    public void ForMainPipeVoid_YAxis_RunsBottomToTopThroughVoidX_WithVoidDiameter_NoPorts()
+    {
+        var template = ValveRoomPipingTemplateCatalog.ForMainPipeVoid("공기밸브실", Outline(), new MainPipeVoid(new Point2D(1000, 500), false, 1500, 0), Diameter)!;
+
+        var resolved = ValveRoomPipingTemplateResolver.Resolve(template, Outline(), fromFarEdge: false, Diameter);
+
+        var run = Assert.Single(resolved.Segments);
+        Assert.Equal(new Point2D(1000, 0), run.Start);
+        Assert.Equal(new Point2D(1000, Height), run.End);
+        Assert.Equal(1500, run.DiameterMm, 6);
+        Assert.Empty(resolved.Ports);   // Top/Bottom 화살표 미지원(docs/172 § 0-5)
+    }
+
+    [Fact]
+    public void ForMainPipeVoid_FoundationFaces_YAxisRunReachesFoundation()
+    {
+        var outline = new ValveRoomOutline(Outline().Walls, null, null, [new OutlineFoundation(1, -300, -400, Width + 300, Height + 400)], useFoundationFaces: true);
+        var template = ValveRoomPipingTemplateCatalog.ForMainPipeVoid("공기밸브실", outline, new MainPipeVoid(new Point2D(1000, 500), false, 300, 0), Diameter)!;
+
+        var run = Assert.Single(ValveRoomPipingTemplateResolver.Resolve(template, outline, false, Diameter).Segments);
+
+        Assert.Equal(-400, run.Start.Y, 6);
+        Assert.Equal(Height + 400, run.End.Y, 6);
+    }
+
+    [Fact]
+    public void PortFaceBounds_VoidRun_OverridesFoundationBoxAlongAxis()
+    {
+        // 솔리드 교점(-250~4250)이 기초 경계상자(-300~4300)보다 우선. 축 수직 방향(Y)은 경계상자 그대로.
+        var pipeVoid = new MainPipeVoid(new Point2D(2000, 1500), true, 300, 0, new Point2D(-250, 1500), new Point2D(Width + 250, 1500));
+        var outline = new ValveRoomOutline(Outline().Walls, null, pipeVoid, [new OutlineFoundation(1, -300, -400, Width + 300, Height + 400)], useFoundationFaces: true);
+
+        Assert.Equal((-250d, -400d, Width + 250, Height + 400), outline.PortFaceBounds);
+    }
+
+    [Fact]
+    public void UseFoundationFaces_VoidRunWithoutPickedFoundation_StillOn()
+    {
+        var pipeVoid = new MainPipeVoid(new Point2D(2000, 1500), true, 300, 0, new Point2D(-250, 1500), new Point2D(Width + 250, 1500));
+        var outline = new ValveRoomOutline(Outline().Walls, null, pipeVoid, useFoundationFaces: true);
+
+        Assert.True(outline.UseFoundationFaces);
+        Assert.Equal(-150, outline.Translate(new Point2D(100, 0)).PortFaceBounds.MinX, 6);   // 평행이동 시 교점도 같이 이동
+    }
+
+    [Fact]
+    public void AnchorOf_FoundationFaces_MovesFaceOnly_KeepsOffsetFromWallInner()
+    {
+        var outline = new ValveRoomOutline(Outline().Walls, null, null, [new OutlineFoundation(1, -300, -400, Width + 300, Height + 400)], useFoundationFaces: true);
+
+        var anchor = outline.AnchorOf(PipePort.Create(PortFlow.In, OutlineSide.Left, 1000, "IN"), fromFarEdge: false);
+
+        Assert.Equal(new Point2D(-300, 1000), anchor);
+        Assert.False(outline.WithFoundationFaces(false).UseFoundationFaces);
+    }
+
+    [Fact]
+    public void Resolve_SluiceRoom_MainRunWithValveAndBypassAtSamePoint()
+    {
+        // 표준도: IN2 없음(2026-10-28 사용자 결정). 본관 밸브 + 부제수 바이패스 세트가 같은 자리(A–A 사이 본관 밸브).
         var template = ValveRoomPipingTemplateCatalog.Default("제수밸브실")!;
 
         var resolved = ValveRoomPipingTemplateResolver.Resolve(template, Outline(), fromFarEdge: false, Diameter);
 
-        Assert.Equal(2, resolved.Ports.Count(x => x.Flow == PortFlow.In));
-        Assert.Equal(1, resolved.Ports.Count(x => x.Flow == PortFlow.Out));
-        Assert.Equal(2, resolved.Segments.Count);
-        Assert.Equal(new Point2D(0, 2250), resolved.Segments[1].Start);
-        Assert.Equal(new Point2D(Width, 2250), resolved.Segments[1].End);
+        Assert.Single(resolved.Ports, x => x.Flow == PortFlow.In);
+        Assert.Single(resolved.Ports, x => x.Flow == PortFlow.Out);
+        var run = Assert.Single(resolved.Segments);
+        Assert.Equal(new Point2D(0, 1650), run.Start);
+        Assert.Equal(new Point2D(Width, 1650), run.End);
+        Assert.Equal(2, resolved.Fittings!.Count);
+        Assert.All(resolved.Fittings, f => Assert.Equal(0.443, f.T, 6));
+        Assert.Single(resolved.Fittings, f => f.IsBypassSet && f.Side == 1);
     }
 
     [Fact]
@@ -112,10 +190,10 @@ public sealed class ValveRoomPipingTemplateResolverTests
         var fromTop = ValveRoomPipingTemplateResolver.Resolve(template, Outline(), fromFarEdge: true, Diameter);
 
         Assert.Equal(fromBottom.Segments.Select(x => (x.Start, x.End)), fromTop.Segments.Select(x => (x.Start, x.End)));
-        var in2Bottom = fromBottom.Ports.Single(x => x.Label == "IN2");
-        var in2Top = fromTop.Ports.Single(x => x.Label == "IN2");
-        Assert.Equal(2250, in2Bottom.OffsetMm, 6);
-        Assert.Equal(750, in2Top.OffsetMm, 6);
+        var inBottom = fromBottom.Ports.Single(x => x.Label == "IN");
+        var inTop = fromTop.Ports.Single(x => x.Label == "IN");
+        Assert.Equal(1650, inBottom.OffsetMm, 6);
+        Assert.Equal(1350, inTop.OffsetMm, 6);
     }
 
     [Fact]

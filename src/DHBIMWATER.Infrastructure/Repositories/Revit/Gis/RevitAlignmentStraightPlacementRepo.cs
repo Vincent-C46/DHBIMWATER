@@ -248,7 +248,10 @@ internal sealed class RevitAlignmentStraightPlacementRepo : IAlignmentStraightPl
             writer.Text(instance, PipeAlignmentParameters.ElevationDatum, PipeAlignmentParameters.Label(info.ZDatum));
             writer.LengthM(instance, PipeAlignmentParameters.Length, lengthM);
             // 무게 = 단위중량 × 연장 + 소켓 무게(docs/178 § A-2). 규격표에 M무게가 없는 관종은 두 칸 다 비워 둔다.
-            if (_rules.StraightWeightKg(catalog!, alignment.PipeKind, diameterMm, lengthM, info.JointType) is { } weightKg)
+            // 강관 플랜지 접합 = 양끝 플랜지 2개 × 개당 무게. 등급은 플랜지 형상 쓴 등급과 같음(None→F12).
+            if (_rules.StraightWeightKg(catalog!, alignment.PipeKind, diameterMm, lengthM, info.JointType,
+                    ValveBypassSpecTable.NormalizeSteelClass(info.SteelFittingClass),
+                    PipeEndFlagParameters.SteelFlangeCount(PipeKindCatalog.MaterialOf(alignment.PipeKind), info.BendConnection)) is { } weightKg)
             {
                 writer.MassPerLengthKgPerM(instance, PipeAlignmentParameters.UnitWeight, spec!.UnitWeightKgPerM);
                 writer.MassKg(instance, PipeAlignmentParameters.Weight, weightKg);

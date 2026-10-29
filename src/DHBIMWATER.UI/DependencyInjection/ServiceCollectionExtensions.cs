@@ -29,7 +29,9 @@ public static class ServiceCollectionExtensions
 
         // Utilities
         services.AddTransient<ExParamsView>();
+        services.AddTransient<FamilyTypeImageView>();   // docs/309
         services.AddTransient<JunctionDetailView>();
+        services.AddTransient<PipeMaterialRefreshView>();
         #endregion
 
         #region ViewModel ���
@@ -49,7 +51,9 @@ public static class ServiceCollectionExtensions
 
         // Utilities
         services.AddTransient<ExParamsViewModel>();
+        services.AddTransient<FamilyTypeImageViewModel>();   // docs/309
         services.AddTransient<JunctionDetailViewModel>();
+        services.AddTransient<PipeMaterialRefreshViewModel>();
         #endregion
 
         return services;

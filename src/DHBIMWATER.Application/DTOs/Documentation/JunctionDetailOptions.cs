@@ -20,7 +20,9 @@ public sealed record JunctionDetailOptions(
     bool ExpandPositive = true,
     IReadOnlyList<JunctionSetOffset>? SetOffsets = null,
     // 미리보기가 정한 번호 태그 위치(docs/296). null이면 Revit 쪽 종전 규칙
-    IReadOnlyList<JunctionTagPlacement>? TagPlacements = null);
+    IReadOnlyList<JunctionTagPlacement>? TagPlacements = null,
+    // 격점마다 시트 1장 + 평면·3D·드래프팅 배치. 평면 생성 켠 때만 돎
+    bool CreateSheet = true);
 
 public sealed record JunctionDetailResult(IReadOnlyList<string> Created, IReadOnlyList<string> Updated,
     IReadOnlyList<string> Reset, IReadOnlyList<string> Skipped, IReadOnlyList<string> Warnings);
@@ -46,7 +48,11 @@ public sealed record JunctionDetailRunResult(
     PipeMaterialScheduleResult? Schedule,
     PipeMaterialScheduleResult? Drafting,
     JunctionDetailResult? Plan,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    JunctionDetailSheetResult? Sheet = null);
+
+public sealed record JunctionDetailSheetResult(IReadOnlyList<string> Created, IReadOnlyList<string> Updated,
+    IReadOnlyList<string> Unchanged, IReadOnlyList<string> Skipped, IReadOnlyList<string> Warnings);
 
 public sealed record JunctionDetailPreviewJunction(string JunctionId, string RoomType,
     int PartCount, IReadOnlyList<JunctionPreviewItem> Items, IReadOnlyList<PipeMaterialRow> TableRows,

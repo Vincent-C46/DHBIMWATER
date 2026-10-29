@@ -30,6 +30,8 @@ namespace DHBIMWATER.Revit.DependencyInjection
 
             // 사용자 피킹(Selection)이 필요한 Repository용 — Document와 동일하게 람다로 지연 해석한다.
             services.AddSingleton<Func<UIDocument?>>(() => uiApp.ActiveUIDocument);
+            // 백그라운드 패밀리 문서 열기용(docs/309) — 활성 문서와 무관한 Application.
+            services.AddSingleton<Func<Autodesk.Revit.ApplicationServices.Application>>(() => uiApp.Application);
             services.AddSingleton<IRevitDispatcher, RevitDispatcher>();
 
             // Revit 관련 서비스 등록

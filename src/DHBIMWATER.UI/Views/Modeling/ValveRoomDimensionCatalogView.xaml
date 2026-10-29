@@ -17,9 +17,7 @@
         <Border Grid.Row="1" Background="White" CornerRadius="12" Margin="20,12" Padding="16">
             <Grid>
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                <TextBlock Text="관경별 내부 치수" Style="{StaticResource SubHeadingTextBlockStyle}" Foreground="#4A6FA5"/>
-                <TextBlock Grid.Row="1" Text="상수도시설 밸브실 표준도 표 4.1~4.6이 기본값입니다. 고친 표는 이 문서에만 저장됩니다. 길이 = 관 방향, 폭 = 직각, 단위 mm."
-                           Style="{StaticResource CaptionTextBlockStyle}" Margin="0,0,0,10" TextWrapping="Wrap"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,10"><TextBlock Text="관경별 내부 치수" Style="{StaticResource SubHeadingTextBlockStyle}" Foreground="#4A6FA5" Margin="0"/><ContentControl Style="{StaticResource HelpIconStyle}" Tag="상수도시설 밸브실 표준도 표 4.1~4.6이 기본값입니다. 고친 표는 이 문서에만 저장됩니다. 길이 = 관 방향, 폭 = 직각, 단위 mm."/></StackPanel>
                 <Grid Grid.Row="2" Margin="0,0,0,8">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <TextBlock Text="유형" VerticalAlignment="Center" Margin="0,0,8,0"/>

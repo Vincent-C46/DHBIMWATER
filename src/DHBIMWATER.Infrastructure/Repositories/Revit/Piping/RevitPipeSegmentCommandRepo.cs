@@ -1658,8 +1658,10 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
                 new FittingWeightInput(weightPart, network.Material,
                     connections.TryGetValue(part.Instance.Id, out var weightConnection) ? weightConnection
                         : PipeJointCountWriter.ResolveConnection(part.Instance, network.JointConnection, _rules),
-                    network.SteelFittingClass, network.PipeKind,
-                    part.DiameterMm, part.BranchDiameterMm, part.LengthMm, part.DeflectionDeg, part.WyeAngleDeg),
+                    ValveBypassSpecTable.NormalizeSteelClass(network.SteelFittingClass), network.PipeKind,
+                    part.DiameterMm, part.BranchDiameterMm, part.LengthMm, part.DeflectionDeg, part.WyeAngleDeg,
+                    // 강관 단관·곡관 플랜지 무게 — 접합 구성(`1S1F`)의 F 개수.
+                    _rules.DecodeComposition(compositions.GetValueOrDefault(part.Instance.Id)).Flange),
                 catalog, _rules, failed);
         }
 

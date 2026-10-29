@@ -373,7 +373,7 @@
                         <DockPanel Margin="0,0,0,10">
                             <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" DockPanel.Dock="Right" Content="해결된 표기도 보기" IsChecked="{Binding ShowResolvedDiameterMappings, Mode=TwoWay}"/>
                             <!-- 관종 토글은 [모델 유형 선택] 탭 한 곳으로 통일(2026-09-22 사용자 지시). 등급 콤보는 그 관종의 등급만 보이고, 바꾸면 다른 관종 등급 행은 기본 등급으로 다시 잡힌다(docs/211 § N). -->
-                            <TextBlock TextWrapping="Wrap" VerticalAlignment="Center" Text="직경·관종 표기 → DN·등급 · 관종: [모델 유형 선택] 탭 · OD·두께: 규격표 자동"/>
+                            <ContentControl Style="{StaticResource HelpIconStyle}" HorizontalAlignment="Left" Tag="직경·관종 표기를 DN·등급으로 매핑합니다. 관종은 [모델 유형 선택] 탭에서 정하고, OD·두께는 규격표에서 자동으로 채웁니다."/>
                         </DockPanel>
                         <Grid Grid.Row="1">
                         <DataGrid Style="{StaticResource PrimaryDataGridStyle}" x:Name="MappingGrid" ItemsSource="{Binding DiameterMappingsView, Mode=OneWay}" SelectionMode="Extended" AutoGenerateColumns="False" CanUserAddRows="False">
@@ -463,7 +463,7 @@
                                     <Border Background="#F8FAFC" BorderBrush="#D7E0E7" BorderThickness="0,0,0,1" CornerRadius="8,8,0,0" Padding="10,0">
                                         <DockPanel VerticalAlignment="Center">
                                             <TextBlock Text="선형" FontWeight="SemiBold" Foreground="#4A6FA5"/>
-                                            <TextBlock Text="클릭 선택 · Ctrl·Shift 다중" FontSize="11" Foreground="#52606A" HorizontalAlignment="Right"/>
+                                            <ContentControl Style="{StaticResource HelpIconStyle}" HorizontalAlignment="Right" Tag="클릭으로 선택, Ctrl·Shift로 여러 개 선택합니다."/>
                                         </DockPanel>
                                     </Border>
                                     <ListBox Grid.Row="1" ItemsSource="{Binding DirectionRows, Mode=OneWay}" SelectionMode="Extended" BorderThickness="0" Background="Transparent"
@@ -540,7 +540,7 @@
                                     <Border Background="#F8FAFC" BorderBrush="#D7E0E7" BorderThickness="0,0,0,1" CornerRadius="8,8,0,0" Padding="10,0">
                                         <DockPanel VerticalAlignment="Center">
                                             <TextBlock Text="선형 전체 개요도" FontWeight="SemiBold" Foreground="#4A6FA5"/>
-                                            <TextBlock Text="휠 확대·축소 · 드래그 이동 · 더블클릭 전체 보기 · 띠 클릭 → 구간 선택" FontSize="11" Foreground="#52606A" HorizontalAlignment="Right" TextTrimming="CharacterEllipsis" Margin="12,0,0,0"/>
+                                            <ContentControl Style="{StaticResource HelpIconStyle}" HorizontalAlignment="Right" Tag="휠: 확대·축소&#x0a;드래그: 이동&#x0a;더블클릭: 전체 보기&#x0a;띠 클릭: 구간 선택"/>
                                         </DockPanel>
                                     </Border>
                                     <controls:AlignmentOverviewControl x:Name="OverviewControl" Grid.Row="1" Margin="0,0,0,6" Model="{Binding Overview, Mode=OneWay}"
@@ -553,7 +553,7 @@
                             <Rectangle Width="18" Height="4" Fill="#B7C4D0" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="기타 선형" FontSize="11" Foreground="#52606A" Margin="0,0,14,0"/>
                             <TextBlock Text="● 시점 · ▶ 진행 방향(6m 분절 시작 쪽)" FontSize="11" Foreground="#52606A" Margin="0,0,14,0"/>
                             <Rectangle Width="18" Height="8" Fill="#73C0392B" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="배치 제외 구간" FontSize="11" Foreground="#52606A" Margin="0,0,14,0"/>
-                            <TextBlock Text="Sta.: 엑셀 Station 열은 위치 고정 · 없으면 진행 방향 시점부터" FontSize="11" Foreground="#52606A"/>
+                            <TextBlock Text="Sta." FontSize="11" Foreground="#52606A"/><ContentControl Style="{StaticResource HelpIconStyle}" Margin="4,0,0,0" Tag="엑셀 Station 열이 있으면 그 위치로 고정하고, 없으면 진행 방향 시점부터 셉니다."/>
                         </WrapPanel>
                         <!-- 배치 제외 구간 표 — 선택 선형의 구간만(전체 보기 토글) -->
                         <Grid Grid.Row="2" DataContext="{Binding Exclusions}">
@@ -564,7 +564,7 @@
                             </Grid.RowDefinitions>
                             <DockPanel Margin="0,0,0,6">
                                 <TextBlock Text="배치 제외 구간" FontWeight="SemiBold" Foreground="#4A6FA5" VerticalAlignment="Center"/>
-                                <TextBlock Text="  구간 내 관·곡관 미배치 (밸브실 등) · 선택 선형의 구간만 표시" Foreground="#52606A" FontSize="11" VerticalAlignment="Center"/>
+                                <ContentControl Style="{StaticResource HelpIconStyle}" Tag="구간 안에는 관·곡관을 배치하지 않습니다(밸브실 등). 선택한 선형의 구간만 표시합니다."/>
                                 <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" Content="전체 보기" IsChecked="{Binding ShowAllRows, Mode=TwoWay}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                             </DockPanel>
                             <DataGrid x:Name="ExclusionGrid" Grid.Row="1" Style="{StaticResource PrimaryDataGridStyle}" ItemsSource="{Binding VisibleRows}" SelectedItem="{Binding SelectedRow, Mode=TwoWay}"
@@ -622,8 +622,7 @@
                                     <iconPacks:PackIconMaterial Kind="TrashCanOutline" Width="16" Height="16"/>
                                 </Button>
                                 <Button Content="측점순 정렬" Style="{StaticResource CancelButtonStyle}" Command="{Binding SortCommand}" Padding="10,3"/>
-                                <TextBlock VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="#52606A" TextWrapping="Wrap"
-                                           Text="측점: 0+352.5 · 352.5 · STA.0+352.5 · 엑셀(구간명·시작·끝) Ctrl+V"/>
+                                <ContentControl Style="{StaticResource HelpIconStyle}" HorizontalAlignment="Right" Tag="측점 입력 형식: 0+352.5 · 352.5 · STA.0+352.5&#x0a;엑셀에서 구간명·시작·끝 열을 복사해 Ctrl+V로 붙여 넣을 수 있습니다."/>
                             </DockPanel>
                         </Grid>
                     </Grid>

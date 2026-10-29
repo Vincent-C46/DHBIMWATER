@@ -799,6 +799,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         set
         {
             if (!SetProperty(ref _valveRoomZone, value ?? string.Empty)) return;
+            // 공기밸브실 여부로 IN/OUT 접점 면(기초/벽)이 바뀜 — 화살표 다시 그림.
+            if (!_outline.IsEmpty && _canvasOutline.UseFoundationFaces != _outline.WithFoundationFaces(IsAirValveRoom).UseFoundationFaces) RefreshOutline();
             NotifyValidationChanged();
             // 유형이 정해지면 격점번호 기본값도 따라간다(docs/177 § B-4).
             ApplyDefaultJunctionId();
@@ -989,6 +991,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         JointDiameterParameterName ?? "",
         OutlineWallElementIds: _outline.Walls.Select(x => x.ElementId).Distinct().ToList(),
         OutlineColumnElementIds: _outline.Columns.Select(x => x.ElementId).Distinct().ToList(),
+        OutlineFoundationElementIds: _outline.Foundations.Select(x => x.ElementId).Distinct().ToList(),
         ReferenceX: ReferenceX,
         ReferenceY: ReferenceY,
         ArrowFromTop: ArrowFromTop,
@@ -1060,6 +1063,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
 
         _savedOutlineElementIds = (settings.OutlineWallElementIds ?? [])
             .Concat(settings.OutlineColumnElementIds ?? [])
+            .Concat(settings.OutlineFoundationElementIds ?? [])
             .Distinct()
             .ToList();
         if (settings.ReferenceX is { } savedX) { _referenceX = savedX; OnPropertyChanged(nameof(ReferenceX)); }
@@ -1810,6 +1814,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         // Columns는 단면 목록이라 항목 수가 곧 기둥 본 수가 아니다 — ElementId로 센다(docs/189 § C-3).
         var columnCount = outline.Columns.Select(c => c.ElementId).Distinct().Count();
         var columnSuffix = columnCount > 0 ? $" · 기둥 {columnCount}본" : string.Empty;
+        columnSuffix += outline.Foundations.Count > 0 ? $" · 기초 {outline.Foundations.Count}개" : string.Empty;
         Status = $"외곽 반영 — 벽체 {outline.Walls.Count}장{columnSuffix}"
             + $" · 내부 {outline.WidthMm / 1000:N2} × {outline.HeightMm / 1000:N2} m"
             + ZoneStatusSuffix(outline)
@@ -1839,6 +1844,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
 
         var columnCount = outline.Columns.Select(c => c.ElementId).Distinct().Count();
         var columnSuffix = columnCount > 0 ? $" · 기둥 {columnCount}본" : string.Empty;
+        columnSuffix += outline.Foundations.Count > 0 ? $" · 기초 {outline.Foundations.Count}개" : string.Empty;
         var missingSuffix = missingCount > 0 ? $" (삭제 {missingCount}개 제외)" : string.Empty;
         Status = $"외곽 복원 — 벽체 {outline.Walls.Count}장{columnSuffix}{missingSuffix}"
             + $" · 내부 {outline.WidthMm / 1000:N2} × {outline.HeightMm / 1000:N2} m"
@@ -2003,12 +2009,23 @@ public sealed class PipeLayoutViewModel : ViewModelBase
 
     // ── 추천 배치(docs/172 § C-11) ────────────────────────────────────────────────────
 
+    private bool IsAirValveRoom => string.Equals(ValveRoomZone, ValveRoomPipingTemplateCatalog.AirValveRoom, StringComparison.Ordinal);
+
+    /// <summary>추천 배치 적용 시 상대 모드 Offset 기본값(mm, 2026-10-29 사용자 지정). 공기밸브실 제외.</summary>
+    private const double TemplateElevationOffsetMm = 600;
+
     /// <summary>밸브실 유형의 프리셋을 캔버스에 그린다. "비우고 새로 그리기"라 Clear()와 같이 가져온 원본 연결을 끊고,
     /// 스냅샷 한 장으로 그래프·원본 목록·포트를 함께 되돌릴 수 있게 한다.</summary>
     private void ApplyTemplate()
     {
         var template = ValveRoomPipingTemplateCatalog.Default(ValveRoomZone);
         if (template is null || _canvasOutline.IsEmpty) return;
+        // 공기밸브실은 기초 본관 관통 Void 자리·관경·높이를 따른다(2026-10-29). Void 못 찾으면 고정 프리셋(중앙 직관) 폴백.
+        var isAirRoom = IsAirValveRoom;
+        var pipeVoid = isAirRoom ? _canvasOutline.MainPipeVoid : null;
+        if (pipeVoid is not null && ValveRoomPipingTemplateCatalog.ForMainPipeVoid(template.Zone, _canvasOutline, pipeVoid, _diameterMm) is { } voidTemplate)
+            template = voidTemplate;
+        else pipeVoid = null;
         CancelDrawing();
         // 해석(Resolve)을 먼저 한다 — 종전에는 원본 연결 해제·선택 해제를 먼저 해서, 해석이 실패하면
         // Undo 기록 없이 "가져온 원본 연결"만 끊긴 채 남았다(docs/239 § C). Resolve는 캔버스를 바꾸지 않는다.
@@ -2064,6 +2081,13 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         // 프리셋이 정한 이격은 사용자 편집값으로 취급한다 — 이후 외곽 재피킹이 중앙값으로 덮지 않게(docs/172 § 0-4 A5).
         RestorePorts(resolved.Ports, userEdited: true);
         RecordUndoIfChanged(before);
+        // 높이: 공기밸브실 = Void 중심(모드 무관, 상대 모드면 Offset 자동 재계산) / 그 외 = 상대 모드일 때만 Offset 600(덮어씀). 절대 모드는 안 건드림.
+        if (pipeVoid is not null)
+        {
+            DiameterMm = pipeVoid.NominalDiameterMm;
+            Elevation = pipeVoid.CenterElevationMm;
+        }
+        else if (!isAirRoom && ElevationMode == PipeElevationMode.Relative) ElevationOffsetMm = TemplateElevationOffsetMm;
         SetSegmentStart(null);
         IsPreviewVisible = false;
         IsSubLineVisible = false;
@@ -2074,6 +2098,9 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         RefreshGraph();
         Status = $"{template.Name} 적용 — 배관 {_network.Edges.Count}개 · 포트 {Ports.Count}개"
             + (placedFittings > 0 ? $" · 부속 {placedFittings}개" : string.Empty)
+            + (pipeVoid is not null ? $" · 본관 Void DN{pipeVoid.NominalDiameterMm:0} · EL {pipeVoid.CenterElevationMm / 1000d:0.###} m" : string.Empty)
+            + (pipeVoid is { HasKnownNominal: false } ? $" · Void 지름 {pipeVoid.DiameterMm:0.#} mm에 맞는 DN 없음 — 관경 확인" : string.Empty)
+            + (isAirRoom && pipeVoid is null ? " · 본관 관통 Void를 못 찾아 중앙 직관으로 그림 — 높이·관경 직접 확인" : string.Empty)
             + (dropped > 0 ? $" · 짧은 선 {dropped}개 제외" : string.Empty)
             + (unassignedValves > 0 ? $" · 게이트 밸브 유형을 찾지 못해 밸브 {unassignedValves}개는 패밀리 미지정" : string.Empty)
             + (placedBypassSets > 0 && HandbookBypassDiameterMm(_diameterMm) is null
@@ -2510,9 +2537,10 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     /// <summary>원본 외곽을 기준점 기준 캔버스 좌표로 옮기고 벽·화살표 표시 항목을 다시 만든다.</summary>
     private void RefreshOutline()
     {
+        // 공기밸브실만 IN/OUT 접점을 기초 외측면에 둔다(2026-10-29). 기초 안 가져왔으면 벽 내측면 그대로.
         _canvasOutline = _outline.IsEmpty
             ? ValveRoomOutline.Empty
-            : _outline.Translate(new DHBIMWATER.Core.Geometry.Point2D(-ReferenceX, -ReferenceY));
+            : _outline.Translate(new DHBIMWATER.Core.Geometry.Point2D(-ReferenceX, -ReferenceY)).WithFoundationFaces(IsAirValveRoom);
 
         OutlineWalls.Clear();
         foreach (var wall in _canvasOutline.Walls)
@@ -2823,6 +2851,15 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         return new(anchor.X + ux * length, anchor.Y + uy * length);
     }
 
+    /// <summary>끝점이 선 정확히 1개에 물렸으면 그 선의 반대쪽 끝(각도 기준점). 아니면 null — 어느 선에 맞출지 못 정한다.</summary>
+    private DHBIMWATER.Core.Geometry.Point2D? SingleEdgeAnchor(Guid nodeId)
+    {
+        var connected = _network.Edges.Where(x => x.StartNodeId == nodeId || x.EndNodeId == nodeId).Take(2).ToList();
+        if (connected.Count != 1) return null;
+        var anchorId = connected[0].StartNodeId == nodeId ? connected[0].EndNodeId : connected[0].StartNodeId;
+        return _network.Nodes.FirstOrDefault(x => x.Id == anchorId)?.Position;
+    }
+
     /// <summary>Shift 각도 구속점 옆에 있는 다른 선의 끝점(docs/193 § B). 없으면 null.
     /// <para>끝점 OSNAP만 본다 — 중간점·직교점까지 끌어들이면 Shift로 준 각도 지시가 자주 깨진다.
     /// 거리 제한은 <see cref="PipeTopologyBuilder.SnapTolerance"/>가 건다.</para>
@@ -2893,15 +2930,19 @@ public sealed class PipeLayoutViewModel : ViewModelBase
                     var orthoTarget = EndpointSnapNear(ortho, drag.NodeOrigin!) ?? ortho;
                     drag.Dx = orthoTarget.X - drag.NodeOrigin!.X;
                     drag.Dy = orthoTarget.Y - drag.NodeOrigin!.Y;
+                    IsSnapMarkerVisible = false;
                     break;
                 }
                 // OSNAP이 잡히면 그 점에 정확히 맞춘다 — 다른 선 끝점에 붙여야 절점이 병합된다.
                 // 끌고 있는 절점 자신은 아직 옛 좌표로 남아 있으므로 제자리 스냅은 버린다.
-                var snapped = FindSnapPoint(model)?.Point;
-                if (snapped is not null && snapped.DistanceTo(drag.NodeOrigin!) <= 1e-6) snapped = null;
-                var target = snapped ?? SnapToGrid(free);
+                // 선 1개에 물린 끝점이면 그리기와 같은 규칙(2026-10-29): 반대쪽 끝 기준 OSNAP(직교점 등) → 각도 스냅(45° 배수)·길이 격자.
+                var anchor = SingleEdgeAnchor(drag.NodeId!.Value);
+                var snap = FindSnapPoint(model, anchor);
+                if (snap is { } s && s.Point.DistanceTo(drag.NodeOrigin!) <= 1e-6) snap = null;
+                var target = snap?.Point ?? (anchor is not null ? Constrain(anchor, free) : SnapToGrid(free));
                 drag.Dx = target.X - drag.NodeOrigin!.X;
                 drag.Dy = target.Y - drag.NodeOrigin!.Y;
+                UpdateSnapMarker(snap);
                 break;
             }
             case PipeDragKind.Edge:
@@ -2955,6 +2996,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         }
 
         _drag = null;
+        IsSnapMarkerVisible = false;
         BeginEditing();
         RecordUndoIfChanged(before);
         DropMissingSelection();
@@ -2969,6 +3011,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     {
         if (_drag is null) return;
         _drag = null;
+        IsSnapMarkerVisible = false;
         RefreshGraph();
         OnPropertyChanged(nameof(InteractionModeText));
     }

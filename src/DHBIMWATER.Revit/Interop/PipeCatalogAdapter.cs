@@ -8,7 +8,7 @@ namespace DHBIMWATER.Revit.Interop;
 internal sealed class PipeCatalogAdapter : IPipeCatalogSource
 {
     private const int ExpectedCatalogContractVersion = 3;
-    private const int ExpectedRulesContractVersion = 4;
+    private const int ExpectedRulesContractVersion = 5;
     private readonly Func<Document?> _document;
     private string _installWarning = string.Empty;
 

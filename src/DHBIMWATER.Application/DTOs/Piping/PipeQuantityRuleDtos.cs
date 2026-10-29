@@ -32,4 +32,4 @@ public enum FittingWeightPart { Other, Straight, Bend, Tee, Cross, Wye, ValveTee
 public sealed record FittingWeightInput(FittingWeightPart Part, PipeMaterial? Material,
     BendConnection Connection, SteelFittingClass SteelClass, string? PipeKind, double DiameterMm,
     double? BranchDiameterMm = null, double? LengthMm = null, double? DeflectionDeg = null,
-    double? WyeAngleDeg = null);
+    double? WyeAngleDeg = null, int FlangeCount = 0);

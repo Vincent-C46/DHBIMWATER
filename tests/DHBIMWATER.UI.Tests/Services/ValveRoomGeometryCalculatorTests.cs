@@ -72,6 +72,22 @@ public class ValveRoomGeometryCalculatorTests
     }
 
     [Fact]
+    public void AirValveRoom_VoidRadiusUsesVoidDiameter_WhenGiven()
+    {
+        // Void = 외경 + 여유(2026-10-29). DN300 주철관 외경 326 → 반지름 163.
+        var dto = new ValveRoomGeometryRequestDto(
+            new ValveRoomDesignConditionDto("공기밸브실", 0),
+            new ValveRoomPlanSpecDto(1500, 1800),
+            new ValveRoomProfileSpecDto(2000, 100, 650, 100, 300, 400),
+            null,
+            null);
+
+        var voidDefinition = ValveRoomGeometryCalculator.CalculateAirValveVoid(dto, new AirValveRoomSpecDto(300, 250, "X", 326));
+
+        Assert.Equal(163, voidDefinition.Radius);
+    }
+
+    [Fact]
     public void AirValveRoom_PlacesYAxisVoidAtPlanLengthCenter()
     {
         var dto = new ValveRoomGeometryRequestDto(

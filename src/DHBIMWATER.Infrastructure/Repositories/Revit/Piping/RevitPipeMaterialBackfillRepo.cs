@@ -1,4 +1,5 @@
 using Autodesk.Revit.DB;
+using Autodesk.Revit.DB.Plumbing;
 using Autodesk.Revit.UI;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Interfaces.Piping;
@@ -50,22 +51,40 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
     {
         var document = Document();
         var (candidates, fromSelection) = Candidates(document);
+        var materialTargets = MaterialTargets(document);
         return new PipeMaterialBackfillScan(candidates.Count, fromSelection,
-            PipeMaterialPartCollector.AllPipingInstances(document).Count(), AdaptiveCandidates(document).Count);
+            PipeMaterialPartCollector.AllPipingInstances(document).Count(), AdaptiveCandidates(document).Count,
+            Scoped(document, MepPipesIn).Count, materialTargets.Count,
+            materialTargets.Count(x => ResolveMaterial(document, x) is null));
     }
 
     public PipeMaterialBackfillResult Backfill(BendSettings catalog) => Run(catalog, untaggedOnly: false);
 
+    // 부재 정보 갱신 창 재산정 모드. 종전 Backfill + 빈 관종·수동 MEP 배관
+    public PipeMaterialBackfillResult Backfill(BendSettings catalog, string? fallbackMaterialCode)
+        => Run(catalog, untaggedOnly: false, fillExtras: true, fallbackMaterialCode: fallbackMaterialCode);
+
     public PipeMaterialBackfillResult BackfillUntagged(BendSettings catalog) => Run(catalog, untaggedOnly: true);
 
+    // 부재 정보 갱신 창 기본 모드. 선택 범위 존중, 빈 부재·빈 가변 패밀리만. 이미 값 있는 부재 개수 안 덮음
+    public PipeMaterialBackfillResult BackfillEmpty(BendSettings catalog, string? fallbackMaterialCode = null)
+        => Run(catalog, untaggedOnly: false, emptyOnly: true, fillExtras: true, fallbackMaterialCode: fallbackMaterialCode);
+
     /// <param name="untaggedOnly">true = 격점상세도 자동 경로. 선택 무시·문서 전체, 빈 격점번호 채움, 개수 재산정·가변 패밀리·연결 패스 안 돔.</param>
-    private PipeMaterialBackfillResult Run(BendSettings catalog, bool untaggedOnly)
+    /// <param name="emptyOnly">true = 값 빈 부재만(가변 패밀리 포함). 문서 전체 재산정·연결 패스 안 돔.</param>
+    /// <param name="fillExtras">true = 부재 정보 갱신 창 경로. 빈 DH_관종 먼저 채우고 수동 MEP 배관도 채움.</param>
+    private PipeMaterialBackfillResult Run(BendSettings catalog, bool untaggedOnly, bool emptyOnly = false,
+        bool fillExtras = false, string? fallbackMaterialCode = null)
     {
         var document = Document();
         var catalogHandle = _catalogSource.OpenCatalog();
         // UseCase가 방금 넣은 바인딩이 '기존' 요소에 반영된 뒤에 LookupParameter를 불러야 한다.
         // 이 한 줄이 빠지면 오래된 문서에서 전부 실패한다(docs/136 § 3-6.2).
         document.Regenerate();
+
+        // 관종 먼저 — 아래 부재명·접합 슬롯·무게가 모두 DH_관종을 읽음
+        var extraFailed = new List<string>();
+        var materialFilled = fillExtras ? FillMaterials(document, fallbackMaterialCode, extraFailed) : 0;
 
         var candidates = untaggedOnly
             ? Ordered(PipeMaterialPartCollector.UntaggedInstances(document))
@@ -178,14 +197,18 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
                         : PipeJointCountWriter.ResolveConnection(part.Instance, BendConnection.Flanged, _rules),
                     SteelFittingClass.None,
                     part.Instance.LookupParameter(ValvePipingParameters.Grade)?.AsString(),
-                    part.DiameterMm, part.BranchDiameterMm, part.LengthMm, part.DeflectionDeg, part.WyeAngleDeg),
+                    part.DiameterMm, part.BranchDiameterMm, part.LengthMm, part.DeflectionDeg, part.WyeAngleDeg,
+                    // 강관 플랜지 단부 수. 등급 None이라 강관 플랜지 부재는 무게 null → 기존 값 유지.
+                    _rules.DecodeComposition(compositions.GetValueOrDefault(part.Instance.Id)).Flange),
                 catalogHandle, _rules, failed);
         }
 
         // 자동 경로는 값 빈 부재만 채움. 손으로 고친 개수를 덮는 문서 전체 재산정은 사용자가 체크했을 때만.
         var recounted = 0;
         var adaptiveFilled = 0;
-        if (!untaggedOnly)
+        if (emptyOnly)
+            adaptiveFilled = FillAdaptivePipes(document, warnings, failed, compositionConflicts, allOffDuctilePipeIds);
+        else if (!untaggedOnly)
         {
             // 개수 재계산(docs/267 § 1) — 이미 태깅된 부재도 규칙 값으로 다시 쓴다. 개수는 이웃 연결에 따라 바뀌어 문서 전체를 봐야 맞다.
             var restoredIds = restored.Select(x => x.Instance.Id).ToHashSet();
@@ -196,6 +219,8 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             // 연결 기준 개수(플랜지 접합 · 유입부 절단) — 부재별 기록이 슬롯을 다시 쓴 뒤에 돈다(docs/266 § 1).
             PipeJointConnectionRecorder.Apply(document, warnings, _rules);
         }
+        var mepFilled = fillExtras ? FillMepPipes(document, warnings, extraFailed) : 0;
+        foreach (var name in extraFailed) failed.Add(name);
 
         if (diagnostics.Warning is { } jointWarning) warnings.Add(jointWarning);
         AddCompositionConflictWarning(compositionConflicts, warnings);
@@ -206,7 +231,8 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
             warnings.Add($"매개변수 {string.Join(", ", distinct)}에 값을 쓰지 못했습니다. " +
                 "배관 밸브류·배관 이음쇠 카테고리에 공유 매개변수가 바인딩됐는지 확인하세요.");
 
-        return new PipeMaterialBackfillResult(restored.Count, skipped, Compress(warnings), recounted, adaptiveFilled);
+        return new PipeMaterialBackfillResult(restored.Count, skipped, Compress(warnings), recounted, adaptiveFilled,
+            mepFilled, materialFilled);
     }
 
     /// <summary>배관 이음쇠·밸브류 전체(DH_Addin 무관, docs/287 § B1)의 개수 값을 수량 규칙으로 다시 쓴다(docs/267 § 1).
@@ -244,6 +270,152 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
         return AdaptiveCandidatesIn(new FilteredElementCollector(document));
     }
 
+    // 선택 안에 대상 있으면 그것만, 없으면 문서 전체(Candidates와 같은 태도)
+    private List<T> Scoped<T>(Document document, Func<FilteredElementCollector, List<T>> query)
+    {
+        var selection = _uiDocument()?.Selection.GetElementIds().ToList() ?? [];
+        if (selection.Count > 0)
+        {
+            var selected = query(new FilteredElementCollector(document, selection));
+            if (selected.Count > 0) return selected;
+        }
+        return query(new FilteredElementCollector(document));
+    }
+
+    private static string? NonEmpty(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+    // DH_관종 빈 배관 부재 — 이음쇠·밸브(밸브실 배관도 관종 기록), 계획관로 가변 패밀리, MEP 배관
+    private List<Element> MaterialTargets(Document document)
+    {
+        var selection = _uiDocument()?.Selection.GetElementIds().ToList() ?? [];
+        if (selection.Count > 0)
+        {
+            var selected = MaterialTargetsIn(document, selection);
+            if (selected.Count > 0) return selected;
+        }
+        return MaterialTargetsIn(document, null);
+    }
+
+    private static List<Element> MaterialTargetsIn(Document document, ICollection<ElementId>? scope)
+    {
+        FilteredElementCollector Within() => scope is { Count: > 0 } ? new(document, scope) : new(document);
+        var fittings = Within().WherePasses(new ElementMulticategoryFilter(new[]
+            { BuiltInCategory.OST_PipeAccessory, BuiltInCategory.OST_PipeFitting })).OfClass(typeof(FamilyInstance)).ToElements();
+        var adaptive = AdaptiveInstancesIn(Within());
+        var pipes = Within().OfClass(typeof(Pipe)).ToElements();
+        return fittings.Concat(adaptive).Concat(pipes)
+            .Where(x => string.IsNullOrWhiteSpace(x.LookupParameter(PipeAlignmentParameters.Material)?.AsString()))
+            .GroupBy(x => x.Id.Value).Select(x => x.First())
+            .OrderBy(x => x.Id.Value).ToList();
+    }
+
+    // 재질 → 유형·패밀리 이름 순(사용자 결정 2026-10-28). MEP 배관 재질 = 배관 세그먼트 재질
+    private static PipeMaterial? ResolveMaterial(Document document, Element element)
+    {
+        var texts = new List<string?>();
+        if (element is Pipe pipe)
+        {
+            var segment = pipe.PipeSegment;
+            texts.Add((segment is null ? null : document.GetElement(segment.MaterialId) as Material)?.Name);
+            texts.Add(segment?.Name);
+            texts.Add(pipe.PipeType?.Name);
+        }
+        else if (element is FamilyInstance instance)
+        {
+            texts.AddRange(MaterialNames(document, instance));
+            texts.AddRange(MaterialNames(document, instance.Symbol));
+            texts.Add(instance.Symbol?.Name);
+            texts.Add(instance.Symbol?.FamilyName);
+        }
+        return PipeMaterialKeywords.ResolveFirst(texts);
+    }
+
+    private static IEnumerable<string?> MaterialNames(Document document, Element? element)
+        => element is null ? []
+            : element.Parameters.Cast<Parameter>()
+                .Where(x => x.StorageType == StorageType.ElementId && x.Definition?.GetDataType() == SpecTypeId.Reference.Material)
+                .Select(x => (document.GetElement(x.AsElementId()) as Material)?.Name)
+                .ToList();
+
+    // 빈 DH_관종만 씀. 판정 실패는 fallback 코드(창에서 고른 값), 그것도 없으면 비움
+    private int FillMaterials(Document document, string? fallbackMaterialCode, ICollection<string> failed)
+    {
+        var filled = 0;
+        foreach (var element in MaterialTargets(document))
+        {
+            var code = ResolveMaterial(document, element) is { } material
+                ? PipeAlignmentParameters.Code(material) : NonEmpty(fallbackMaterialCode);
+            if (code is null) continue;
+            var parameter = element.LookupParameter(PipeAlignmentParameters.Material);
+            if (parameter is not { IsReadOnly: false, StorageType: StorageType.String })
+            {
+                failed.Add(PipeAlignmentParameters.Material);
+                continue;
+            }
+            parameter.Set(code);
+            filled++;
+        }
+        return filled;
+    }
+
+    private static List<Pipe> MepPipesIn(FilteredElementCollector collector)
+        => collector.OfClass(typeof(Pipe)).Cast<Pipe>()
+            .Where(x => string.IsNullOrWhiteSpace(x.LookupParameter(PipeAlignmentParameters.Addin)?.AsString()))
+            .OrderBy(x => x.Id.Value)
+            .ToList();
+
+    // 정척 길이. 계획관로 직관 분절과 같은 6 m(docs/266 R-1)
+    // TODO: 관종별 정척이 수량 규칙에 생기면 그 값으로 교체
+    private const double StandardLengthMm = 6000;
+
+    /// <summary>수동 MEP 배관 채움(사용자 결정 2026-10-28: 연장 + 정척 환산). 연장 = 실제 길이,
+    /// 접합 슬롯 수 = 본수(⌈길이/6 m⌉), 부설·절단 = 정척 본 규칙 합 + 남은 토막 규칙. 무게는 관종등급 몰라 비움.</summary>
+    private int FillMepPipes(Document document, ICollection<string> warnings, ICollection<string> failed)
+    {
+        var candidates = Scoped(document, MepPipesIn);
+        if (candidates.Count == 0) return 0;
+        var writer = new PipeParameterWriter(_rules);
+        var standard = _rules.CountPlannedSegment(StandardLengthMm);
+        int filled = 0, unknownSlot = 0, missingMaterial = 0;
+        foreach (var pipe in candidates)
+        {
+            var lengthMm = UC.FtToMm(pipe.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH)?.AsDouble() ?? 0);
+            if (lengthMm <= 1) continue;
+            var diameterMm = UC.FtToMm(pipe.get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM)?.AsDouble() ?? 0);
+            var materialCode = NonEmpty(pipe.LookupParameter(PipeAlignmentParameters.Material)?.AsString());
+            if (materialCode is null) missingMaterial++;
+
+            // 정척 −1 mm까지 1본으로 봄(CountPlannedSegment와 같은 허용)
+            var full = (int)Math.Floor((lengthMm + 1) / StandardLengthMm);
+            var restMm = lengthMm - full * StandardLengthMm;
+            var tail = restMm > 1 ? _rules.CountPlannedSegment(restMm) : null;
+            var pieces = full + (tail is null ? 0 : 1);
+            var part = full > 0 ? standard.PartName : tail!.PartName;
+            var composition = _rules.DefaultPlannedComposition(part);
+            var counts = _rules.CountPlannedMember(part, composition, materialCode);
+
+            writer.Text(pipe, PipeAlignmentParameters.Addin, PipeAlignmentParameters.AddinValue);
+            writer.Text(pipe, PipeAlignmentParameters.Part, part);
+            if (diameterMm > 0) writer.Text(pipe, PipeAlignmentParameters.NominalDiameter, PipeAlignmentParameters.DiameterText(Math.Round(diameterMm, 2)));
+            writer.LengthM(pipe, PipeAlignmentParameters.Length, lengthMm / 1000d);
+            // 야간 해제도 0 명시 — 집계 "값 없음" 방지(docs/141 § C-6)
+            writer.YesNo(pipe, PipeAlignmentParameters.NightWork, false);
+            writer.Text(pipe, PipeAlignmentParameters.JointComposition, composition);
+            writer.JointSlots(pipe, counts.SocketSlots.Select(x => (x.Kind, x.Spec, x.Count * pieces)).ToList());
+            if (counts.MaterialUnknown) unknownSlot++;
+            writer.Integer(pipe, PipeAlignmentParameters.LayingCount, full * standard.LayingCount + (tail?.LayingCount ?? 0));
+            writer.Integer(pipe, PipeAlignmentParameters.CutCount, full * standard.CutCount + (tail?.CutCount ?? 0));
+            filled++;
+        }
+        if (missingMaterial > 0)
+            warnings.Add($"MEP 배관 {missingMaterial:N0}개는 관종을 정하지 못해 DH_관종을 비워 두었습니다. 창에서 관종을 골라 다시 실행하세요.");
+        if (unknownSlot > 0)
+            warnings.Add($"MEP 배관 {unknownSlot:N0}개는 관종을 몰라 소켓 접합 슬롯을 비워 두었습니다.");
+        foreach (var name in writer.Missing) failed.Add(name);
+        return filled;
+    }
+
+
     private static List<FamilyInstance> AdaptiveCandidatesIn(FilteredElementCollector collector)
         => AdaptiveInstancesIn(collector)
             .Where(x => string.IsNullOrWhiteSpace(x.LookupParameter(PipeAlignmentParameters.Addin)?.AsString()))
@@ -278,7 +450,9 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
                 ?? (points.Count == 2 ? UC.FtToMm(points[0]!.DistanceTo(points[1]!)) : 0d);
             if (_rules.AdaptivePartFor(points.Count, lengthMm) is not { } part) continue;
 
-            var rawMaterial = ReadText(instance, names.Material);
+            // 패밀리 관종 칸 없으면 DH_관종(부재 정보 갱신이 재질로 채운 값) 사용
+            var rawMaterial = ReadText(instance, names.Material)
+                ?? NonEmpty(instance.LookupParameter(PipeAlignmentParameters.Material)?.AsString());
             var materialCode = PipeAlignmentParameters.MaterialFromModelValue(rawMaterial) is { } material
                 ? PipeAlignmentParameters.Code(material) : rawMaterial;
             var diameterText = ReadDiameterText(instance, names.NominalDiameter);

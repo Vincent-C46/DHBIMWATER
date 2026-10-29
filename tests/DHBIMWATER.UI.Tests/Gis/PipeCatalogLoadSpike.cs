@@ -10,7 +10,7 @@ public sealed class PipeCatalogLoadSpike
     {
         var data = PipeCatalogInterop.GetData(PipeCatalogInterop.LoadDefaults());
         Assert.Equal(3, PipeCatalogInterop.ContractVersion);
-        Assert.Equal(4, PipeQuantityRulesInterop.ContractVersion);
+        Assert.Equal(5, PipeQuantityRulesInterop.ContractVersion);
         Assert.NotEmpty(data.ProjectTables.StraightPipes);
         Assert.NotEmpty(data.ProjectTables.Fittings);
         Assert.NotEmpty(data.ProjectTables.JointDeflections);

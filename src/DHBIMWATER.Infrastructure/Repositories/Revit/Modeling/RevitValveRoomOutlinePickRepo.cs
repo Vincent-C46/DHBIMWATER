@@ -32,7 +32,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             try
             {
                 references = uiDoc.Selection.PickObjects(ObjectType.Element, new ExistingObjectSelectionFilter(),
-                    "밸브실 외곽 벽체와 기둥을 선택한 뒤 완료를 누르세요");
+                    "밸브실 외곽 벽체·기둥·기초를 선택한 뒤 완료를 누르세요");
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)
             {
@@ -85,8 +85,112 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             var center = walls.Count == 0 ? XYZ.Zero : Average(walls.Select(MidPoint).ToList());
 
             var outlineWalls = walls.Select(wall => ToOutlineWall(wall, center)).ToList();
-            return new ValveRoomOutline(outlineWalls, columns);
+            var bounds = new ValveRoomOutline(outlineWalls);
+            // 기초는 공기밸브실 IN/OUT 접점용 평면 경계상자만 담음(2026-10-29). 외곽 치수에는 안 씀.
+            var foundations = elements.Where(IsFoundation).Select(ToOutlineFoundation).OfType<OutlineFoundation>().ToList();
+            return new ValveRoomOutline(outlineWalls, columns, walls.Count == 0 ? null : FindMainPipeVoid(walls[0].Document, bounds), foundations);
         }
+
+        /// <summary>공기밸브실 기초 본관 관통 Void(RevitAirValveVoidCommandRepo가 DH_Part로 표시). 평면 중심이 외곽 경계상자 안인 것 중
+        /// 외곽 중심에 가장 가까운 1개. 축 = 인스턴스 Z축(호스트 면 법선), 중심·표고 = 배치점, 지름 = 2r(없으면 상자 높이).
+        /// 관 끝 = 중심선 × 호스트 기초 솔리드 교점(2026-10-29).</summary>
+        private static MainPipeVoid? FindMainPipeVoid(Document doc, ValveRoomOutline bounds)
+        {
+            if (bounds.IsEmpty) return null;
+            var mid = new Point2D((bounds.MinX + bounds.MaxX) / 2, (bounds.MinY + bounds.MaxY) / 2);
+            return new FilteredElementCollector(doc).OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>()
+                .Where(x => x.LookupParameter("DH_Part")?.AsString() == MainPipeVoidPart)
+                .Select(ToMainPipeVoid)
+                .OfType<MainPipeVoid>()
+                .Where(v => v.Center.X >= bounds.MinX && v.Center.X <= bounds.MaxX && v.Center.Y >= bounds.MinY && v.Center.Y <= bounds.MaxY)
+                .OrderBy(v => v.Center.DistanceTo(mid))
+                .FirstOrDefault();
+
+            static MainPipeVoid? ToMainPipeVoid(FamilyInstance instance)
+            {
+                var box = instance.get_BoundingBox(null);
+                // 면기반 Void: 패밀리 Z축 = 호스트 면 법선 = 관통 축, 배치점 = 관 중심(RevitAirValveVoidCommandRepo.AlignToTarget).
+                var transform = instance.GetTransform();
+                var origin = transform.Origin;
+                var axis = new XYZ(transform.BasisZ.X, transform.BasisZ.Y, 0);
+                if (axis.GetLength() < 0.5)
+                {
+                    // 수평 축이 아니면(호스팅 이상) 종전처럼 경계상자로 추정.
+                    if (box is null) return null;
+                    axis = box.Max.X - box.Min.X >= box.Max.Y - box.Min.Y ? XYZ.BasisX : XYZ.BasisY;
+                    origin = (box.Min + box.Max) / 2;
+                }
+                axis = axis.Normalize();
+
+                var radius = instance.LookupParameter("r") is { StorageType: StorageType.Double } r ? UC.FtToMm(r.AsDouble()) : 0;
+                var diameter = radius > 0 ? radius * 2 : box is null ? 0 : UC.FtToMm(box.Max.Z - box.Min.Z);
+                if (diameter <= 0) return null;
+
+                var run = instance.Host is { } host ? CrossFoundation(host, origin, axis) : null;
+                return new MainPipeVoid(
+                    new Point2D(UC.FtToMm(origin.X), UC.FtToMm(origin.Y)),
+                    AlongX: Math.Abs(axis.X) >= Math.Abs(axis.Y),
+                    Math.Round(diameter, 1),
+                    UC.FtToMm(origin.Z),
+                    run?.Start, run?.End);
+            }
+        }
+
+        /// <summary>관 중심선(origin + t·axis)이 기초 솔리드를 지나는 구간의 양 끝(평면 mm). 못 구하면 null — 기초 경계상자 폴백.
+        /// <para>절단 전 형상(GetOriginalGeometry)을 쓴다 — 절단 후 형상은 중심선이 Void 구멍 안을 지나 교점이 없다.</para></summary>
+        private static (Point2D Start, Point2D End)? CrossFoundation(Element host, XYZ origin, XYZ axis)
+        {
+            const double HalfLengthFt = 300;   // 약 91 m. 기초보다 충분히 김.
+            var options = new Options { DetailLevel = ViewDetailLevel.Fine };
+            var geometry = host is FamilyInstance familyInstance
+                ? familyInstance.GetOriginalGeometry(options)?.GetTransformed(familyInstance.GetTotalTransform())
+                : host.get_Geometry(options);
+            if (geometry is null) return null;
+
+            var line = Line.CreateBound(origin - axis * HalfLengthFt, origin + axis * HalfLengthFt);
+            var intersectOptions = new SolidCurveIntersectionOptions { ResultType = SolidCurveIntersectionMode.CurveSegmentsInside };
+            double? min = null, max = null;
+            foreach (var solid in Solids(geometry))
+            {
+                SolidCurveIntersection hits;
+                try { hits = solid.IntersectWithCurve(line, intersectOptions); }
+                catch (Autodesk.Revit.Exceptions.InvalidOperationException) { continue; }
+                for (var k = 0; k < hits.SegmentCount; k++)
+                {
+                    var segment = hits.GetCurveSegment(k);
+                    foreach (var t in new[] { (segment.GetEndPoint(0) - origin).DotProduct(axis), (segment.GetEndPoint(1) - origin).DotProduct(axis) })
+                    {
+                        min = min is null ? t : Math.Min(min.Value, t);
+                        max = max is null ? t : Math.Max(max.Value, t);
+                    }
+                }
+            }
+            if (min is not { } a || max is not { } b || b - a < 1e-6) return null;
+            var start = origin + axis * a;
+            var end = origin + axis * b;
+            return (new Point2D(UC.FtToMm(start.X), UC.FtToMm(start.Y)), new Point2D(UC.FtToMm(end.X), UC.FtToMm(end.Y)));
+
+            static IEnumerable<Solid> Solids(GeometryElement element)
+            {
+                foreach (var item in element)
+                {
+                    if (item is Solid { Volume: > 0 } solid) yield return solid;
+                    else if (item is GeometryInstance nested)
+                        foreach (var inner in Solids(nested.GetInstanceGeometry())) yield return inner;
+                }
+            }
+        }
+
+        private static bool IsFoundation(Element element)
+            => element.Category?.Id.Value == (long)BuiltInCategory.OST_StructuralFoundation;
+
+        private static OutlineFoundation? ToOutlineFoundation(Element element)
+            => element.get_BoundingBox(null) is { } box
+                ? new OutlineFoundation(element.Id.Value, UC.FtToMm(box.Min.X), UC.FtToMm(box.Min.Y), UC.FtToMm(box.Max.X), UC.FtToMm(box.Max.Y))
+                : null;
+
+        /// <summary>RevitAirValveVoidCommandRepo가 Void에 찍는 DH_Part 값.</summary>
+        private const string MainPipeVoidPart = "본관 관통 Void";
 
         // TODO: 헌치가 기둥과 형상 결합돼 있지 않고 별도 구조 프레임(OST_StructuralFraming)으로 서 있으면
         // 지금은 선택 필터에 안 걸려 단면이 나오지 않는다. 필요해지면 필터에 추가한다(docs/189 § 4).
@@ -330,7 +434,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
         /// <summary>벽체와 기둥을 함께 고를 수 있게 한다(docs/184 § C-1). 기둥은 배관과 겹칠 수 있어 같이 가져온다.</summary>
         private sealed class ExistingObjectSelectionFilter : ISelectionFilter
         {
-            public bool AllowElement(Element elem) => elem is Wall || IsColumn(elem);
+            public bool AllowElement(Element elem) => elem is Wall || IsColumn(elem) || IsFoundation(elem);
             public bool AllowReference(Reference reference, XYZ position) => false;
         }
     }

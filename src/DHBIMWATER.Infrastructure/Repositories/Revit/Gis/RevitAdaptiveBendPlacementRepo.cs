@@ -133,7 +133,9 @@ internal sealed class RevitAdaptiveBendPlacementRepo : IAdaptiveBendPlacementRep
                 writer.JointComposition(instance, info.BendConnection, endCount: 2, socketEnds: socketEnds);
                 // 곡관은 곡관표의 한 개 무게(소켓 포함)를 그대로 적는다(docs/178 § A-2). 단위중량은 직관에만 있다.
                 var weight = isSteel
-                    ? _rules.SteelBendWeightKg(catalog!, info.BendConnection, info.SteelFittingClass, plan.DiameterMm, plan.StandardAngleDeg)
+                    // 강관 곡관 + 플랜지 단부 수 × 개당 무게(None→F12, 형상 등급과 같음).
+                    ? _rules.SteelBendWeightKg(catalog!, info.BendConnection, ValveBypassSpecTable.NormalizeSteelClass(info.SteelFittingClass),
+                        plan.DiameterMm, plan.StandardAngleDeg, PipeEndFlagParameters.SteelFlangeCount(PipeMaterial.Steel, info.BendConnection))
                     : _rules.DuctileBendWeightKg(catalog!, info.BendConnection, plan.Form, info.JointType, plan.DiameterMm, plan.StandardAngleDeg);
                 if (weight is { } weightKg) writer.MassKg(instance, PipeAlignmentParameters.Weight, weightKg);
                 writer.Text(instance, PlacementStationParameters.SourceFile, plan.SourceFile);

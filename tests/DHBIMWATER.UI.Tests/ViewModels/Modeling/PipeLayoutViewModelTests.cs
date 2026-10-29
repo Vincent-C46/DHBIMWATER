@@ -2012,6 +2012,7 @@ public sealed class PipeLayoutViewModelTests
             || vm.Transform.ToModel(new Point(x.X2, x.Y2)).X < 1);
         SelectEdge(vm, left);
         var grabbed = vm.Nodes.First(x => Math.Abs(vm.Transform.ToModel(new Point(x.X, x.Y)).X - 500) < 1e-6);
+        vm.UseAngleSnap = false;   // 집기 규칙만 본다 — 끝점 각도 스냅(2026-10-29)은 끔
 
         Assert.True(vm.TryBeginNodeDrag(vm.Transform.ToScreen(new Point2D(500, 0)), grabbed.Id));
         var moved = vm.Transform.ToScreen(new Point2D(500, 600));
@@ -2142,12 +2143,13 @@ public sealed class PipeLayoutViewModelTests
     /// <summary><see cref="ShiftConstrainedEnd"/>에서 약 50mm 떨어진 다른 선의 끝점. SnapTolerance(100mm) 안이다.</summary>
     private static Point2D OtherEndpoint => new(1080, 1010);
 
-    /// <summary>회귀 — Shift를 안 누르면 종전대로 자유 이동이다.</summary>
+    /// <summary>각도 스냅을 끄면 Shift 없이 격자 단위 자유 이동이다(종전 동작).</summary>
     [Fact]
-    public void EndPointDrag_WithoutShift_MovesFreely()
+    public void EndPointDrag_AngleSnapOff_MovesFreely()
     {
         var vm = CreateDrawingViewModel();
         DisableOsnap(vm);
+        vm.UseAngleSnap = false;
         Draw(vm, new Point2D(0, 0), new Point2D(1000, 0));
         vm.Mode = PipeLayoutMode.Selection;
         var end = vm.Nodes.Single(x => AreClose(vm.Transform.ToModel(new Point(x.X, x.Y)), new Point2D(1000, 0)));
@@ -2158,6 +2160,51 @@ public sealed class PipeLayoutViewModelTests
         vm.CommitDrag(moved);
 
         Assert.Contains(vm.Nodes, x => AreClose(vm.Transform.ToModel(new Point(x.X, x.Y)), new Point2D(1200, 900)));
+    }
+
+    /// <summary>끝점 드래그도 그리기처럼 반대쪽 끝 기준 45° 배수에 붙는다(2026-10-29). (1200, 900)은 36.9° → 45°.</summary>
+    [Fact]
+    public void EndPointDrag_AngleSnapOn_SnapsTo45DegreeFromOtherEnd()
+    {
+        var vm = CreateDrawingViewModel();
+        DisableOsnap(vm);
+        vm.UseAngleSnap = true;
+        Draw(vm, new Point2D(0, 0), new Point2D(1000, 0));
+        vm.Mode = PipeLayoutMode.Selection;
+        var end = vm.Nodes.Single(x => AreClose(vm.Transform.ToModel(new Point(x.X, x.Y)), new Point2D(1000, 0)));
+
+        Assert.True(vm.TryBeginNodeDrag(vm.Transform.ToScreen(new Point2D(1000, 0)), end.Id));
+        var moved = vm.Transform.ToScreen(new Point2D(1200, 900));
+        vm.UpdateDrag(moved);
+        vm.CommitDrag(moved);
+
+        var edge = Assert.Single(vm.Edges);
+        var a = vm.Transform.ToModel(new Point(edge.X1, edge.Y1));
+        var b = vm.Transform.ToModel(new Point(edge.X2, edge.Y2));
+        Assert.Equal(Math.Abs(b.X - a.X), Math.Abs(b.Y - a.Y), 3);
+    }
+
+    /// <summary>끝점 드래그 중 다른 선 끝점 OSNAP이 각도 스냅보다 앞선다 — 붙이면 절점 병합.</summary>
+    [Fact]
+    public void EndPointDrag_OsnapEndpoint_WinsOverAngleSnap()
+    {
+        var vm = CreateDrawingViewModel();
+        vm.UseAngleSnap = false;   // 작도는 자유 각도로
+        Draw(vm, new Point2D(0, 0), new Point2D(1000, 0));
+        Draw(vm, new Point2D(3000, 0), new Point2D(1700, 900));
+        vm.UseAngleSnap = true;
+        vm.Mode = PipeLayoutMode.Selection;
+        var end = vm.Nodes.Single(x => AreClose(vm.Transform.ToModel(new Point(x.X, x.Y)), new Point2D(1000, 0)));
+
+        Assert.True(vm.TryBeginNodeDrag(vm.Transform.ToScreen(new Point2D(1000, 0)), end.Id));
+        var moved = vm.Transform.ToScreen(new Point2D(1690, 880));
+        vm.UpdateDrag(moved);
+        Assert.True(vm.IsSnapMarkerVisible);
+        vm.CommitDrag(moved);
+
+        Assert.False(vm.IsSnapMarkerVisible);
+        Assert.Contains(vm.Nodes, x => AreClose(vm.Transform.ToModel(new Point(x.X, x.Y)), new Point2D(1700, 900)));
+        Assert.DoesNotContain(vm.Nodes, x => AreClose(vm.Transform.ToModel(new Point(x.X, x.Y)), new Point2D(1000, 0)));
     }
 
     private static bool AreClose(Point2D a, Point2D b) => a.DistanceTo(b) < 1e-3;
@@ -3154,11 +3201,11 @@ public sealed class PipeLayoutViewModelTests
     }
 
     [Fact]
-    public void ApplyTemplate_TieValveRoom_UsesGateValveTypeMatchingEdgeDiameter()
+    public void ApplyTemplate_SluiceRoom_UsesGateValveTypeMatchingEdgeDiameter()
     {
         var vm = CreateDrawingViewModel(["DH_게이트 밸브 : 100A", "DH_게이트 밸브 : 300A"]);
         vm.ApplyOutline(CreateOutline(4000, 3000));
-        vm.ValveRoomZone = "타이밸브실";
+        vm.ValveRoomZone = "제수밸브실";
 
         vm.ApplyTemplateCommand.Execute(null);
 
@@ -3168,11 +3215,11 @@ public sealed class PipeLayoutViewModelTests
     }
 
     [Fact]
-    public void ApplyTemplate_TieValveRoom_MissingMatchingGateTypeReportsUnassignedValve()
+    public void ApplyTemplate_SluiceRoom_MissingMatchingGateTypeReportsUnassignedValve()
     {
         var vm = CreateDrawingViewModel(["DH_게이트 밸브 : 100A"]);
         vm.ApplyOutline(CreateOutline(4000, 3000));
-        vm.ValveRoomZone = "타이밸브실";
+        vm.ValveRoomZone = "제수밸브실";
 
         vm.ApplyTemplateCommand.Execute(null);
 
@@ -3181,11 +3228,11 @@ public sealed class PipeLayoutViewModelTests
     }
 
     [Fact]
-    public void ApplyTemplate_TieValveRoom_OutsideBypassRangeWarnsButKeepsSet()
+    public void ApplyTemplate_SluiceRoom_OutsideBypassRangeWarnsButKeepsSet()
     {
         var vm = CreateDrawingViewModel(["DH_게이트 밸브 : 100A"]);
         vm.ApplyOutline(CreateOutline(4000, 3000));
-        vm.ValveRoomZone = "타이밸브실";
+        vm.ValveRoomZone = "제수밸브실";
         vm.DiameterMm = 100;
 
         vm.ApplyTemplateCommand.Execute(null);
@@ -3196,11 +3243,11 @@ public sealed class PipeLayoutViewModelTests
     }
 
     [Fact]
-    public void ApplyTemplate_MudRoom_DrawsOneRunBetweenInAndOutAnchors()
+    public void ApplyTemplate_AirRoom_DrawsOneRunBetweenInAndOutAnchors()
     {
         var vm = CreateDrawingViewModel();
         vm.ApplyOutline(CreateOutline(4000, 3000));
-        vm.ValveRoomZone = "이토밸브실";
+        vm.ValveRoomZone = "공기밸브실";
 
         vm.ApplyTemplateCommand.Execute(null);
 
@@ -3215,21 +3262,153 @@ public sealed class PipeLayoutViewModelTests
     }
 
     [Fact]
-    public void ApplyTemplate_SluiceRoom_ProducesTwoInletsAndTwoRuns()
+    public void ApplyTemplate_SluiceRoom_MainValveAndBypassSetOnOneRun()
     {
-        // IN 2개 기본 배치는 제수밸브실이다(사용자 수정 2026-09-15).
-        var vm = CreateDrawingViewModel();
+        // 표준도(2026-10-28): IN2 없음, 본관 밸브 + 부제수 바이패스 세트가 같은 선 같은 자리.
+        var vm = CreateDrawingViewModel(["DH_게이트 밸브 : 300A"]);
         vm.ApplyOutline(CreateOutline(4000, 3000));
         vm.ValveRoomZone = "제수밸브실";
 
         vm.ApplyTemplateCommand.Execute(null);
 
-        Assert.Equal(["IN", "IN2", "OUT"], vm.Ports.Select(x => x.Label));
-        Assert.False(vm.Ports[0].CanRemove);
-        Assert.True(vm.Ports[1].CanRemove);
-        Assert.Equal(2, vm.Edges.Count);
-        Assert.Equal(3, vm.OutlineArrows.Count);
+        Assert.Equal(["IN", "OUT"], vm.Ports.Select(x => x.Label));
+        Assert.Single(vm.Edges);
+        Assert.Equal("DH_게이트 밸브 : 300A", Assert.Single(vm.InlineFittings, x => !x.IsBypassSet).FamilyTypeName);
+        Assert.Single(vm.BypassSetItems);
         Assert.All(vm.Ports, p => Assert.True(p.UserEdited));   // 프리셋 이격은 사용자 값으로 취급(docs/172 § 0-4 A5)
+    }
+
+    [Fact]
+    public void ApplyTemplate_MudRoom_RunStopsAtMiddleWall_NoOutPort()
+    {
+        // 표준도(2026-10-28): 이토관은 중간벽 방류실 쪽 면까지, 방류관 없음. 중간벽 없는 외곽이면 중앙에서 끝.
+        var vm = CreateDrawingViewModel();
+        vm.ApplyOutline(CreateOutline(4500, 2500));
+        vm.ValveRoomZone = "이토밸브실";
+
+        vm.ApplyTemplateCommand.Execute(null);
+
+        Assert.Equal(["IN"], vm.Ports.Select(x => x.Label));
+        Assert.Equal(2250, Assert.Single(vm.Edges).LengthMm, 1);
+        Assert.Single(vm.InlineFittings, x => !x.IsBypassSet);
+    }
+
+    [Fact]
+    public void ApplyTemplate_RelativeMode_OverwritesOffsetWith600()
+    {
+        var level = new LevelInfo(1, "1층", 1000);
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(levels: [level]));
+        vm.ApplyOutline(CreateOutline(4000, 3000));
+        vm.ElevationLevel = level;
+        vm.ElevationOffsetMm = 100;
+        vm.ValveRoomZone = "제수밸브실";
+
+        vm.ApplyTemplateCommand.Execute(null);
+
+        Assert.Equal(600, vm.ElevationOffsetMm);
+        Assert.Equal(1600, vm.Elevation);
+    }
+
+    [Fact]
+    public void ApplyTemplate_AbsoluteMode_KeepsElevation()
+    {
+        var vm = CreateDrawingViewModel();
+        vm.ApplyOutline(CreateOutline(4000, 3000));
+        vm.IsAbsoluteElevation = true;
+        vm.Elevation = 2000;
+        vm.ValveRoomZone = "제수밸브실";
+
+        vm.ApplyTemplateCommand.Execute(null);
+
+        Assert.Equal(2000, vm.Elevation);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ApplyTemplate_AirRoom_FollowsMainPipeVoid(bool alongX)
+    {
+        // 공기밸브실: 기초 관통 Void 자리·관경·높이를 따름. Offset 600 규칙 예외(2026-10-29).
+        var level = new LevelInfo(1, "1층", 1000);
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(levels: [level]));
+        var walls = CreateOutline(2000, 3000).Walls;
+        vm.ApplyOutline(new ValveRoomOutline(walls, null, new MainPipeVoid(new Point2D(700, 800), alongX, 1500, -1200)));
+        vm.ElevationLevel = level;
+        vm.ValveRoomZone = "공기밸브실";
+
+        vm.ApplyTemplateCommand.Execute(null);
+
+        var edge = Assert.Single(vm.Edges);
+        Assert.Equal(1500, edge.DiameterMm, 6);
+        Assert.Equal(alongX ? 2000 : 3000, edge.LengthMm, 1);
+        Assert.Equal(1500, vm.DiameterMm, 6);
+        Assert.Equal(-1200, vm.Elevation, 6);
+        Assert.Equal(-2200, vm.ElevationOffsetMm, 6);   // 상대 모드 Offset = Void 표고 − 레벨
+        Assert.Contains("본관 Void DN1500", vm.Status);
+    }
+
+    [Fact]
+    public void ApplyTemplate_AirRoom_VoidAtOuterDiameter_UsesNominalDiameter()
+    {
+        // Void = 외경(DN300 주철관 326) → 관경 칸은 호칭지름 300(2026-10-29).
+        var vm = CreateDrawingViewModel();
+        vm.ApplyOutline(new ValveRoomOutline(CreateOutline(2000, 2000).Walls, null, new MainPipeVoid(new Point2D(1000, 1000), true, 326, 0)));
+        vm.ValveRoomZone = "공기밸브실";
+
+        vm.ApplyTemplateCommand.Execute(null);
+
+        Assert.Equal(300, Assert.Single(vm.Edges).DiameterMm, 6);
+        Assert.Equal(300, vm.DiameterMm, 6);
+        Assert.DoesNotContain("맞는 DN 없음", vm.Status);
+    }
+
+    [Fact]
+    public void ApplyTemplate_AirRoomWithFoundation_RunAndArrowsReachFoundationFaces()
+    {
+        // 공기밸브실만 IN/OUT 접점 = 기초 외측면(2026-10-29). 벽 내측 2000 → 기초 -500~2500 = 3000.
+        var vm = CreateDrawingViewModel();
+        var outline = new ValveRoomOutline(CreateOutline(2000, 2000).Walls, null, new MainPipeVoid(new Point2D(1000, 1000), true, 326, 0),
+            [new OutlineFoundation(99, -500, -500, 2500, 2500)]);
+        vm.ApplyOutline(outline);
+        vm.ValveRoomZone = "공기밸브실";
+
+        vm.ApplyTemplateCommand.Execute(null);
+
+        var edge = Assert.Single(vm.Edges);
+        Assert.Equal(3000, edge.LengthMm, 1);
+        var inArrow = vm.OutlineArrows.Single(x => x.Label == "IN");
+        var outArrow = vm.OutlineArrows.Single(x => x.Label == "OUT");
+        Assert.Equal(inArrow.X2, edge.X1, 1);
+        Assert.Equal(outArrow.X1, edge.X2, 1);
+        Assert.Contains(99L, vm.ToFamilySettings().OutlineFoundationElementIds!);
+    }
+
+    [Fact]
+    public void ApplyTemplate_OtherRoomWithFoundation_StaysOnWallFaces()
+    {
+        var vm = CreateDrawingViewModel();
+        vm.ApplyOutline(new ValveRoomOutline(CreateOutline(4000, 3000).Walls, null, null, [new OutlineFoundation(99, -500, -500, 4500, 3500)]));
+        vm.ValveRoomZone = "제수밸브실";
+
+        vm.ApplyTemplateCommand.Execute(null);
+
+        Assert.Equal(4000, Assert.Single(vm.Edges).LengthMm, 1);
+    }
+
+    [Fact]
+    public void ApplyTemplate_AirRoomWithoutVoid_KeepsElevationAndWarns()
+    {
+        var level = new LevelInfo(1, "1층", 1000);
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(levels: [level]));
+        vm.ApplyOutline(CreateOutline(2000, 2000));
+        vm.ElevationLevel = level;
+        vm.ElevationOffsetMm = 100;
+        vm.ValveRoomZone = "공기밸브실";
+
+        vm.ApplyTemplateCommand.Execute(null);
+
+        Assert.Equal(100, vm.ElevationOffsetMm);
+        Assert.Contains("Void를 못 찾아", vm.Status);
     }
 
     [Fact]
@@ -3242,8 +3421,7 @@ public sealed class PipeLayoutViewModelTests
         vm.ValveRoomZone = "제수밸브실";
 
         vm.ApplyTemplateCommand.Execute(null);
-        Assert.Equal(2, vm.Edges.Count);
-        Assert.Equal(3, vm.Ports.Count);
+        Assert.Equal(4000, Assert.Single(vm.Edges).LengthMm, 6);
 
         vm.UndoCommand.Execute(null);
 

@@ -146,6 +146,19 @@ public static class PipeAlignmentParameters
         Text(JointSlotKind(3)), Text(JointSlotSpec(3)), Def(JointSlotCount(3), ParameterSpecType.Integer),
     };
 
+    // 수동 MEP 배관(OST_PipeCurves)용 묶음. 이름·GUID 같음 → 기존 바인딩에 카테고리만 병합
+    private static readonly HashSet<string> MepPipeNames = new(StringComparer.Ordinal)
+    {
+        Addin, Part, NominalDiameter, Material, Length, NightWork, JointTotalCount, LayingCount, CutCount, JointComposition,
+        JointSlotKind(1), JointSlotSpec(1), JointSlotCount(1), JointSlotKind(2), JointSlotSpec(2), JointSlotCount(2),
+        JointSlotKind(3), JointSlotSpec(3), JointSlotCount(3),
+    };
+
+    public static IReadOnlyList<SharedParameterDefinition> MepPipeDefinitions { get; } = Definitions
+        .Where(x => MepPipeNames.Contains(x.Name))
+        .Select(x => x with { Categories = new[] { ParameterCategory.Pipes } })
+        .ToList();
+
     /// <summary><b>관종 + 곡관 접합</b> → 접합 슬롯 `종류` 칸에 적을 문자열(docs/186 § 4-2).
     /// <para>수량산출의 <c>PipeWorkCatalog</c> 키와 <b>문자열이 같아야</b> 행이 선다.</para>
     /// <para>대응이 없으면(PE·PVC 융착·접착) null이다. 호출부는 값을 지어내지 말고 <b>슬롯을 비우고</b> 경고를 남긴다.</para></summary>
