@@ -36,13 +36,13 @@
             <!-- 판정 못 한 부재만 대상. 재질·이름으로 정해진 부재와 이미 값 있는 부재는 안 바뀜 -->
             <DockPanel IsEnabled="{Binding HasUnresolvedMaterial, Mode=OneWay}" Margin="0,0,0,10">
                 <TextBlock Text="판정 못 한 부재 관종" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,10,0"/>
-                <ComboBox ItemsSource="{Binding MaterialChoices, Mode=OneWay}" SelectedItem="{Binding FallbackMaterial, Mode=TwoWay}"
+                <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding MaterialChoices, Mode=OneWay}" SelectedItem="{Binding FallbackMaterial, Mode=TwoWay}"
                           DisplayMemberPath="Label" Width="200" HorizontalAlignment="Left"/>
             </DockPanel>
-            <CheckBox Content="개수까지 문서 전체 재산정" IsChecked="{Binding RecountAll, Mode=TwoWay}" FontWeight="SemiBold"/>
-            <TextBlock Foreground="#B03A2E" FontSize="11" TextWrapping="Wrap" Margin="20,4,0,0"
+            <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" Content="개수까지 문서 전체 재산정" IsChecked="{Binding RecountAll, Mode=TwoWay}" FontWeight="SemiBold"/>
+            <TextBlock Foreground="{StaticResource ErrorTextBrush}" FontSize="11" TextWrapping="Wrap" Margin="20,4,0,0"
                        Text="켜면 이미 값 있는 부재의 접합·부설·절단 수를 수량 규칙으로 다시 씁니다. 손으로 고친 개수는 덮어씁니다."/>
-            <TextBlock Foreground="#7F8C8D" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"
+            <TextBlock Foreground="{StaticResource TextSubBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"
                        Text="명칭·규격·번호·무게는 커넥터·배치점 실측으로, 관종은 재질 → 유형·패밀리 이름 순으로 채웁니다. MEP 배관은 연장 그대로, 접합 수는 6 m 정척 본수로 환산합니다. 격점번호는 채우지 않고 야간은 해제로 둡니다."/>
         </StackPanel></Border>
 

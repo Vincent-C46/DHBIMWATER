@@ -67,6 +67,8 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
                 return 0;
             }
 
+            SetStructural(wall);
+
             WallUtils.DisallowWallJoinAtEnd(wall, 0);
             WallUtils.DisallowWallJoinAtEnd(wall, 1);
 
@@ -133,6 +135,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             profileWall.LookupParameter("DH_Zone")?.Set(profileWallDefinition.Zone);
             profileWall.LookupParameter("DH_IsExterior")?.Set(profileWallDefinition.IsExterior ? 1 : 0);
 
+            SetStructural(profileWall);
             if (profileWallDefinition.IsFlipped) profileWall.Flip();
 
             WallUtils.DisallowWallJoinAtEnd(profileWall, 0);
@@ -143,6 +146,13 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
         #endregion
 
         #region Private Helpers
+        /// <summary>인스턴스 "구조" 체크(WALL_STRUCTURAL_SIGNIFICANT) 켬. Wall.Create structural 인자만으론 False로 남는 경우 있어 한 번 더 씀. 읽기 전용이면 건너뜀.</summary>
+        private static void SetStructural(Wall wall)
+        {
+            var structural = wall.get_Parameter(BuiltInParameter.WALL_STRUCTURAL_SIGNIFICANT);
+            if (structural is { IsReadOnly: false }) structural.Set(1);
+        }
+
         /// <summary>벽 상부를 레벨+간격띄우기로 구속. 레벨 못 찾으면 경고 후 높이값 벽으로 남김(작업 중단 안 함).</summary>
         private void ApplyTopConstraint(Document doc, Wall wall, LinearWallDefinition def)
         {

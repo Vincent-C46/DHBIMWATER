@@ -43,8 +43,8 @@
                             <Button Content="파일 추가" Style="{StaticResource PrimaryButtonStyle}"
                                     ToolTip="엑셀 · CSV (측점 좌표)" Command="{Binding AddCommand}" CommandParameter="Excel"/>
                             <Button Content="제거" Style="{StaticResource CancelButtonStyle}" Margin="8,0" Command="{Binding RemoveCommand}"/>
-                            <TextBlock Margin="18,5,0,0" Foreground="#B26B00" Text="{Binding DiameterUnresolvedCount, StringFormat=⚠ 확정 안 한 표기 {0}건}" ToolTip="확정 안 하면 자동추정값으로 배치" Visibility="{Binding HasDiameterUnresolved, Converter={StaticResource BoolToVisibility}}"/>
-                            <TextBlock Margin="18,5,0,0" Foreground="#B26B00" TextWrapping="Wrap"
+                            <TextBlock Margin="18,5,0,0" Foreground="{StaticResource WarningTextBrush}" Text="{Binding DiameterUnresolvedCount, StringFormat=⚠ 확정 안 한 표기 {0}건}" ToolTip="확정 안 하면 자동추정값으로 배치" Visibility="{Binding HasDiameterUnresolved, Converter={StaticResource BoolToVisibility}}"/>
+                            <TextBlock Margin="18,5,0,0" Foreground="{StaticResource WarningTextBrush}" TextWrapping="Wrap"
                                        Text="{Binding SpecUnmatchedCount, StringFormat=⚠ 규격 미매칭 {0}건}"
                                        ToolTip="제원표에 (등급, DN) 없음 → [규격 매핑] 지정 또는 규격표 행 추가"
                                        Visibility="{Binding HasSpecUnmatched, Converter={StaticResource BoolToVisibility}}"/>
@@ -87,7 +87,7 @@
                             </DataGrid>
                             <TextBox Style="{StaticResource PrimaryTextBoxStyle}" IsReadOnly="True" TextWrapping="Wrap" Height="80" Margin="0,8,0,0"
                                      Text="{Binding SelectedItem.Details, ElementName=ShpGrid, Mode=OneWay}"/>
-                            <TextBlock Foreground="#B26B00" Margin="0,6,0,0" TextWrapping="Wrap"
+                            <TextBlock Foreground="{StaticResource WarningTextBrush}" Margin="0,6,0,0" TextWrapping="Wrap"
                                        Text="직경 필드 &lt;수동&gt; → [규격 매핑] &quot;(값 없음)&quot; 행에서 DN 지정"
                                        Visibility="{Binding SelectedItem.IsManualDiameterEnabled, ElementName=ShpGrid, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"/>
                             <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
@@ -131,7 +131,7 @@
                             </DataGrid>
                             <TextBox Style="{StaticResource PrimaryTextBoxStyle}" IsReadOnly="True" TextWrapping="Wrap" Height="80" Margin="0,8,0,0"
                                      Text="{Binding SelectedItem.Details, ElementName=DwgGrid, Mode=OneWay}"/>
-                            <TextBlock Foreground="#B26B00" Margin="0,6,0,0" TextWrapping="Wrap"
+                            <TextBlock Foreground="{StaticResource WarningTextBrush}" Margin="0,6,0,0" TextWrapping="Wrap"
                                        Text="직경 필드 &lt;수동&gt; → [규격 매핑] &quot;(값 없음)&quot; 행에서 DN 지정"
                                        Visibility="{Binding SelectedItem.IsManualDiameterEnabled, ElementName=DwgGrid, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"/>
                             <TextBlock Margin="0,8,0,3" Text="사용할 폴리선 레이어 (복수 선택 가능)"/>
@@ -219,9 +219,9 @@
                         </StackPanel>
                         <TextBlock Margin="0,16,0,5" Text="생성 전 선형(Line) 미리보기 확인 · 미리보기 유지"/>
                         <StackPanel Visibility="{Binding UsesStraightAndBendSettings, Converter={StaticResource BoolToVisibility}}">
-                            <Border Background="#EEF2F7" CornerRadius="8" Padding="14" Margin="0,0,0,12">
+                            <Border Style="{StaticResource GroupPanelStyle}" Margin="0,0,0,12">
                             <StackPanel>
-                            <TextBlock Text="관 배치 기준높이" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,8"/>
+                            <TextBlock Text="관 배치 기준높이" Style="{StaticResource SectionHeaderTextBlockStyle}" Margin="0,0,0,8"/>
                             <StackPanel Orientation="Horizontal">
                                 <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Width="210" VerticalAlignment="Center" ItemsSource="{Binding ZDatums, Mode=OneWay}" SelectedItem="{Binding ZDatum, Mode=TwoWay}">
                                     <ComboBox.ItemTemplate>
@@ -240,11 +240,11 @@
                                     <Ellipse Canvas.Left="41" Canvas.Top="51" Width="8" Height="8" Fill="{Binding ZDatum, Mode=OneWay, Converter={StaticResource EnumEqualsToBrush}, ConverterParameter=Centerline}"/>
                                     <Ellipse Canvas.Left="41" Canvas.Top="76" Width="8" Height="8" Fill="{Binding ZDatum, Mode=OneWay, Converter={StaticResource EnumEqualsToBrush}, ConverterParameter=Invert}"/>
                                     <Ellipse Canvas.Left="41" Canvas.Top="91" Width="8" Height="8" Fill="{Binding ZDatum, Mode=OneWay, Converter={StaticResource EnumEqualsToBrush}, ConverterParameter=OutsideBottom}"/>
-                                    <TextBlock Canvas.Left="92" Canvas.Top="7" FontSize="10" Text="외부 맨 위"/>
-                                    <TextBlock Canvas.Left="92" Canvas.Top="23" FontSize="10" Text="크라운"/>
-                                    <TextBlock Canvas.Left="92" Canvas.Top="48" FontSize="10" Text="중심선"/>
-                                    <TextBlock Canvas.Left="92" Canvas.Top="73" FontSize="10" Text="관저고"/>
-                                    <TextBlock Canvas.Left="92" Canvas.Top="89" FontSize="10" Text="외부 맨 아래"/>
+                                    <TextBlock Canvas.Left="92" Canvas.Top="7" FontSize="11" Text="외부 맨 위"/>
+                                    <TextBlock Canvas.Left="92" Canvas.Top="23" FontSize="11" Text="크라운"/>
+                                    <TextBlock Canvas.Left="92" Canvas.Top="48" FontSize="11" Text="중심선"/>
+                                    <TextBlock Canvas.Left="92" Canvas.Top="73" FontSize="11" Text="관저고"/>
+                                    <TextBlock Canvas.Left="92" Canvas.Top="89" FontSize="11" Text="외부 맨 아래"/>
                                 </Canvas>
                                 <StackPanel Orientation="Horizontal" Margin="0,8">
                                     <Button Content="관·곡관 설정 열기…" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding OpenPipeSpecsCommand}"
@@ -271,9 +271,9 @@
                                     <ColumnDefinition Width="12"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                            <Border Grid.Column="0" Background="#EEF2F7" CornerRadius="8" Padding="14">
+                            <Border Grid.Column="0">
                                 <Border.Style>
-                                    <Style TargetType="Border">
+                                    <Style TargetType="Border" BasedOn="{StaticResource GroupPanelStyle}">
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsDirectShape}" Value="True">
                                                 <Setter Property="Grid.ColumnSpan" Value="3"/>
@@ -282,20 +282,20 @@
                                     </Style>
                                 </Border.Style>
                             <StackPanel>
-                            <TextBlock Text="곡관 설정" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,8" Visibility="{Binding IsAdaptive, Converter={StaticResource BoolToVisibility}}"/>
-                            <TextBlock Text="곡관 접합 판정" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,8" Visibility="{Binding IsDirectShape, Converter={StaticResource BoolToVisibility}}"/>
+                            <TextBlock Text="곡관 설정" Style="{StaticResource SectionHeaderTextBlockStyle}" Margin="0,0,0,8" Visibility="{Binding IsAdaptive, Converter={StaticResource BoolToVisibility}}"/>
+                            <TextBlock Text="곡관 접합 판정" Style="{StaticResource SectionHeaderTextBlockStyle}" Margin="0,0,0,8" Visibility="{Binding IsDirectShape, Converter={StaticResource BoolToVisibility}}"/>
                             <StackPanel Visibility="{Binding IsAdaptive, Converter={StaticResource BoolToVisibility}}">
                                     <TextBlock Text="곡관 패밀리 : 유형 (5점 가변)" Margin="0,0,0,3"/>
                                     <ComboBox x:Name="BendFamilyCombo" ItemsSource="{Binding BendFamilyTypeOptions, Mode=OneWay}" SelectedItem="{Binding BendFamilyTypeName, Mode=TwoWay}">
                                         <ComboBox.Style><Style TargetType="ComboBox" BasedOn="{StaticResource PrimaryComboBoxStyle}"><Style.Triggers><DataTrigger Binding="{Binding IsBendFamilyHighlighted}" Value="True"><Setter Property="BorderBrush" Value="#E67E22"/><Setter Property="BorderThickness" Value="2"/></DataTrigger></Style.Triggers></Style></ComboBox.Style>
                                     </ComboBox>
-                                    <TextBlock Foreground="#B26B00" TextWrapping="Wrap" Margin="0,4,0,0" Text="{Binding BendPointCountNotice}" Visibility="{Binding HasBendPointCountNotice, Converter={StaticResource BoolToVisibility}}"/>
+                                    <TextBlock Foreground="{StaticResource WarningTextBrush}" TextWrapping="Wrap" Margin="0,4,0,0" Text="{Binding BendPointCountNotice}" Visibility="{Binding HasBendPointCountNotice, Converter={StaticResource BoolToVisibility}}"/>
                                     <TextBlock Text="곡관 파라미터 매핑" FontWeight="SemiBold" Margin="0,12,0,0"/>
                                     <TextBlock Text="호칭지름 DN" Margin="0,8,0,3"/><ComboBox Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding BendParameterOptions, Mode=OneWay}" SelectedItem="{Binding BendDiameterParameterName, Mode=TwoWay}"/>
                                     <TextBlock Text="관 두께 e" Margin="0,8,0,3"/><ComboBox Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding BendParameterOptions, Mode=OneWay}" SelectedItem="{Binding BendWallThicknessParameterName, Mode=TwoWay}"/>
                                     <TextBlock Text="외경 OD" Margin="0,8,0,3"/><ComboBox Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding BendParameterOptions, Mode=OneWay}" SelectedItem="{Binding BendOuterDiameterParameterName, Mode=TwoWay}"/>
                             </StackPanel>
-                            <TextBlock Foreground="#B26B00" Text="{Binding SettingsNotice}" TextWrapping="Wrap" Visibility="{Binding IsAdaptive, Converter={StaticResource BoolToVisibility}}"/>
+                            <TextBlock Foreground="{StaticResource WarningTextBrush}" Text="{Binding SettingsNotice}" TextWrapping="Wrap" Visibility="{Binding IsAdaptive, Converter={StaticResource BoolToVisibility}}"/>
                             <TextBlock Text="곡관 접합 종류" Margin="0,14,0,3"/>
                             <ComboBox Style="{StaticResource PrimaryComboBoxStyle}"
                                       ItemsSource="{Binding BendConnectionOptions, Mode=OneWay}"
@@ -331,9 +331,9 @@
                             </StackPanel>
                             </StackPanel>
                             </Border>
-                            <Border Grid.Column="2" Background="#EEF2F7" CornerRadius="8" Padding="14" Visibility="{Binding IsAdaptive, Converter={StaticResource BoolToVisibility}}">
+                            <Border Grid.Column="2" Style="{StaticResource GroupPanelStyle}" Visibility="{Binding IsAdaptive, Converter={StaticResource BoolToVisibility}}">
                             <StackPanel>
-                            <TextBlock Text="직관 설정" FontWeight="SemiBold" Foreground="#4A6FA5" Margin="0,0,0,8"/>
+                            <TextBlock Text="직관 설정" Style="{StaticResource SectionHeaderTextBlockStyle}" Margin="0,0,0,8"/>
                             <!-- docs/236 § D — 창을 연 뒤 로드한 패밀리를 목록에 반영한다(곡관·파이프 시스템·레벨 목록도 함께). -->
                             <DockPanel Margin="0,0,0,3">
                                 <Button DockPanel.Dock="Right" Content="새로고침" Style="{StaticResource CancelButtonStyle}" Padding="8,1" FontSize="11"
@@ -343,7 +343,7 @@
                             <ComboBox x:Name="StraightFamilyCombo" ItemsSource="{Binding StraightFamilyTypeOptions, Mode=OneWay}" SelectedItem="{Binding StraightFamilyTypeName, Mode=TwoWay}">
                                 <ComboBox.Style><Style TargetType="ComboBox" BasedOn="{StaticResource PrimaryComboBoxStyle}"><Style.Triggers><DataTrigger Binding="{Binding IsStraightFamilyHighlighted}" Value="True"><Setter Property="BorderBrush" Value="#E67E22"/><Setter Property="BorderThickness" Value="2"/></DataTrigger></Style.Triggers></Style></ComboBox.Style>
                             </ComboBox>
-                            <TextBlock Foreground="#B26B00" TextWrapping="Wrap" Margin="0,4,0,0" Text="{Binding StraightPointCountNotice}" Visibility="{Binding HasStraightPointCountNotice, Converter={StaticResource BoolToVisibility}}"/>
+                            <TextBlock Foreground="{StaticResource WarningTextBrush}" TextWrapping="Wrap" Margin="0,4,0,0" Text="{Binding StraightPointCountNotice}" Visibility="{Binding HasStraightPointCountNotice, Converter={StaticResource BoolToVisibility}}"/>
                             <TextBlock Text="직관 파라미터 매핑" FontWeight="SemiBold" Margin="0,12,0,0"/>
                             <TextBlock Text="호칭지름 DN" Margin="0,8,0,3"/><ComboBox Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding StraightParameterOptions, Mode=OneWay}" SelectedItem="{Binding StraightDiameterParameterName, Mode=TwoWay}"/>
                             <TextBlock Text="관 두께 e" Margin="0,8,0,3"/><ComboBox Style="{StaticResource PrimaryComboBoxStyle}" ItemsSource="{Binding StraightParameterOptions, Mode=OneWay}" SelectedItem="{Binding StraightThicknessParameterName, Mode=TwoWay}"/>
@@ -416,7 +416,7 @@
                                 </DataGridTextColumn>
                             </DataGrid.Columns>
                         </DataGrid>
-                        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#2E7D32" FontWeight="SemiBold" Text="✔ 모든 직경 표기 해석 완료" Visibility="{Binding HasNoVisibleDiameterMappings, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"/>
+                        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource SuccessTextBrush}" FontWeight="SemiBold" Text="✔ 모든 직경 표기 해석 완료" Visibility="{Binding HasNoVisibleDiameterMappings, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"/>
                         </Grid>
                         <Grid Grid.Row="2" Margin="0,10,0,0">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -424,8 +424,8 @@
                             <Button Grid.Column="1" Content="전체 일괄 적용" Style="{StaticResource PrimaryButtonStyle}" Margin="8,0,0,0" Command="{Binding ApplyBulkMappingCommand}" ToolTip="전 행 적용 — DN은 자동추정값, 등급은 왼쪽 선택값"/>
                             <!-- 관·곡관 규격표 진입점은 [관 · 곡관 설정] 탭 하나로 통일했다(2026-08-20, 중복 진입점 정리). -->
                             <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-                                <TextBlock Foreground="#B26B00" Text="{Binding DiameterUnresolvedCount, StringFormat=⚠ 확정 안 한 표기 {0}건}" ToolTip="확정 안 하면 자동추정값으로 배치"/>
-                                <TextBlock Foreground="#B26B00" Margin="12,0,0,0" Text="{Binding SpecUnmatchedCount, StringFormat=⚠ 규격 미매칭 {0}건}"/>
+                                <TextBlock Foreground="{StaticResource WarningTextBrush}" Text="{Binding DiameterUnresolvedCount, StringFormat=⚠ 확정 안 한 표기 {0}건}" ToolTip="확정 안 하면 자동추정값으로 배치"/>
+                                <TextBlock Foreground="{StaticResource WarningTextBrush}" Margin="12,0,0,0" Text="{Binding SpecUnmatchedCount, StringFormat=⚠ 규격 미매칭 {0}건}"/>
                             </StackPanel>
                         </Grid>
                     </Grid>
@@ -462,7 +462,7 @@
                                     </Grid.RowDefinitions>
                                     <Border Background="#F8FAFC" BorderBrush="#D7E0E7" BorderThickness="0,0,0,1" CornerRadius="8,8,0,0" Padding="10,0">
                                         <DockPanel VerticalAlignment="Center">
-                                            <TextBlock Text="선형" FontWeight="SemiBold" Foreground="#4A6FA5"/>
+                                            <TextBlock Text="선형" Style="{StaticResource SectionHeaderTextBlockStyle}"/>
                                             <ContentControl Style="{StaticResource HelpIconStyle}" HorizontalAlignment="Right" Tag="클릭으로 선택, Ctrl·Shift로 여러 개 선택합니다."/>
                                         </DockPanel>
                                     </Border>
@@ -495,15 +495,15 @@
                                                         <ColumnDefinition Width="Auto"/>
                                                     </Grid.ColumnDefinitions>
                                                     <StackPanel Margin="0,0,8,0">
-                                                        <TextBlock Text="{Binding Title, Mode=OneWay}" FontWeight="SemiBold" Foreground="#1F2A33" TextTrimming="CharacterEllipsis" ToolTip="{Binding Title, Mode=OneWay}"/>
-                                                        <TextBlock Text="{Binding MetaDisplay, Mode=OneWay}" FontSize="11" Foreground="#52606A" Margin="0,1,0,0"/>
+                                                        <TextBlock Text="{Binding Title, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource MainTextBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Title, Mode=OneWay}"/>
+                                                        <TextBlock Text="{Binding MetaDisplay, Mode=OneWay}" FontSize="11" Foreground="{StaticResource TextSubBrush}" Margin="0,1,0,0"/>
                                                     </StackPanel>
                                                     <ToggleButton Grid.Column="1" IsChecked="{Binding IsReversed, Mode=TwoWay}" VerticalAlignment="Center" Cursor="Hand"
                                                                   ToolTip="정점 순서 뒤집기(좌표 불변) — 6m 분절이 반대편 끝부터 시작. 선택된 행이면 선택 전체에 같은 값 적용">
                                                         <ToggleButton.Template>
                                                             <ControlTemplate TargetType="ToggleButton">
                                                                 <Border x:Name="bd" Background="White" BorderBrush="#D7E0E7" BorderThickness="1" CornerRadius="5" Padding="7,2">
-                                                                    <TextBlock x:Name="tx" Text="⇄ 반전" FontSize="12" Foreground="#52606A"/>
+                                                                    <TextBlock x:Name="tx" Text="⇄ 반전" FontSize="12" Foreground="{StaticResource TextSubBrush}"/>
                                                                 </Border>
                                                                 <ControlTemplate.Triggers>
                                                                     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bd" Property="BorderBrush" Value="#4A6FA5"/></Trigger>
@@ -524,7 +524,7 @@
                                     </ListBox>
                                     <Border Grid.Row="2" BorderBrush="#D7E0E7" BorderThickness="0,1,0,0" Padding="10,0">
                                         <DockPanel VerticalAlignment="Center">
-                                            <TextBlock VerticalAlignment="Center" Foreground="#3A6EA5" Text="{Binding ReversedCount, StringFormat=방향 반전 {0}건}"/>
+                                            <TextBlock VerticalAlignment="Center" Foreground="{StaticResource HeadingBrush}" Text="{Binding ReversedCount, StringFormat=방향 반전 {0}건}"/>
                                             <Button Content="선택 반전" Style="{StaticResource CancelButtonStyle}" Padding="10,2" HorizontalAlignment="Right" Command="{Binding ReverseSelectedCommand}"/>
                                         </DockPanel>
                                     </Border>
@@ -539,7 +539,7 @@
                                     </Grid.RowDefinitions>
                                     <Border Background="#F8FAFC" BorderBrush="#D7E0E7" BorderThickness="0,0,0,1" CornerRadius="8,8,0,0" Padding="10,0">
                                         <DockPanel VerticalAlignment="Center">
-                                            <TextBlock Text="선형 전체 개요도" FontWeight="SemiBold" Foreground="#4A6FA5"/>
+                                            <TextBlock Text="선형 전체 개요도" Style="{StaticResource SectionHeaderTextBlockStyle}"/>
                                             <ContentControl Style="{StaticResource HelpIconStyle}" HorizontalAlignment="Right" Tag="휠: 확대·축소&#x0a;드래그: 이동&#x0a;더블클릭: 전체 보기&#x0a;띠 클릭: 구간 선택"/>
                                         </DockPanel>
                                     </Border>
@@ -549,11 +549,11 @@
                             </Border>
                         </Grid>
                         <WrapPanel Grid.Row="1" Margin="2,6,0,8">
-                            <Rectangle Width="18" Height="4" Fill="#4A6FA5" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="선택 선형" FontSize="11" Foreground="#52606A" Margin="0,0,14,0"/>
-                            <Rectangle Width="18" Height="4" Fill="#B7C4D0" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="기타 선형" FontSize="11" Foreground="#52606A" Margin="0,0,14,0"/>
-                            <TextBlock Text="● 시점 · ▶ 진행 방향(6m 분절 시작 쪽)" FontSize="11" Foreground="#52606A" Margin="0,0,14,0"/>
-                            <Rectangle Width="18" Height="8" Fill="#73C0392B" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="배치 제외 구간" FontSize="11" Foreground="#52606A" Margin="0,0,14,0"/>
-                            <TextBlock Text="Sta." FontSize="11" Foreground="#52606A"/><ContentControl Style="{StaticResource HelpIconStyle}" Margin="4,0,0,0" Tag="엑셀 Station 열이 있으면 그 위치로 고정하고, 없으면 진행 방향 시점부터 셉니다."/>
+                            <Rectangle Width="18" Height="4" Fill="#4A6FA5" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="선택 선형" FontSize="11" Foreground="{StaticResource TextSubBrush}" Margin="0,0,14,0"/>
+                            <Rectangle Width="18" Height="4" Fill="#B7C4D0" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="기타 선형" FontSize="11" Foreground="{StaticResource TextSubBrush}" Margin="0,0,14,0"/>
+                            <TextBlock Text="● 시점 · ▶ 진행 방향(6m 분절 시작 쪽)" FontSize="11" Foreground="{StaticResource TextSubBrush}" Margin="0,0,14,0"/>
+                            <Rectangle Width="18" Height="8" Fill="#73C0392B" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="배치 제외 구간" FontSize="11" Foreground="{StaticResource TextSubBrush}" Margin="0,0,14,0"/>
+                            <TextBlock Text="Sta." FontSize="11" Foreground="{StaticResource TextSubBrush}"/><ContentControl Style="{StaticResource HelpIconStyle}" Margin="4,0,0,0" Tag="엑셀 Station 열이 있으면 그 위치로 고정하고, 없으면 진행 방향 시점부터 셉니다."/>
                         </WrapPanel>
                         <!-- 배치 제외 구간 표 — 선택 선형의 구간만(전체 보기 토글) -->
                         <Grid Grid.Row="2" DataContext="{Binding Exclusions}">
@@ -563,7 +563,7 @@
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <DockPanel Margin="0,0,0,6">
-                                <TextBlock Text="배치 제외 구간" FontWeight="SemiBold" Foreground="#4A6FA5" VerticalAlignment="Center"/>
+                                <TextBlock Text="배치 제외 구간" Style="{StaticResource SectionHeaderTextBlockStyle}" VerticalAlignment="Center"/>
                                 <ContentControl Style="{StaticResource HelpIconStyle}" Tag="구간 안에는 관·곡관을 배치하지 않습니다(밸브실 등). 선택한 선형의 구간만 표시합니다."/>
                                 <CheckBox Style="{StaticResource PrimaryCheckBoxStyle}" Content="전체 보기" IsChecked="{Binding ShowAllRows, Mode=TwoWay}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                             </DockPanel>
@@ -606,7 +606,7 @@
                                                             </Style>
                                                         </TextBlock.Style>
                                                     </TextBlock>
-                                                    <TextBlock Text="{Binding FirstMessage}" Foreground="#52606A" TextTrimming="CharacterEllipsis" MaxWidth="120"/>
+                                                    <TextBlock Text="{Binding FirstMessage}" Foreground="{StaticResource TextSubBrush}" TextTrimming="CharacterEllipsis" MaxWidth="120"/>
                                                 </StackPanel>
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
@@ -641,7 +641,7 @@
                     <StackPanel>
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="진단" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                            <TextBlock Text="스냅 허용오차(mm)" VerticalAlignment="Center" Foreground="#52606A"/>
+                            <TextBlock Text="스냅 허용오차(mm)" VerticalAlignment="Center" Foreground="{StaticResource TextSubBrush}"/>
                             <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Width="70" Margin="8,0" Text="{Binding SnapToleranceMm}"/>
                             <Button Content="진단 실행" Style="{StaticResource PrimaryButtonStyle}" Padding="12,3" Command="{Binding RunCommand}"/>
                         </StackPanel>
@@ -653,7 +653,7 @@
                 <StackPanel Visibility="{Binding IsBusy, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                     <Grid Margin="0,0,0,5">
                         <TextBlock Text="{Binding PhaseText, Mode=OneWay}" FontWeight="SemiBold"/>
-                        <TextBlock Text="{Binding ProgressDetail, Mode=OneWay}" HorizontalAlignment="Right" Foreground="#52606A"/>
+                        <TextBlock Text="{Binding ProgressDetail, Mode=OneWay}" HorizontalAlignment="Right" Foreground="{StaticResource TextSubBrush}"/>
                     </Grid>
                     <ProgressBar Style="{StaticResource PrimaryProgressBarStyle}" Minimum="0" Maximum="100"
                                  Value="{Binding ProgressPercent, Mode=OneWay}"/>
@@ -677,7 +677,7 @@
                         <ScrollViewer MaxHeight="110" Margin="0,6,0,0" VerticalScrollBarVisibility="Auto">
                             <TextBox Style="{StaticResource PrimaryTextBoxStyle}" Text="{Binding ResultWarningsText, Mode=OneWay}"
                                      IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
-                                     Foreground="#B26B00" Background="Transparent" BorderThickness="0"
+                                     Foreground="{StaticResource WarningTextBrush}" Background="Transparent" BorderThickness="0"
                                      Padding="0" IsTabStop="False"/>
                         </ScrollViewer>
                     </StackPanel>
@@ -690,7 +690,7 @@
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <TextBlock Margin="0,2,0,0">
-                                        <Hyperlink Foreground="#B26B00" TextDecorations="Underline" Command="{Binding DataContext.NavigatePreflightIssueCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}">
+                                        <Hyperlink Foreground="{StaticResource WarningTextBrush}" TextDecorations="Underline" Command="{Binding DataContext.NavigatePreflightIssueCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}">
                                             <Run Text="{Binding Message, Mode=OneWay}"/>
                                         </Hyperlink>
                                     </TextBlock>

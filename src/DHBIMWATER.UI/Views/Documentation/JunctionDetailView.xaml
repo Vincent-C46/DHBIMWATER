@@ -331,7 +331,7 @@
                                 <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap"
                                            Text="패밀리 기호선을 실제 평면 위치에 그린 예상도입니다(낮음 상세수준). 기호선 없는 패밀리는 대체 기호, 연결 끊긴 부재는 빨간색입니다. 부재에 마우스를 올리면 명칭이 보입니다."/>
                                 <ItemsControl ItemsSource="{Binding PreviewWarnings, Mode=OneWay}">
-                                    <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding Mode=OneWay, StringFormat=⚠ {0}}" Foreground="#E74C3C" FontSize="11" TextWrapping="Wrap"/></DataTemplate></ItemsControl.ItemTemplate>
+                                    <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding Mode=OneWay, StringFormat=⚠ {0}}" Foreground="{StaticResource ErrorTextBrush}" FontSize="11" TextWrapping="Wrap"/></DataTemplate></ItemsControl.ItemTemplate>
                                 </ItemsControl>
                             </StackPanel>
                         </Grid>
@@ -393,7 +393,7 @@
                         </Style>
                     </Border.Style>
                     <StackPanel>
-                        <TextBlock Text="{Binding StatusText, Mode=OneWay}" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" Margin="0,0,0,4"/>
+                        <TextBlock Text="{Binding StatusText, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" Margin="0,0,0,4"/>
                         <ItemsControl ItemsSource="{Binding ResultLines, Mode=OneWay}" MaxHeight="90">
                             <ItemsControl.Template><ControlTemplate TargetType="ItemsControl"><ScrollViewer VerticalScrollBarVisibility="Auto"><ItemsPresenter/></ScrollViewer></ControlTemplate></ItemsControl.Template>
                             <ItemsControl.ItemTemplate>

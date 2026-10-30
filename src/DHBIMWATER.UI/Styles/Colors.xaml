@@ -83,6 +83,16 @@
 
     <!-- Text -->
     <SolidColorBrush x:Key="MainTextBrush" Color="{StaticResource Color.Neutral.Gray.900}"/>
-    <SolidColorBrush x:Key="TextSubBrush" Color="{StaticResource Color.Neutral.Gray.600}"/>
+    <!-- 보조 글자. #5D6D7E = 흰 배경 5.3:1 (WCAG 4.5:1 통과). 예전 Gray.600은 3.5:1이라 바꿈 -->
+    <SolidColorBrush x:Key="TextSubBrush" Color="#5D6D7E"/>
+    <!-- 묶음 제목 글자. 흰 5.1:1 -->
+    <SolidColorBrush x:Key="HeadingBrush" Color="#4A6FA5"/>
+    <!-- 상태 글자. 원색(Error/Warning)은 글자로 쓰면 대비 부족해서 어둡게 뺌 -->
+    <SolidColorBrush x:Key="ErrorTextBrush" Color="#B03A2E"/>
+    <SolidColorBrush x:Key="WarningTextBrush" Color="#9A5B00"/>
+    <SolidColorBrush x:Key="SuccessTextBrush" Color="#2E7D32"/>
+    <!-- 묶음 패널 -->
+    <SolidColorBrush x:Key="GroupPanelBackgroundBrush" Color="#F7F9FB"/>
+    <SolidColorBrush x:Key="GroupPanelBorderBrush" Color="#DCE6EE"/>
 
 </ResourceDictionary>

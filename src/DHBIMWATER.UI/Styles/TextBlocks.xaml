@@ -29,6 +29,14 @@
         <Setter Property="Margin" Value="0,0,0,8"/>
     </Style>
 
+    <!-- 창 안 묶음 제목. 13 SemiBold + HeadingBrush. Bold·16px 소제목 대신 쓴다 (docs/UI_디자인_원칙.md) -->
+    <Style x:Key="SectionHeaderTextBlockStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{StaticResource HeadingBrush}"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
     <!-- ========================================
          Body Styles - 본문용 스타일
          ======================================== -->
@@ -119,8 +127,8 @@
                                            Text="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource AncestorType=ToolTip}}"/>
                             </ToolTip>
                         </Grid.ToolTip>
-                        <Ellipse x:Name="Circle" Stroke="{StaticResource Brush.Gray.500}" StrokeThickness="1.2"/>
-                        <TextBlock x:Name="Mark" Text="?" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Brush.Gray.500}"
+                        <Ellipse x:Name="Circle" Stroke="{StaticResource Brush.Gray.600}" StrokeThickness="1.2"/>
+                        <TextBlock x:Name="Mark" Text="?" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Brush.Gray.600}"
                                    HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0"/>
                     </Grid>
                     <ControlTemplate.Triggers>
