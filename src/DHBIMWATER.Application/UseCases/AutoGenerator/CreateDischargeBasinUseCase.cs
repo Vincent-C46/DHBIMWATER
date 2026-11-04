@@ -11,9 +11,9 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator;
 ///
 /// <para><b>이번 범위</b> — 레벨 · 바닥슬래브 · 외벽 · 상부슬래브 · 상부 개구부.</para>
 ///
-/// <para><b>기둥·거더는 만들지 않는다</b> — 원본 엑셀이 단면(TCB1·TCH1·TGB1·TGH1)만 주고
-/// <b>열 위치와 개수를 주지 않기</b> 때문이다. 더구나 <see cref="IElementTypeCommandRepo"/> 에
-/// 기둥 유형을 만드는 API 가 없어 기존 문서의 패밀리 유형을 골라야 한다(밸브실 방식).
+/// <para><b>기둥·거더는 아직 만들지 않는다</b> — 배치(펌프 사이 N−1개)는 평면 도해에서 확인했지만
+/// <see cref="IElementTypeCommandRepo"/> 에 기둥 유형을 만드는 API 가 없어
+/// 기존 문서의 패밀리 유형을 고를 화면이 먼저 필요하다(밸브실 방식).
 /// 펌프장도 기둥은 만들지 않는다. docs/164_토출조_확인필요사항.md C-4 참조.</para>
 ///
 /// <para><b>단, 배선은 열어 두었다</b> — <see cref="DischargeBasinInputDto.Frame"/> 에
@@ -144,7 +144,7 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
                 _transaction.Commit();
 
                 var frameNote = input.Frame is null
-                    ? "\r\n\r\n※ 기둥·거더는 원본 자료에 배치 정보가 없어 생성하지 않았습니다."
+                    ? "\r\n\r\n※ 기둥·거더는 기둥 유형 선택이 아직 없어 생성하지 않았습니다."
                     : string.Empty;
                 var openingNote = openingFailures > 0
                     ? $"\r\n\r\n※ 상부 개구부 {openingDefs.Count}개소 중 {openingFailures}개소를 만들지 못했습니다."

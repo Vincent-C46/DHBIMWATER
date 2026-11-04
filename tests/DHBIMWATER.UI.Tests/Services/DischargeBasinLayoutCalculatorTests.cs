@@ -59,34 +59,54 @@ public class DischargeBasinLayoutCalculatorTests
 
         var outline = DischargeBasinLayoutCalculator.CalculateInnerOutline(input, g);
 
-        Assert.Equal(8, outline.Count);
-        // TL4=1000, TL3=6750 → 경사 시작/끝
+        // 평면 도해 하단 치수열 TL3 | TL4 | 관로 | TL4 | TL3 — 단부 TB1 코너에서 곧바로 경사가 시작된다.
+        Assert.Equal(6, outline.Count);
         Assert.Equal(new Point2D(19500, 3800), outline[2]);
-        Assert.Equal(new Point2D(18500, 3800), outline[3]);
-        Assert.Equal(11750, outline[4].X, Precision);
-        Assert.Equal(6300, outline[4].Y, Precision);          // TB2
-        Assert.Equal(7750, outline[5].X, Precision);
-        Assert.Equal(6300, outline[5].Y, Precision);
-        Assert.Equal(new Point2D(1000, 3800), outline[6]);
+        Assert.Equal(19500 - 6750, outline[3].X, Precision);  // TLT − TL3
+        Assert.Equal(6300, outline[3].Y, Precision);          // TB2
+        Assert.Equal(6750, outline[4].X, Precision);          // TL3
+        Assert.Equal(6300, outline[4].Y, Precision);
+        Assert.Equal(new Point2D(0, 3800), outline[5]);
 
-        // 가운데 평행 구간 = 토출관로 폭 (ON×OH, OT=0 재현 조건)
-        Assert.Equal(2 * 2000, outline[4].X - outline[5].X, Precision);
+        // 가운데 평행 구간 = TL4 + 토출관로 폭(ON×OH, OT=0 재현 조건) + TL4
+        Assert.Equal(1000 + 2 * 2000 + 1000, outline[3].X - outline[4].X, Precision);
     }
 
     /// <summary>
-    /// 중앙부 평면은 가운데가 부풀어 오목(reflex) 꼭짓점을 갖는다.
-    /// acos 만으로 내각을 구하면 여기가 볼록으로 잡혀 마이터 보정 부호가 뒤집힌다.
+    /// 엑셀 TT4·TB4 의 θ1 = (90°+θ)/2 는 단부 (0, TB1) 코너 내각의 절반이다 —
+    /// 경사가 단부 코너에서 곧바로 시작해야 성립한다. 경사→평행 절곡점 내각은 180° − θ.
     /// </summary>
     [Fact]
-    public void Center_InnerOutline_HasReflexVertices()
+    public void Center_CornerAngles_MatchExcelTheta1()
     {
         var (input, g) = Case(DischargeOutletPosition.Center);
         var outline = DischargeBasinLayoutCalculator.CalculateInnerOutline(input, g);
 
-        Assert.True(DischargeBasinLayoutCalculator.InteriorAngle(outline, 3) > Math.PI);
-        Assert.True(DischargeBasinLayoutCalculator.InteriorAngle(outline, 6) > Math.PI);
+        var atTb1 = DischargeBasinLayoutCalculator.InteriorAngle(outline, 5) / 2 * 180 / Math.PI;
+        Assert.Equal(g.Theta1, atTb1, 6);
+        Assert.Equal(g.TT4 / 2, g.TT1 / 2 / Math.Tan(atTb1 * Math.PI / 180), 6);
+
+        var atBend = DischargeBasinLayoutCalculator.InteriorAngle(outline, 4) * 180 / Math.PI;
+        Assert.Equal(180 - g.Theta, atBend, 6);
         // 펌프측 직각 코너는 그대로 90°.
         Assert.Equal(Math.PI / 2, DischargeBasinLayoutCalculator.InteriorAngle(outline, 0), Precision);
+    }
+
+    /// <summary>
+    /// 엑셀 TL5·TL7 은 벽 외면 / 바닥슬래브 외면에서 경사→평행 절곡점까지의 길이다.
+    /// 내공 외곽선을 TT1 · TT1+TB3 만큼 바깥으로 민 절곡점이 그 값과 맞아야 한다.
+    /// </summary>
+    [Fact]
+    public void Center_OffsetBendPoints_MatchExcelTL5AndTL7()
+    {
+        var (input, g) = Case(DischargeOutletPosition.Center);
+        var inner = DischargeBasinLayoutCalculator.CalculateInnerOutline(input, g);
+
+        var wallOuter = DischargeBasinLayoutCalculator.OffsetOutward(inner, g.TT1);
+        Assert.Equal(g.TL5!.Value, wallOuter[4].X + g.TT1, 6);           // 벽 외면(x = −TT1) 기준
+
+        var slabOuter = DischargeBasinLayoutCalculator.OffsetOutward(inner, g.TT1 + g.TB3);
+        Assert.Equal(g.TL7!.Value, slabOuter[4].X + g.TT1 + g.TB3, 6);   // 바닥슬래브 외면 기준
     }
 
     // ── 엑셀의 θ1·θ2 와 맞물리는지 ─────────────────────────────────
@@ -176,13 +196,13 @@ public class DischargeBasinLayoutCalculatorTests
     }
 
     [Fact]
-    public void Center_Walls_FollowEightSidedOutline()
+    public void Center_Walls_FollowSixSidedOutline()
     {
         var (input, g) = Case(DischargeOutletPosition.Center);
 
         var walls = DischargeBasinLayoutCalculator.CalculateWalls(input, g);
 
-        Assert.Equal(8, walls.Count);
+        Assert.Equal(6, walls.Count);
     }
 
     /// <summary>
@@ -238,6 +258,12 @@ public class DischargeBasinLayoutCalculatorTests
             Assert.Equal(DischargeBasinLayoutCalculator.TopSlabCode, o.HostElementCode);
             Assert.Equal(DischargeBasinLayoutCalculator.TopLevelName, o.LevelName);
         });
+
+        // 진입 동선용(TOL2)은 개구부 도해대로 TB1 단부 내벽면(로컬 x=0 → 프로젝트 OriginY)에 한 변을 붙인다.
+        Assert.Equal(placement.OriginY + g.TOL2 / 2, openings[0].Position.Y, Precision);
+        // 나머지는 펌프 중심.
+        for (var i = 1; i < openings.Count; i++)
+            Assert.Equal(placement.OriginY + DischargeBasinLayoutCalculator.PumpCenterX(input, g, i), openings[i].Position.Y, Precision);
     }
 
     /// <summary>개구부 X는 펌프 중심을 따른다. 펌프 배열은 TLT 산식과 같은 순서여야 한다.</summary>
@@ -257,7 +283,7 @@ public class DischargeBasinLayoutCalculatorTests
     // ── 기둥 · 거더 (확장 지점) ───────────────────────────────────
 
     /// <summary>
-    /// 기본값은 기둥·거더 없음. 원본에 열 위치·개수가 없어 Frame 이 항상 null 이다(확인필요사항 C-4).
+    /// 기본값은 기둥·거더 없음. 기둥 유형 선택 화면이 없어 Frame 이 항상 null 이다(확인필요사항 C-4).
     /// </summary>
     [Fact]
     public void Frame_IsAbsentByDefault_SoNoColumnsOrGirders()
@@ -271,7 +297,7 @@ public class DischargeBasinLayoutCalculatorTests
 
     /// <summary>Frame 을 채우면 그대로 돌아야 한다 — 나중에 배치가 확정됐을 때의 동작을 미리 고정해 둔다.</summary>
     [Fact]
-    public void Frame_WhenSupplied_PutsOneColumnPerPumpOnTheColumnLine()
+    public void Frame_WhenSupplied_PutsColumnsBetweenPumpsOnTheColumnLine()
     {
         var (baseInput, g) = Case(DischargeOutletPosition.LeftRight);
         var input = baseInput with { Frame = new DischargeBasinFrameSpec(3800, "기둥류 : 기둥 A") };
@@ -279,7 +305,8 @@ public class DischargeBasinLayoutCalculatorTests
         var columns = DischargeBasinLayoutCalculator.CalculateColumns(input, g);
 
         var placement = DischargeBasinPlacement.For(input, g);
-        Assert.Equal(input.N, columns.Count);
+        // 평면 도해: 펌프 사이(TL2 가운데)에 펌프 대수 − 1 개.
+        Assert.Equal(input.N - 1, columns.Count);
         Assert.All(columns, c =>
         {
             // 기둥 열 위치는 로컬 Y → 프로젝트 X.
@@ -291,9 +318,9 @@ public class DischargeBasinLayoutCalculatorTests
             Assert.Equal(-(g.TT3 + g.TGH1), c.TopOffset, Precision);
         });
 
-        // 펌프 축(프로젝트 Y)은 개구부와 같은 펌프 중심을 쓴다.
-        var openings = DischargeBasinLayoutCalculator.CalculateSlabOpenings(input, g);
-        Assert.Equal(openings.Select(o => o.Position.Y), columns.Select(c => c.Position.Y));
+        // 펌프 축(프로젝트 Y)은 이웃한 두 펌프 중심의 가운데 = 1번 펌프 중심 + (i + ½)·피치.
+        for (var i = 0; i < columns.Count; i++)
+            Assert.Equal(input.FirstPumpCenterY + (i + 0.5) * input.B8PlusT5, columns[i].Position.Y, Precision);
     }
 
     [Fact]
@@ -323,7 +350,7 @@ public class DischargeBasinLayoutCalculatorTests
 
         var columns = DischargeBasinLayoutCalculator.CalculateColumns(input, g);
 
-        Assert.Equal(input.N, columns.Count);
+        Assert.Equal(input.N - 1, columns.Count);
         Assert.Empty(DischargeBasinLayoutCalculator.CalculateGirders(input, g));
         // 거더가 없으면 기둥 상단은 슬래브 하면까지 올라온다.
         Assert.All(columns, c => Assert.Equal(-g.TT3, c.TopOffset, Precision));
@@ -415,7 +442,8 @@ public class DischargeBasinLayoutCalculatorTests
     {
         var (input, g) = PlacedCase();
 
-        var openings = DischargeBasinLayoutCalculator.CalculateSlabOpenings(input, g);
+        // 펌프측 벽 관통구는 펌프마다 펌프 중심에 뚫린다(상부 개구부 1번은 단부 내벽면 정렬이라 기준으로 못 쓴다).
+        var openings = DischargeBasinLayoutCalculator.CalculateWallOpenings(input, g);
 
         for (var i = 0; i < input.N; i++)
             Assert.Equal(input.FirstPumpCenterY + i * input.B8PlusT5, openings[i].Position.Y, Precision);

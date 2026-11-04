@@ -44,7 +44,7 @@ namespace DHBIMWATER.Application.Services
             if (input.Step != DischargeStepType.None) return UnsupportedReason;
 
             // 중앙부 토출은 토출관로가 내공 총길이를 다 먹으면 경사 구간이 사라진다.
-            // TL3 ≤ 0 이면 내공 외곽선의 4·5번 점이 3·6번을 넘어가 자기교차(bowtie) 다각형이 되고
+            // TL3 ≤ 0 이면 내공 외곽선의 3·4번 점(경사 끝)이 단부 벽 바깥으로 나가 자기교차 다각형이 되고
             // TB2 < TB1 로 형상까지 뒤집힌다.
             if (input.Position == DischargeOutletPosition.Center && (g.TL3 ?? 0) <= 0)
                 return CenterConduitTooWideReason(input, g);
@@ -106,19 +106,18 @@ namespace DHBIMWATER.Application.Services
                 };
             }
 
-            // 중앙부 토출 — 좌우 대칭. 양 단부에서 TL4 만큼 평행하다가 TL3 구간에서 TB2 까지 벌어지고,
-            // 가운데 토출관로 구간은 TB2 로 평행하다.
+            // 중앙부 토출 — 좌우 대칭 육각형. 양 단부(x=0·TLT)의 TB1 코너에서 곧바로 TL3 구간 경사로 TB2 까지 벌어지고,
+            // 가운데 TL4 + 토출관로 + TL4 구간은 TB2 로 평행하다(평면 도해 하단 치수열 TL3|TL4|관로|TL4|TL3).
+            // 엑셀 수식도 이 배치를 전제한다 — TT4·TB4 의 θ1 = (90°+θ)/2 는 x=0 코너 내각의 절반이고,
+            // TL5·TL6 은 경사→평행 절곡점(x = TL3)의 벽 외면 위치다(docs/164_토출조_확인필요사항.md A-5).
             var tl3 = g.TL3 ?? 0;
-            var tl4 = g.TL4 ?? 0;
             return new[]
             {
                 new Point2D(0, 0),
                 new Point2D(g.TLT, 0),
                 new Point2D(g.TLT, g.TB1),
-                new Point2D(g.TLT - tl4, g.TB1),
-                new Point2D(g.TLT - tl4 - tl3, g.TB2),
-                new Point2D(tl4 + tl3, g.TB2),
-                new Point2D(tl4, g.TB1),
+                new Point2D(g.TLT - tl3, g.TB2),
+                new Point2D(tl3, g.TB2),
                 new Point2D(0, g.TB1),
             };
         }
@@ -202,7 +201,7 @@ namespace DHBIMWATER.Application.Services
                 var dir = Direction(a, b);
 
                 // 짝수 변은 양 끝을 코너까지 늘리고, 홀수 변은 그만큼 줄인다.
-                // 변의 수가 짝수라야 코너마다 늘림 1 · 줄임 1 이 된다(현재 두 유형 모두 4변·8변).
+                // 변의 수가 짝수라야 코너마다 늘림 1 · 줄임 1 이 된다(현재 좌우측 4변 · 중앙부 6변).
                 var sign = i % 2 == 0 ? 1 : -1;
                 var start = new Point2D(a.X - dir.X * miter[i] * sign, a.Y - dir.Y * miter[i] * sign);
                 var endIndex = (i + 1) % n;
@@ -226,7 +225,10 @@ namespace DHBIMWATER.Application.Services
         }
 
         /// <summary>
-        /// 상부 개구부. 펌프 대수만큼 펌프 중심에 맞춰 뚫되, 진입 동선용 1개소(첫 번째)만 TOL2 로 길게 한다.
+        /// 상부 개구부. 펌프 대수만큼 뚫되, 진입 동선용 1개소(첫 번째)만 TOL2 로 길게 한다.
+        /// <para><b>위치</b> — 2번째부터는 펌프 중심에 맞춘다. 첫 번째(TOL2)는 개구부 평면 도해대로
+        /// <b>TB1 단부 내벽면(로컬 x=0)에 한 변을 붙인다</b> — 진입 동선이 단부 벽을 따라 내려가는 자리다
+        /// (2026-11-02 도해 대조로 정정. 종전에는 1번 펌프 중심 기준 가운데 정렬이었다).</para>
         /// <para><b>치수는 축 기준으로 넣는다</b> — 개구부 패밀리는 회전 없이 배치되고
         /// (<c>RevitOpeningCommandRepo</c>), <c>Width</c>→W = <b>프로젝트 X</b> · <c>Length</c>→L = <b>프로젝트 Y</b> 다
         /// (2026-09-15 Revit 실검증으로 확인. 펌프장도 같은 규약으로 쓴다 —
@@ -242,11 +244,13 @@ namespace DHBIMWATER.Application.Services
             for (var i = 0; i < input.N; i++)
             {
                 var length = i == 0 ? g.TOL2 : g.TOL1;
+                // 진입 동선용(첫 번째)은 단부 내벽면에 붙이고, 나머지는 펌프 중심.
+                var centerX = i == 0 ? g.TOL2 / 2 : PumpCenterX(input, g, i);
                 openings.Add(new RectangularSlabOpeningDefinition
                 {
                     Width = g.TOB1,      // X 방향 (펌프측 → 토출측)
                     Length = length,     // Y 방향 (펌프 배열 방향) — 첫 1개소만 진입 동선용 TOL2
-                    Position = placement.Map(new Point2D(PumpCenterX(input, g, i), g.TOB1 / 2)),
+                    Position = placement.Map(new Point2D(centerX, g.TOB1 / 2)),
                     Name = $"토출조 상부 개구부 {i + 1}",
                     LevelName = TopLevelName,
                     HostElementCode = TopSlabCode,
@@ -304,9 +308,9 @@ namespace DHBIMWATER.Application.Services
         /// <summary>
         /// 기둥. <see cref="DischargeBasinInputDto.Frame"/> 이 null 이면 빈 목록이다 — 지금은 항상 그렇다.
         ///
-        /// <para>배치 규칙은 이미 정해 두었다: <b>X는 펌프 중심, 개수는 펌프 대수</b>(평면 전체가 펌프 중심으로 잡혀 있다).
-        /// 원본에 없는 값은 <b>열의 Y 위치 하나</b>뿐이라 그것만 Frame 으로 받는다
-        /// (docs/164_토출조_확인필요사항.md C-4).</para>
+        /// <para>배치 규칙 — 평면 도해(좌우측·중앙부 공통)에 기둥이 <b>펌프와 펌프 사이(TL2 구간 가운데)</b>에
+        /// <b>펌프 대수 − 1 개</b> 그려져 있다(2026-11-02 도해 대조로 정정. 종전 규칙은 "펌프 중심, 펌프 대수만큼").
+        /// 열의 Y 는 도해상 TB1 선 부근이라 Frame 으로 받는다(docs/164_토출조_확인필요사항.md C-4).</para>
         ///
         /// <para>단면 TCB1 × TCH1 (= TT1 × TT1) 은 고른 패밀리 유형이 들고 있다 —
         /// <see cref="Interfaces.IElementTypeCommandRepo"/> 에 기둥 유형 생성 API 가 없어 만들어 줄 수 없다.</para>
@@ -317,13 +321,16 @@ namespace DHBIMWATER.Application.Services
             if (input.Frame is not { } frame) return Array.Empty<ColumnDefinition>();
 
             var placement = DischargeBasinPlacement.For(input, g);
-            var columns = new List<ColumnDefinition>(input.N);
-            for (var i = 0; i < input.N; i++)
+            var count = Math.Max(input.N - 1, 0);
+            var columns = new List<ColumnDefinition>(count);
+            for (var i = 0; i < count; i++)
             {
+                // i번과 i+1번 펌프 중심의 가운데 = TL2 구간 가운데.
+                var x = (PumpCenterX(input, g, i) + PumpCenterX(input, g, i + 1)) / 2;
                 columns.Add(new ColumnDefinition
                 {
                     Position = placement.Map(
-                        new Point3D(PumpCenterX(input, g, i), frame.ColumnLineOffsetY, g.TF * 1000)),
+                        new Point3D(x, frame.ColumnLineOffsetY, g.TF * 1000)),
                     TypeName = frame.ColumnTypeName,
                     BaseLevelName = BaseLevelName,
                     TopLevelName = TopLevelName,
