@@ -243,6 +243,34 @@ public sealed class PipeLayoutJointTests
         Assert.Equal("DH_소켓_직관 : 80A", vm.SegmentFamilyTypeName);
     }
 
+    private static readonly string[] SteelFamilyNames =
+    [
+        .. JointFamilyNames,
+        "DH_강관_직관 : 80A", "DH_강관_곡관 : 90°", "DH_강관_T자관 : 100x80", "DH_강관_Y형관 : 100x80", "DH_플랜지_Y형관 : 100x80",
+    ];
+
+    [Fact]
+    public void MaterialToggle_Steel_PicksSteelFamilies_DuctileRestores()
+    {
+        var vm = CreateViewModelWithValve(SteelFamilyNames);
+        Assert.Equal("DH_플랜지_직관 : 80A", vm.SegmentFamilyTypeName);   // 주철관은 강관 패밀리 제외
+        Assert.Equal("DH_플랜지_Y형관 : 100x80", vm.WyeFamilyTypeName);
+
+        vm.IsSteelSelected = true;
+        Assert.Equal("DH_강관_직관 : 80A", vm.SegmentFamilyTypeName);
+        Assert.Equal("DH_강관_곡관 : 90°", vm.BendFamilyTypeName);
+        Assert.Equal("DH_강관_T자관 : 100x80", vm.TeeFamilyTypeName);
+        Assert.Equal("DH_강관_Y형관 : 100x80", vm.WyeFamilyTypeName);
+        Assert.Equal("DH_십자관 : DN100", vm.CrossFamilyTypeName);         // 강관 십자관 없으면 그대로
+
+        vm.JointConnectionLabel = "용접";
+        Assert.Equal("DH_강관_T자관 : 100x80", vm.TeeFamilyTypeName);
+
+        vm.IsDuctileIronSelected = true;
+        Assert.Equal("DH_소켓_직관 : 80A", vm.SegmentFamilyTypeName);
+        Assert.Equal("DH_소켓_플랜지T형관 : 100x80", vm.TeeFamilyTypeName);
+    }
+
     // ── 패밀리 설정 저장·적용(docs/175 § E-4) ────────────────────
 
     [Fact]

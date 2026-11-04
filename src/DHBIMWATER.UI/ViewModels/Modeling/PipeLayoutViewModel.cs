@@ -49,7 +49,10 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     /// 한 배열에 담아야 GuessFamily의 DH 접두 패스가 두 키워드 모두에 먼저 걸린다 —
     /// 호출을 쪼개면 "DH 없는 소켓곡관"이 "DH_곡관"을 이긴다(docs/145 § 1).</summary>
     private static readonly string[] BendFamilyDefaultKeywords = ["소켓곡관", "곡관"];
-    private static readonly string[] TeeFamilyDefaultKeywords = ["T형관", "T형", "티", "TEE"];
+    /// <summary>`T자관` = 강관 패밀리 이름 규칙(2026-10-30).</summary>
+    private static readonly string[] TeeFamilyDefaultKeywords = ["T형관", "T자관", "T형", "티", "TEE"];
+    /// <summary>강관 패밀리 표지 단어. 관종 강관이면 이 단어 든 패밀리만, 주철관이면 이 단어 없는 패밀리만 추정 후보(2026-10-30).</summary>
+    private const string SteelFamilyToken = "강관";
     /// <summary>Y형관 추정 키워드(docs/187 § 3-4). T형 키워드에서 떼어냈다 —
     /// 남겨 두면 Y형관 패밀리가 T형 칸으로 추정돼 두 칸이 같은 패밀리를 가리킨다.</summary>
     private static readonly string[] WyeFamilyDefaultKeywords = ["Y형관", "Y형", "WYE", "와이"];
@@ -672,8 +675,13 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             OnPropertyChanged(nameof(IsSteelSelected));
             EnsurePipeKindForMaterial();
             NotifyJointConnectionLabels();
+            // 관종 바뀌면 관·곡관·T·Y·십자·이경 칸도 그 관종 패밀리로(2026-10-30 사용자 결정). 가져오기 중엔 가져온 값 우선.
+            if (!_isApplyingImport) ApplyJointFamilyDefaults();
         }
     }
+
+    /// <summary>기존 객체 가져오기가 관종을 바꾸는 중. 이때는 관종 기본 패밀리로 덮지 않는다 — 뒤이어 가져온 패밀리를 고른다.</summary>
+    private bool _isApplyingImport;
 
     /// <summary>강관 관 등급 콤보의 "DN별 기본" 항목 — DN≤300 STWW 290, 그 밖 STWW 400 A(<see cref="PipeKindCatalog.DefaultSteelGrade"/>).</summary>
     public const string AutoSteelGradeLabel = "자동 (DN별 기본)";
@@ -1123,7 +1131,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         NotifyValidationChanged();
     }
 
-    /// <summary>접합 종류가 바뀌면 관·곡관·T·Y·십자·이경 칸을 그 접합의 패밀리로 바꾼다(docs/263 § D, 2026-10-02 사용자 결정).
+    /// <summary>접합 종류·관종이 바뀌면 관·곡관·T·Y·십자·이경 칸을 그 접합·관종의 패밀리로 바꾼다(docs/263 § D, 2026-10-02·2026-10-30 사용자 결정).
     /// 사용자가 고른 값도 덮는다. 매칭이 없는 칸은 그대로 두고, 사용자는 이후 설정 창에서 다시 고를 수 있다.
     /// 밸브부관 A·B는 대상이 아니다.</summary>
     private void ApplyJointFamilyDefaults()
@@ -1133,12 +1141,12 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         _parameterRefreshDeferral++;
         try
         {
-            if (GuessFamilyForJoint(names, PipeFamilyDefaultKeywords, _jointConnection) is { } segment) SegmentFamilyTypeName = segment;
-            if (GuessFamilyForJoint(names, BendFamilyDefaultKeywords, _jointConnection) is { } bend) BendFamilyTypeName = bend;
-            if (GuessFamilyForJoint(names, TeeFamilyDefaultKeywords, _jointConnection) is { } tee) TeeFamilyTypeName = tee;
-            if (GuessFamilyForJoint(names, CrossFamilyDefaultKeywords, _jointConnection) is { } cross) CrossFamilyTypeName = cross;
-            if (GuessFamilyForJoint(names, WyeFamilyDefaultKeywords, _jointConnection) is { } wye) WyeFamilyTypeName = wye;
-            if (GuessFamilyForJoint(names, ReducerFamilyDefaultKeywords, _jointConnection) is { } reducer) ReducerFamilyTypeName = reducer;
+            if (GuessFamilyForJoint(names, PipeFamilyDefaultKeywords, _jointConnection, _pipeMaterial) is { } segment) SegmentFamilyTypeName = segment;
+            if (GuessFamilyForJoint(names, BendFamilyDefaultKeywords, _jointConnection, _pipeMaterial) is { } bend) BendFamilyTypeName = bend;
+            if (GuessFamilyForJoint(names, TeeFamilyDefaultKeywords, _jointConnection, _pipeMaterial) is { } tee) TeeFamilyTypeName = tee;
+            if (GuessFamilyForJoint(names, CrossFamilyDefaultKeywords, _jointConnection, _pipeMaterial) is { } cross) CrossFamilyTypeName = cross;
+            if (GuessFamilyForJoint(names, WyeFamilyDefaultKeywords, _jointConnection, _pipeMaterial) is { } wye) WyeFamilyTypeName = wye;
+            if (GuessFamilyForJoint(names, ReducerFamilyDefaultKeywords, _jointConnection, _pipeMaterial) is { } reducer) ReducerFamilyTypeName = reducer;
         }
         finally { _parameterRefreshDeferral--; }
         FlushDeferredParameterRefresh();
@@ -2460,7 +2468,11 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         if (!string.IsNullOrWhiteSpace(import.Zone)) ValveRoomZone = import.Zone;
         // 관종도 같은 규칙으로 이어받는다. 안 하면 강관 밸브실이 재생성에서 DCIP로 덮어쓰인다(docs/170 § G).
         if (PipeAlignmentParameters.MaterialFromModelValue(import.Material) is { } importedMaterial)
-            PipeMaterial = importedMaterial;
+        {
+            _isApplyingImport = true;
+            try { PipeMaterial = importedMaterial; }
+            finally { _isApplyingImport = false; }
+        }
         // 프로젝트 저장값이 있으면 채워진 칸은 덮지 않는다 — 저장값은 사용자가 확정한 값이고 가져온 값은 최빈값 추정이다(docs/175 § E-4 6).
         var kept = new List<string>();
         SelectImportedFamily(import.SegmentFamilyTypeName, SegmentFamilyTypeName, x => SegmentFamilyTypeName = x, "관", kept);
@@ -3325,12 +3337,12 @@ public sealed class PipeLayoutViewModel : ViewModelBase
 
         // 이름으로 기본값을 추정한다. 못 찾으면 비워 두고 검증에서 선택을 요구한다.
         // 현재 접합 종류(기본 플랜지)의 패밀리를 먼저 찾는다(docs/263 § D-2). 저장값은 이 뒤 ApplyFamilySettings가 덮는다.
-        _segmentFamilyTypeName ??= GuessFamilyForJoint(fittingNames, PipeFamilyDefaultKeywords, _jointConnection) ?? GuessFamily(fittingNames, PipeFamilyDefaultKeywords);
-        _bendFamilyTypeName ??= GuessFamilyForJoint(fittingNames, BendFamilyDefaultKeywords, _jointConnection) ?? GuessFamily(fittingNames, BendFamilyDefaultKeywords);
-        _teeFamilyTypeName ??= GuessFamilyForJoint(fittingNames, TeeFamilyDefaultKeywords, _jointConnection) ?? GuessFamily(fittingNames, TeeFamilyDefaultKeywords);
-        _crossFamilyTypeName ??= GuessFamilyForJoint(fittingNames, CrossFamilyDefaultKeywords, _jointConnection) ?? GuessFamily(fittingNames, CrossFamilyDefaultKeywords);
-        _wyeFamilyTypeName ??= GuessFamilyForJoint(fittingNames, WyeFamilyDefaultKeywords, _jointConnection) ?? GuessFamily(fittingNames, WyeFamilyDefaultKeywords);
-        _reducerFamilyTypeName ??= GuessFamilyForJoint(fittingNames, ReducerFamilyDefaultKeywords, _jointConnection) ?? GuessFamily(fittingNames, ReducerFamilyDefaultKeywords);
+        _segmentFamilyTypeName ??= GuessFamilyForJoint(fittingNames, PipeFamilyDefaultKeywords, _jointConnection, _pipeMaterial) ?? GuessFamily(MaterialPool(fittingNames, _pipeMaterial), PipeFamilyDefaultKeywords);
+        _bendFamilyTypeName ??= GuessFamilyForJoint(fittingNames, BendFamilyDefaultKeywords, _jointConnection, _pipeMaterial) ?? GuessFamily(MaterialPool(fittingNames, _pipeMaterial), BendFamilyDefaultKeywords);
+        _teeFamilyTypeName ??= GuessFamilyForJoint(fittingNames, TeeFamilyDefaultKeywords, _jointConnection, _pipeMaterial) ?? GuessFamily(MaterialPool(fittingNames, _pipeMaterial), TeeFamilyDefaultKeywords);
+        _crossFamilyTypeName ??= GuessFamilyForJoint(fittingNames, CrossFamilyDefaultKeywords, _jointConnection, _pipeMaterial) ?? GuessFamily(MaterialPool(fittingNames, _pipeMaterial), CrossFamilyDefaultKeywords);
+        _wyeFamilyTypeName ??= GuessFamilyForJoint(fittingNames, WyeFamilyDefaultKeywords, _jointConnection, _pipeMaterial) ?? GuessFamily(MaterialPool(fittingNames, _pipeMaterial), WyeFamilyDefaultKeywords);
+        _reducerFamilyTypeName ??= GuessFamilyForJoint(fittingNames, ReducerFamilyDefaultKeywords, _jointConnection, _pipeMaterial) ?? GuessFamily(MaterialPool(fittingNames, _pipeMaterial), ReducerFamilyDefaultKeywords);
         // 후보가 이미 키워드로 걸러져 있다. A·B는 커넥터 수로만 갈리므로(docs/227 § 0-6) 이름으로는 패밀리명(유형명 제외)의
         // A/B 표기만 본다. B는 못 찾으면 첫 항목, A는 못 찾으면 비워 두고 검증에서 선택을 요구한다.
         // 기본 패밀리명 완전일치가 먼저다(docs/232 § A-2) — `DH_특수_밸브부관`·`(D형)`에는 A/B 글자가 없어 종전 규칙이 못 잡는다.
@@ -3403,7 +3415,27 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     /// <summary>접합 종류에 맞는 패밀리만 남긴 뒤 부재 키워드 추정(<see cref="GuessFamily"/>)을 돌린다(docs/263 § D-1).
     /// 이름 규칙이 `DH_{접합}_{부재}`라 1순위는 `소켓_`·`플랜지_` 접두다 — `DH_소켓_플랜지T형관`처럼 두 단어가 다 든 패밀리가 있어
     /// 단어 포함만 보면 소켓 T형관이 플랜지로 잡힌다. 2순위는 패밀리명에 접합 단어 포함. 둘 다 없으면 null(호출부가 현재 값 유지).
-    /// 강관 `용접`은 값이 <see cref="BendConnection.Socket"/>이라 소켓 패밀리로 매칭한다(2026-10-02 사용자 결정).</summary>
+    /// 강관 `용접`은 값이 <see cref="BendConnection.Socket"/>이라 소켓 패밀리로 매칭한다(2026-10-02 사용자 결정).
+    /// <para>관종으로 먼저 거른다(<see cref="MaterialPool"/>). 강관 패밀리는 접합 단어가 없을 수 있어 — 접합 매칭 실패 시 강관 후보 안 키워드 추정.
+    /// 강관 `용접`은 `용접` 단어 먼저, 없으면 `소켓`.</para></summary>
+    private static string? GuessFamilyForJoint(IReadOnlyList<string> names, IReadOnlyList<string> keywords, BendConnection joint, PipeMaterial material)
+    {
+        var pool = MaterialPool(names, material);
+        var steel = material == PipeMaterial.Steel && pool.Count > 0 && IsSteelFamily(pool[0]);
+        if (!steel) return GuessFamilyForJoint(pool, keywords, joint);
+        if (joint == BendConnection.Socket && GuessFamilyForJointWord(pool, keywords, "용접") is { } weld) return weld;
+        return GuessFamilyForJoint(pool, keywords, joint) ?? GuessFamily(pool, keywords);
+    }
+
+    /// <summary>관종 후보. 강관 = `강관` 든 패밀리, 그 밖 = `강관` 없는 패밀리. 해당 후보가 하나도 없으면 전체(종전 동작).</summary>
+    private static IReadOnlyList<string> MaterialPool(IReadOnlyList<string> names, PipeMaterial material)
+    {
+        var pool = names.Where(x => IsSteelFamily(x) == (material == PipeMaterial.Steel)).ToList();
+        return pool.Count > 0 ? pool : names;
+    }
+
+    private static bool IsSteelFamily(string familyTypeName) => GetFamilyName(familyTypeName).Contains(SteelFamilyToken, StringComparison.Ordinal);
+
     private static string? GuessFamilyForJoint(IReadOnlyList<string> names, IReadOnlyList<string> keywords, BendConnection joint)
     {
         var word = joint switch
@@ -3412,7 +3444,11 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             BendConnection.Flanged => "플랜지",
             _ => null
         };
-        if (word is null) return null;
+        return word is null ? null : GuessFamilyForJointWord(names, keywords, word);
+    }
+
+    private static string? GuessFamilyForJointWord(IReadOnlyList<string> names, IReadOnlyList<string> keywords, string word)
+    {
         var prefixed = names.Where(x => GetFamilyName(x).Contains(word + "_", StringComparison.Ordinal)).ToList();
         if (GuessFamily(prefixed, keywords) is { } byPrefix) return byPrefix;
         var contained = names.Where(x => GetFamilyName(x).Contains(word, StringComparison.Ordinal)).ToList();
