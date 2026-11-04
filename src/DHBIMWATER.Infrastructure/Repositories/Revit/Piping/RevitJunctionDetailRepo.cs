@@ -67,7 +67,7 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
                 order.GetValueOrDefault(instance.Id.Value), ToVector(transform.BasisX), ToVector(transform.BasisY),
                 ToVector(transform.BasisZ), ToVector(upDirection), rotation, !orphans.Contains(instance.Id.Value),
                 ToVector(rightDirection), null,
-                // 미리보기 캔버스 배치용 평면 위치(mm). 기호선 읽기와 같은 뷰 오른쪽·위쪽 축
+                // 미리보기 캔버스 배치용 평면 위치(mm). 격점 평면뷰 오른쪽·위쪽 축(기호선도 미리보기 UseCase가 이 축으로 돌림)
                 new ShapePoint(RevitUnitConverter.FtToMm(transform.Origin.DotProduct(rightDirection)),
                     RevitUnitConverter.FtToMm(transform.Origin.DotProduct(upDirection))));
         }).ToList();

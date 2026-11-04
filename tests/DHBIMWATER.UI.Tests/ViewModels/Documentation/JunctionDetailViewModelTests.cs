@@ -22,6 +22,7 @@ public sealed class JunctionDetailViewModelTests
         Assert.Equal(400, set.StepMm);
         Assert.True(set.IsY);
         Assert.Equal(50, vm.ViewScale);
+        Assert.Equal(25, vm.SheetScale);
         // 태그 유형 0개 → 체크 해제로 보이고 실행에도 false(docs/291)
         Assert.False(vm.CanPlaceTags);
         Assert.False(vm.PlaceTags);
@@ -304,6 +305,59 @@ public sealed class JunctionDetailViewModelTests
         Assert.True(vm.PreviewCanvasWidth >= 60 * 8);
         Assert.Equal("", Create().RoomLabel);
         Assert.Null(Create().PreviewWallGeometry);
+    }
+
+    [Fact]
+    public void Scale_PresetAndCustom_UpdateViewScale_InvalidCustomBlocksRun()
+    {
+        var vm = Create();
+        Assert.Equal("1:25", vm.SelectedScale.Label);
+        Assert.False(vm.IsCustomScale);
+
+        var width = vm.PreviewCanvasWidth;
+
+        vm.SelectedScale = vm.ScaleChoices.Single(x => x.Label == "1:20");
+        Assert.Equal(20, vm.SheetScale);
+        // 시트 축척은 미리보기 캔버스 안 바꿈
+        Assert.Equal(50, vm.ViewScale);
+        Assert.Equal(width, vm.PreviewCanvasWidth);
+
+        vm.SelectedScale = vm.ScaleChoices.Single(x => x.Scale is null);
+        Assert.True(vm.IsCustomScale);
+        vm.CustomScaleText = "1:75";
+        Assert.Equal(75, vm.SheetScale);
+        Assert.True(vm.CanRun);
+
+        vm.CustomScaleText = "abc";
+        Assert.True(vm.HasScaleError);
+        Assert.False(vm.CanRun);
+        Assert.Equal(75, vm.SheetScale);
+    }
+
+    [Fact]
+    public void CompletionMessage_ListsCreatedUpdatedUnchanged_AndWarningCount()
+    {
+        var result = new JunctionDetailRunResult(null, null, null,
+            new JunctionDetailResult(["격점상세도_A"], ["격점상세도_B"], [], [], ["평면 경고"]), ["전체 경고"],
+            new JunctionDetailSheetResult(["격점상세도 (A)"], ["격점상세도 (B)"], ["격점상세도 (C)"], [], []));
+
+        var message = JunctionDetailViewModel.CompletionMessage(result);
+
+        Assert.Contains("평면 상세도: 새로 작성 1 · 갱신 1", message);
+        Assert.Contains("시트: 새로 작성 1 · 갱신 1 · 그대로 1", message);
+        Assert.Contains("새로 작성: 격점상세도 (A)", message);
+        Assert.Contains("갱신: 격점상세도 (B)", message);
+        Assert.Contains("경고 2건", message);
+        Assert.DoesNotContain("재료 일람표", message);
+    }
+
+    [Fact]
+    public void TitleBlocks_NoRunUseCase_EmptyWithMessage()
+    {
+        var vm = Create();
+        Assert.Empty(vm.TitleBlocks);
+        Assert.Null(vm.SelectedTitleBlock);
+        Assert.NotEqual("", vm.TitleBlockMessage);
     }
 
     private static JunctionDetailViewModel Create(bool connected = true, bool material = true,

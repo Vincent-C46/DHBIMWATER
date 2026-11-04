@@ -65,10 +65,14 @@ public sealed class BuildJunctionDetailPreviewUseCase
                         _transaction.Begin("기호선 읽기");
                         var result = _shapes.Read(elementIds);
                         diagnostics.AddRange(result.Diagnostics);
+                        // 기호선 = 세계 X·Y → 부재 위치와 같은 평면뷰 축으로. 뷰 회전해도 기호가 제자리에서 같이 돎
                         previews = previews.Select(preview => preview with
                         {
-                            Items = preview.Items.Select(item =>
-                                item with { Shape = result.Shapes.GetValueOrDefault(item.ElementId) }).ToList()
+                            Items = preview.Items.Select(item => item with
+                            {
+                                Shape = result.Shapes.GetValueOrDefault(item.ElementId) is { } shape
+                                    ? JunctionSymbolShapeMath.ToView(shape, item.ViewRight, item.ViewUp) : null
+                            }).ToList()
                         }).ToList();
                     }
                     finally

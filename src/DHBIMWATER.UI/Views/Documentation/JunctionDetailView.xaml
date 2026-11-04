@@ -82,8 +82,44 @@
             <!-- 왼쪽: 설정 2칸. "값 재기록" 칸은 제거(docs/291) — 값 빈 부재 자동 기록만 유지, 문서 전체 재산정 없음 -->
             <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
                 <StackPanel Margin="0,14,0,0">
-                    <!-- 펼침 항상 켬, 축척 1/50 고정. 수직분기 세트(수평 부재에서 이어진 수직 구간)마다 축·간격 입력 -->
-                    <GroupBox Header="1. 수직분기 오프셋 (세트별)">
+                    <!-- 새 시트 도곽 + 평면·3D 축척 일괄. 축척은 실행 때 Revit 뷰에만 씀, 미리보기 캔버스는 그대로 -->
+                    <GroupBox Header="1. 시트 · 축척">
+                        <StackPanel>
+                            <TextBlock Text="도곽 (제목 블록)" Style="{StaticResource FieldLabel}" Margin="0,0,0,3"/>
+                            <ComboBox ItemsSource="{Binding TitleBlocks, Mode=OneWay}" DisplayMemberPath="Name"
+                                      SelectedItem="{Binding SelectedTitleBlock, Mode=TwoWay}" FontWeight="Normal"
+                                      ToolTip="{Binding SelectedTitleBlock.Name, Mode=OneWay}"/>
+                            <TextBlock Text="{Binding TitleBlockMessage, Mode=OneWay}" Foreground="{StaticResource ErrorTextBrush}" TextWrapping="Wrap" FontWeight="Normal" FontSize="11">
+                                <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers>
+                                    <DataTrigger Binding="{Binding TitleBlockMessage, Mode=OneWay}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                                </Style.Triggers></Style></TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" FontWeight="Normal"
+                                       Text="새로 만드는 시트에만 적용합니다. 이미 있는 시트의 도곽은 바꾸지 않습니다."/>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="뷰 축척" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                <ComboBox Grid.Column="1" ItemsSource="{Binding ScaleChoices, Mode=OneWay}" DisplayMemberPath="Label"
+                                          SelectedItem="{Binding SelectedScale, Mode=TwoWay}" FontWeight="Normal"/>
+                                <!-- '사용자' 선택 시만 입력칸. 1:n의 n 정수(1~24000), 틀리면 빨간 테두리 + 실행 막음 -->
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="8,0,0,0" VerticalAlignment="Center"
+                                            Visibility="{Binding IsCustomScale, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                    <TextBlock Text="1 :" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Normal"/>
+                                    <TextBox Width="64" HorizontalContentAlignment="Right" ToolTip="축척 분모(1~24000 정수)"
+                                             Text="{Binding CustomScaleText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=300}">
+                                        <TextBox.Style><Style TargetType="TextBox" BasedOn="{StaticResource PrimaryTextBoxStyle}"><Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasScaleError, Mode=OneWay}" Value="True"><Setter Property="BorderBrush" Value="#E74C3C"/></DataTrigger>
+                                        </Style.Triggers></Style></TextBox.Style>
+                                    </TextBox>
+                                </StackPanel>
+                            </Grid>
+                            <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" FontWeight="Normal"
+                                       Text="평면뷰·3D뷰에 적용합니다. 재료표 드래프팅뷰는 1:1 그대로입니다. 축척이 바뀐 시트는 세 뷰를 다시 배치합니다."/>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <!-- 펼침 항상 켬. 수직분기 세트(수평 부재에서 이어진 수직 구간)마다 축·간격 입력 -->
+                    <GroupBox Header="2. 수직분기 오프셋 (세트별)">
                         <StackPanel>
                             <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,0,0,6" FontWeight="Normal"
                                        Text="간격은 실제 mm(심볼오프셋 값). 순서 n 부재 = n × 간격. 음수 = 반대 방향, 0 = 펼치지 않음."/>
@@ -153,7 +189,7 @@
                         </StackPanel>
                     </GroupBox>
 
-                    <GroupBox Header="2. 상세도 · 표 옵션">
+                    <GroupBox Header="3. 상세도 · 표 옵션">
                         <StackPanel>
                             <CheckBox Content="부재 번호 원(태그) 붙이기" IsChecked="{Binding PlaceTags, Mode=TwoWay}" IsEnabled="{Binding CanPlaceTags, Mode=OneWay}"/>
                             <Grid Margin="22,2,0,6">

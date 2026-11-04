@@ -12,7 +12,8 @@ public sealed record JunctionDetailOptions(
     bool Backfill = false,
     bool ExpandVertical = true,
     double StepMm = JunctionDetailParameters.StepMm,
-    int ViewScale = JunctionDetailParameters.ViewScale,
+    // Revit 평면·3D 뷰 축척. 미리보기 축척 아님
+    int ViewScale = JunctionDetailParameters.SheetScale,
     bool PlaceTags = true,
     long TagTypeId = 0,
     bool UseTypeImage = true,
@@ -22,7 +23,9 @@ public sealed record JunctionDetailOptions(
     // 미리보기가 정한 번호 태그 위치(docs/296). null이면 Revit 쪽 종전 규칙
     IReadOnlyList<JunctionTagPlacement>? TagPlacements = null,
     // 격점마다 시트 1장 + 평면·3D·드래프팅 배치. 평면 생성 켠 때만 돎
-    bool CreateSheet = true);
+    bool CreateSheet = true,
+    // 새 시트 도곽(제목 블록 유형 Id). 0 = A1 자동
+    long TitleBlockId = 0);
 
 public sealed record JunctionDetailResult(IReadOnlyList<string> Created, IReadOnlyList<string> Updated,
     IReadOnlyList<string> Reset, IReadOnlyList<string> Skipped, IReadOnlyList<string> Warnings);

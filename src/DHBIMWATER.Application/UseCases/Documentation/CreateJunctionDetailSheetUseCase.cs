@@ -24,7 +24,12 @@ public sealed class CreateJunctionDetailSheetUseCase
         _repo = repo;
     }
 
-    public JunctionDetailSheetResult Execute()
+    /// <summary>창 도곽 목록용. 읽기만, 트랜잭션 없음.</summary>
+    public IReadOnlyList<JunctionDetailTitleBlock> GetTitleBlocks() => _repo.GetTitleBlocks();
+
+    /// <param name="titleBlockId">새 시트 도곽. 0 = A1 자동. 기존 시트 도곽은 안 바꿈</param>
+    /// <param name="viewScale">3D 축척. 평면은 평면 UseCase가 같은 값으로 이미 바꿈</param>
+    public JunctionDetailSheetResult Execute(long titleBlockId = 0, int viewScale = JunctionDetailParameters.SheetScale)
     {
         var groups = _junctions.GetJunctions();
         var created = new List<string>();
@@ -41,7 +46,7 @@ public sealed class CreateJunctionDetailSheetUseCase
                 _transaction.Begin("격점상세도 시트 생성·갱신");
                 foreach (var group in groups)
                 {
-                    var request = BuildRequest(group);
+                    var request = BuildRequest(group) with { TitleBlockId = titleBlockId, ViewScale = viewScale };
                     // 격점 하나 실패해도 나머지 살림. Repo가 SubTransaction으로 그 격점만 되돌림
                     try
                     {

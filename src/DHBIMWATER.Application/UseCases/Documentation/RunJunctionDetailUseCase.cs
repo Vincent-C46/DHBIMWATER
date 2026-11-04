@@ -27,6 +27,9 @@ public sealed class RunJunctionDetailUseCase
         _catalog = catalog;
     }
 
+    /// <summary>창 도곽 목록. 시트 UseCase에 넘김.</summary>
+    public IReadOnlyList<JunctionDetailTitleBlock> GetTitleBlocks() => _sheet.GetTitleBlocks();
+
     public JunctionDetailRunResult Execute(JunctionDetailOptions options)
     {
         PipeMaterialBackfillResult? backfill = null;
@@ -75,7 +78,7 @@ public sealed class RunJunctionDetailUseCase
 
         // 평면·도면 만든 뒤 배치. 평면 끈 실행은 시트도 안 건드림
         if (options.CreatePlan && options.CreateSheet)
-            try { sheet = _sheet.Execute(); }
+            try { sheet = _sheet.Execute(options.TitleBlockId, options.ViewScale); }
             catch (DhbimwaterException ex) when (ex.Code == ErrorCodes.NoActiveDocument) { throw; }
             catch (Exception ex) { warnings.Add($"시트 생성 실패: {ex.Message}"); }
 

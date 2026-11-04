@@ -10,25 +10,31 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
 /// 배관재료표를 드래프팅뷰에 선(<see cref="DetailCurve"/>)과 문자(<see cref="TextNote"/>)로 직접 그린다(docs/133).
 /// <para>참고한 방식은 <c>docs/01_철근상세도_..._rev260408.dyn</c>이다 — 격자선을 그리고 셀마다 문자를 넣는다.
 /// 다만 그 스크립트는 범례를 복제해 쓰는데, 여기서는 <see cref="ViewDrafting.Create"/>로 새로 만든다.</para>
-/// <para>뷰 축척은 1:1로 두고 모든 치수를 mm로 잡는다. 그래야 여기 적은 mm 값이 도면에서 그대로 mm가 된다.</para>
+/// <para>모든 치수를 mm로 잡고 A1 도곽 1:1 크기로 그린다. 뷰 축척은 시트 배치 때 도곽 크기로 정한다(A1 1:1, A3 1:2).
+/// 문자는 용지 2.5mm 유형이라 축척과 무관하게 같은 크기.</para>
 /// <para>트랜잭션은 열지 않는다. UseCase가 연다(CLAUDE.md).</para>
 /// </summary>
 internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
 {
-    /// <summary>열 정의 — 제목, 폭(mm), 가운데 정렬 여부. 순서가 곧 도면 열 순서다(docs/131 § 0 표).</summary>
+    /// <summary>열 정의 — 제목, 폭(mm), 가운데 정렬 여부. 순서가 곧 도면 열 순서다(docs/131 § 0 표).
+    /// <para>A1 도곽 1:1 크기(종전 A3 값 × 2). A3 시트에선 시트 Repo가 뷰 축척 1:2로 줄임 → 종전 A3 모양과 같음.</para></summary>
     private static readonly (string Heading, double WidthMm, bool Centered)[] Columns =
     [
-        ("번호", 14, true),
-        ("명칭", 40, false),
-        ("규격", 42, false),
-        ("형상", 30, true),
-        ("수량", 14, true),
-        ("비고", 30, false),  // 직관·단관은 관 재료 코드가 자동으로 들어온다(docs/141 § B-7). 나머지는 빈 칸.
+        ("번호", 28, true),
+        ("명칭", 80, false),
+        ("규격", 84, false),
+        ("형상", 60, true),
+        ("수량", 28, true),
+        ("비고", 60, false),  // 직관·단관은 관 재료 코드가 자동으로 들어온다(docs/141 § B-7). 나머지는 빈 칸.
     ];
 
-    private const double RowHeightMm = 9;
-    private const double TitleGapMm = 6;      // 표 상단선과 제목 문자 사이 간격
-    private const double TextPaddingMm = 2;   // 좌측 정렬 칸의 안쪽 여백
+    private const double RowHeightMm = 18;
+    private const double TitleGapMm = 12;     // 표 상단선과 제목 문자 사이 간격
+    private const double TextPaddingMm = 4;   // 좌측 정렬 칸의 안쪽 여백
+    // 문자 = A1(1:1) 용지 5mm. 문자는 뷰 축척 따라 안 줄어서 축척 n이면 5/n mm 유형 씀 → A3(1:2) 2.5mm.
+    // 유형 없으면 기본 유형 복제해 만듦
+    private const double BaseTextSizeMm = 5;
+    private const string TextTypePrefix = "배관재료표_";
 
     private readonly Func<Document?> _document;
     public RevitPipeMaterialDraftingRepo(Func<Document?> document) => _document = document;
@@ -78,12 +84,7 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
         var view = FindDraftingView(document, viewName);
         if (view is null) return false;
 
-        // 축척을 1로 되돌린다 — 이 클래스의 mm 값은 1:1을 전제로 하고(CreateView 주석),
-        // 문자 크기(용지 mm)와 칸 폭의 눈금도 1:1에서만 맞는다. 사용자가 축척을 바꿔 놨다면 표가 이미 깨져 있다.
-        // 지우기 전에 판정한다 — 축척이 뷰 템플릿에 잠겨 있으면 Scale setter가 던지고, 그때 뷰가 비어 있으면 안 된다(docs/208 § C-3).
-        if (view.Scale != 1 && view.ViewTemplateId != ElementId.InvalidElementId)
-            throw new DhbimwaterException(ErrorCodes.MT_ViewScaleLocked,
-                $"드래프팅뷰 '{view.Name}'에 뷰 템플릿이 적용돼 축척을 1:1로 바꿀 수 없습니다. 템플릿을 해제한 뒤 다시 실행하세요.");
+        // 축척은 안 건드림 — 시트 Repo가 도곽 크기로 정함(A1 1:1, A3 1:2). 문자는 용지 mm라 축척 무관
 
         // 격점 하나의 실패가 나머지 격점까지 되돌리지 않도록 그 격점의 변경만 묶는다(docs/208 § C-2).
         // ClearView 뒤 그리기가 실패하면 뷰가 비어 버리므로 반드시 함께 되돌린다.
@@ -99,7 +100,6 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
                 if (alive.Count > 0) document.Delete(alive);
             }
             else ClearView(document, view);
-            if (view.Scale != 1) view.Scale = 1;
             DrawTableAndRecord(document, view, title, rows, includeTypeImage, signature);
             sub.Commit();
         }
@@ -172,7 +172,7 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
 
         var view = ViewDrafting.Create(document, draftingType.Id);
         view.Name = viewName;
-        // 축척 1:1. 이 클래스의 mm 값이 곧 도면 mm가 되고, 문자 크기(용지 mm)와도 눈금이 맞는다.
+        // 기본 1:1(A1). 시트에 놓을 때 도곽이 작으면 시트 Repo가 축척 키움
         view.Scale = 1;
         return view;
     }
@@ -199,10 +199,8 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
     private static void DrawTexts(Document document, ViewDrafting view, string title,
         IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage)
     {
-        var textTypeId = document.GetDefaultElementTypeId(ElementTypeGroup.TextNoteType);
-        if (textTypeId == ElementId.InvalidElementId)
-            throw new DhbimwaterException(ErrorCodes.MT_TextNoteTypeMissing,
-                "기본 문자 유형(TextNoteType)이 프로젝트에 없습니다. 템플릿에 문자 유형을 추가하세요.");
+        // 이미 시트 축척(A3 1:2 등) 받은 뷰를 다시 그리면 그 축척에 맞는 크기
+        var textTypeId = TextType(document, TextSizeFor(view));
 
         // 제목은 표 좌상단 위에 왼쪽 정렬로 놓는다.
         PlaceText(document, view, textTypeId, title, 0, TitleGapMm, centered: false);
@@ -229,6 +227,43 @@ internal sealed class RevitPipeMaterialDraftingRepo : IPipeMaterialDraftingRepo
                 PlaceCellText(document, view, textTypeId, values[col], col, i + 1, Columns[col].Centered);
             if (includeTypeImage) PlaceShapeImage(document, view, row, i + 1);
         }
+    }
+
+    // 뷰 축척 n → 문자 5/n mm (A1 1:1 = 5, A3 1:2 = 2.5)
+    private static double TextSizeFor(View view) => BaseTextSizeMm / Math.Max(1, view.Scale);
+
+    /// <summary>시트 Repo가 드래프팅 축척 바꾼 뒤 호출. 애드인이 그린 문자만 새 축척 크기 유형으로 바꿈(사용자 주석 안 건드림).</summary>
+    internal static void ApplyTextSize(Document document, ViewDrafting view)
+    {
+        if (PipeMaterialDraftingStorageSchema.Read(view) is not { ElementIds.Count: > 0 } record) return;
+        var notes = record.ElementIds.Select(document.GetElement).OfType<TextNote>().ToList();
+        if (notes.Count == 0) return;
+        var typeId = TextType(document, TextSizeFor(view));
+        foreach (var note in notes.Where(x => x.GetTypeId() != typeId)) note.ChangeTypeId(typeId);
+    }
+
+    /// <summary>문자 유형(용지 mm). 기본 유형이 그 크기면 그것, 아니면 같은 크기 유형 중 이름순 첫째, 없으면 기본 유형 복제(글꼴은 기본 유형 따름).</summary>
+    private static ElementId TextType(Document document, double sizeMm)
+    {
+        var defaultId = document.GetDefaultElementTypeId(ElementTypeGroup.TextNoteType);
+        if (defaultId == ElementId.InvalidElementId || document.GetElement(defaultId) is not TextNoteType baseType)
+            throw new DhbimwaterException(ErrorCodes.MT_TextNoteTypeMissing,
+                "기본 문자 유형(TextNoteType)이 프로젝트에 없습니다. 템플릿에 문자 유형을 추가하세요.");
+        var size = UC.MmToFt(sizeMm);
+        var typeName = $"{TextTypePrefix}{sizeMm:0.##}mm";
+        bool Fits(TextNoteType type)
+            => type.get_Parameter(BuiltInParameter.TEXT_SIZE)?.AsDouble() is { } value && Math.Abs(value - size) < UC.MmToFt(0.01);
+        if (Fits(baseType)) return baseType.Id;
+        var types = new FilteredElementCollector(document).OfClass(typeof(TextNoteType)).Cast<TextNoteType>().ToList();
+        var found = types.FirstOrDefault(x => x.Name == typeName && Fits(x))
+            ?? types.Where(Fits).OrderBy(x => x.Name, StringComparer.Ordinal).FirstOrDefault();
+        if (found is not null) return found.Id;
+        // 같은 이름이 크기 다르게 있으면 이름 뒤에 번호
+        var name = typeName;
+        for (var i = 2; types.Any(x => x.Name == name); i++) name = $"{typeName}_{i}";
+        var created = (TextNoteType)baseType.Duplicate(name);
+        created.get_Parameter(BuiltInParameter.TEXT_SIZE).Set(size);
+        return created.Id;
     }
 
     private static void PlaceShapeImage(Document document, ViewDrafting view, PipeMaterialRow row, int tableRow)

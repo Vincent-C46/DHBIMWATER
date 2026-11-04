@@ -42,4 +42,28 @@ public sealed class JunctionSymbolShapeTests
         Assert.Equal(baseline.Y, restored.Y, 8);
         Assert.Equal(baseline.Z, restored.Z, 8);
     }
+
+    [Fact]
+    public void ToView_RotatedPlan_RotatesShapeLikePosition()
+    {
+        // 뷰 90° 회전: 오른쪽 = 세계 +Y, 위쪽 = 세계 −X. 세계 +X 방향 선 → 뷰에서 아래쪽
+        var shape = JunctionSymbolShape.FromPolylines([(IReadOnlyList<ShapePoint>)[new(0, 0), new(100, 0)]]);
+        var right = new SymbolVector(0, 1, 0);
+        var up = new SymbolVector(-1, 0, 0);
+
+        var view = JunctionSymbolShapeMath.ToView(shape, right, up);
+
+        // 위치 변환(점·right, 점·up)과 같은 결과
+        Assert.Equal(0, view.Polylines[0][1].X, 8);
+        Assert.Equal(-100, view.Polylines[0][1].Y, 8);
+        Assert.Equal(-100, view.MinY, 8);
+    }
+
+    [Fact]
+    public void ToView_NoPlanAxes_KeepsShape()
+    {
+        var shape = JunctionSymbolShape.FromPolylines([(IReadOnlyList<ShapePoint>)[new(0, 0), new(100, 0)]]);
+        Assert.Same(shape, JunctionSymbolShapeMath.ToView(shape, default, default));
+        Assert.Same(shape, JunctionSymbolShapeMath.ToView(shape, new SymbolVector(1, 0, 0), new SymbolVector(0, 1, 0)));
+    }
 }

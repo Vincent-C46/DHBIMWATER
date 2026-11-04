@@ -55,7 +55,7 @@ internal sealed class RevitJunctionSymbolShapeRepo : IJunctionSymbolShapeRepo
                 var polylines = read.Polylines.Select(line => (IReadOnlyList<ShapePoint>)line
                     .Select(point => Project(JunctionSymbolShapeMath.RestoreOffset(ToVector(point - transform.Origin),
                         offset, ToVector(transform.BasisX), ToVector(transform.BasisY), ToVector(transform.BasisZ)),
-                        view.RightDirection, view.UpDirection))
+                        XYZ.BasisX, XYZ.BasisY))
                     .ToList()).Where(line => line.Count >= 2 && JunctionSymbolShapeMath.IsVisibleInPlan(line)).ToList();
                 var points = polylines.SelectMany(x => x).ToList();
                 var response = VerifyOffset(instance, view, diagnostics);
@@ -135,6 +135,7 @@ internal sealed class RevitJunctionSymbolShapeRepo : IJunctionSymbolShapeRepo
         }
     }
 
+    // 세계 X·Y로 투영. 격점 평면뷰 축(회전 포함) 변환은 미리보기 UseCase가 함
     private static ShapePoint Project(SymbolVector point, XYZ right, XYZ up)
     {
         var xyz = new XYZ(point.X, point.Y, point.Z);

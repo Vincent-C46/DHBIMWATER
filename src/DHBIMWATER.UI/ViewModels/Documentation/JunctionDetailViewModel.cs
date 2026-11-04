@@ -15,6 +15,8 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     private readonly BuildJunctionDetailPreviewUseCase _previewUseCase;
     private readonly RunJunctionDetailUseCase _runUseCase;
     private readonly BackfillPipeMaterialParametersUseCase _backfillUseCase;
+    // 실행 끝나면 완료 대화상자(새로 작성·갱신·그대로 개수). null = 안 띄움(테스트)
+    private readonly IDialogService? _dialog;
     private JunctionDetailPreview _preview;
     private bool _createSchedule = true, _createDrafting = true, _createPlan = true;
     private bool _expandVertical = true, _placeTags = true, _useTypeImage = true;
@@ -31,14 +33,26 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     private string _statusText = string.Empty;
 
     public JunctionDetailViewModel(BuildJunctionDetailPreviewUseCase previewUseCase,
-        RunJunctionDetailUseCase runUseCase, BackfillPipeMaterialParametersUseCase backfillUseCase)
+        RunJunctionDetailUseCase runUseCase, BackfillPipeMaterialParametersUseCase backfillUseCase,
+        IDialogService? dialog = null)
     {
+        _dialog = dialog;
         _previewUseCase = previewUseCase;
         _runUseCase = runUseCase;
         _backfillUseCase = backfillUseCase;
         _preview = previewUseCase.Execute();
         TagTypes = new ObservableCollection<JunctionDetailTagType>(_preview.TagTypes);
         _selectedTagType = TagTypes.Count == 1 ? TagTypes[0] : null;
+        // 도곽 목록. 기본 선택 = A1 이름 든 첫 유형(Revit 쪽 자동 규칙과 같음). 읽기 실패해도 창은 염
+        try { TitleBlocks = runUseCase?.GetTitleBlocks() ?? []; }
+        catch (Exception ex) { TitleBlocks = []; TitleBlockMessage = "도곽 목록을 읽지 못했습니다: " + ex.Message; }
+        _selectedTitleBlock = TitleBlocks.FirstOrDefault(x =>
+                x.Name.Contains(JunctionDetailParameters.DefaultTitleBlockKeyword, StringComparison.OrdinalIgnoreCase))
+            ?? TitleBlocks.FirstOrDefault();
+        if (TitleBlocks.Count == 0 && TitleBlockMessage.Length == 0)
+            TitleBlockMessage = "로드된 도곽(제목 블록) 패밀리가 없습니다. 시트는 도곽 없이 만들어집니다.";
+        _selectedScale = ScaleChoices.FirstOrDefault(x => x.Scale == _sheetScale) ?? ScaleChoices[^1];
+        _customScaleText = _sheetScale.ToString();
         // 값 빈 부재 수 = 실행 시 자동 기록 대상. 문서 전체 재산정 체크는 제거(docs/291)
         UntaggedCount = backfillUseCase.ScanCandidates().CandidateCount;
         RunCommand = new RelayCommand(_ => Run(), _ => CanRun && !IsRunning);
@@ -147,7 +161,7 @@ public sealed class JunctionDetailViewModel : ViewModelBase
           + (FirstJunction.Warnings.Count > 0 ? " · 경고: " + string.Join("; ", FirstJunction.Warnings) : "");
     public int TotalPartCount => _preview.MaterialPartCount;
     public bool HasJunctionTargets => _preview.Junctions.Any(x => x.PartCount > 0);
-    public bool CanRun => (CreateSchedule || CreateDrafting || CreatePlan)
+    public bool CanRun => !HasScaleError && (CreateSchedule || CreateDrafting || CreatePlan)
         && (!(CreateSchedule || CreateDrafting) || TotalPartCount > 0 || UntaggedCount > 0)
         && (!CreatePlan || HasJunctionTargets);
 
@@ -171,6 +185,40 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     public JunctionDetailTagType? SelectedTagType { get => _selectedTagType; set => SetProperty(ref _selectedTagType, value); }
     /// <summary>번호 태그 방향(docs/296). 바꾸면 미리보기 다시 배치</summary>
     public JunctionTagSide TagSide { get => _tagSide; set { if (SetProperty(ref _tagSide, value)) RefreshPreview(); } }
+    // 새 시트 도곽. 기존 시트 도곽은 안 바꿈
+    private JunctionDetailTitleBlock? _selectedTitleBlock;
+    public IReadOnlyList<JunctionDetailTitleBlock> TitleBlocks { get; }
+    public JunctionDetailTitleBlock? SelectedTitleBlock { get => _selectedTitleBlock; set => SetProperty(ref _selectedTitleBlock, value); }
+    public string TitleBlockMessage { get; } = string.Empty;
+
+    // 시트에 놓는 평면·3D 축척 일괄. 미리보기 캔버스(ViewScale)와 무관.
+    // 드래프팅(재료표)은 도면 크기로 그려 1:1 고정. Revit 기본 축척 목록 + 사용자
+    private int _sheetScale = JunctionDetailParameters.SheetScale;
+    public int SheetScale => _sheetScale;
+    private ScaleChoice _selectedScale;
+    private string _customScaleText;
+    public IReadOnlyList<ScaleChoice> ScaleChoices { get; } =
+        [.. new[] { 1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000, 2000, 5000 }.Select(x => new ScaleChoice(x, $"1:{x}")),
+         new ScaleChoice(null, "사용자")];
+    public ScaleChoice SelectedScale
+    {
+        get => _selectedScale;
+        set
+        {
+            if (!SetProperty(ref _selectedScale, value)) return;
+            OnPropertyChanged(nameof(IsCustomScale));
+            ApplyScale();
+        }
+    }
+    public bool IsCustomScale => _selectedScale.Scale is null;
+    /// <summary>사용자 축척 분모(1:n의 n). Revit 허용 1~24000 정수.</summary>
+    public string CustomScaleText
+    {
+        get => _customScaleText;
+        set { if (SetProperty(ref _customScaleText, value)) ApplyScale(); }
+    }
+    public bool HasScaleError => IsCustomScale && ParseCustomScale(_customScaleText) is null;
+
     public IReadOnlyList<KeyValuePair<JunctionTagSide, string>> TagSideOptions { get; } =
     [
         new(JunctionTagSide.Auto, "자동"), new(JunctionTagSide.Right, "우측"), new(JunctionTagSide.Top, "상단"),
@@ -397,6 +445,29 @@ public sealed class JunctionDetailViewModel : ViewModelBase
         RefreshSummary();
     }
 
+    // 고른 축척 → SheetScale(실행 때만 씀, 미리보기 안 바뀜). 사용자 입력이 틀리면 이전 축척 유지 + 실행 막음
+    private void ApplyScale()
+    {
+        var scale = _selectedScale.Scale ?? ParseCustomScale(_customScaleText);
+        if (scale is { } value && value != _sheetScale)
+        {
+            _sheetScale = value;
+            OnPropertyChanged(nameof(SheetScale));
+        }
+        OnPropertyChanged(nameof(HasScaleError));
+        OnPropertyChanged(nameof(CanRun));
+        RaiseCommands();
+    }
+
+    internal static int? ParseCustomScale(string? text)
+    {
+        var trimmed = (text ?? "").Trim();
+        // "1:75" 형식도 받음
+        var colon = trimmed.IndexOf(':');
+        if (colon >= 0 && trimmed[..colon].Trim() == "1") trimmed = trimmed[(colon + 1)..].Trim();
+        return int.TryParse(trimmed, out var value) && value is >= 1 and <= 24000 ? value : null;
+    }
+
     private void ApplyAllSets()
     {
         if (!JunctionOffsetSetViewModel.TryParse(BulkStepText, out var step)) return;
@@ -562,9 +633,10 @@ public sealed class JunctionDetailViewModel : ViewModelBase
             EnsureDocument?.Invoke();
             // Backfill false 고정: 값 빈 부재 자동 기록만(docs/291)
             var options = new JunctionDetailOptions(CreateSchedule, CreateDrafting, CreatePlan, false,
-                ExpandVertical, JunctionDetailParameters.StepMm, ViewScale, PlaceTags, SelectedTagType?.Id ?? 0,
+                ExpandVertical, JunctionDetailParameters.StepMm, SheetScale, PlaceTags, SelectedTagType?.Id ?? 0,
                 UseTypeImage, JunctionExpandAxis.Y, true,
-                OffsetSets.Select(x => x.ToOffset()).ToList(), TagPlacements());
+                OffsetSets.Select(x => x.ToOffset()).ToList(), TagPlacements(),
+                TitleBlockId: SelectedTitleBlock?.Id ?? 0);
             var result = _runUseCase.Execute(options);
             if (result.Backfill is { } backfill)
             {
@@ -591,9 +663,45 @@ public sealed class JunctionDetailViewModel : ViewModelBase
             ResultText = string.Join(Environment.NewLine, ResultLines);
             StatusText = "완료";
             ReloadPreview();
+            _dialog?.Info("격점상세도", CompletionMessage(result));
         }
-        catch (Exception ex) { ResultLines.Add("실행 실패: " + ex.Message); ResultText = ResultLines.Last(); StatusText = "실패"; }
+        catch (Exception ex)
+        {
+            ResultLines.Add("실행 실패: " + ex.Message); ResultText = ResultLines.Last(); StatusText = "실패";
+            _dialog?.Warn("격점상세도", "실행 실패: " + ex.Message);
+        }
         finally { IsRunning = false; }
+    }
+
+    /// <summary>완료 대화상자 본문. 항목별 새로 작성·갱신·그대로 개수 + 새로·갱신 시트 이름. 0인 항목은 뺌, 자세한 건 창 결과 목록.</summary>
+    public static string CompletionMessage(JunctionDetailRunResult result)
+    {
+        var lines = new List<string> { "격점상세도 작성을 마쳤습니다.", "" };
+        static string Counts(int created, int updated, int unchanged, int skipped)
+        {
+            var parts = new List<string>();
+            if (created > 0) parts.Add($"새로 작성 {created}");
+            if (updated > 0) parts.Add($"갱신 {updated}");
+            if (unchanged > 0) parts.Add($"그대로 {unchanged}");
+            if (skipped > 0) parts.Add($"건너뜀 {skipped}");
+            return parts.Count == 0 ? "변경 없음" : string.Join(" · ", parts);
+        }
+        if (result.Schedule is { } schedule)
+            lines.Add("재료 일람표: " + Counts(schedule.Created.Count, schedule.Updated.Count, schedule.Unchanged.Count, schedule.Skipped.Count));
+        if (result.Drafting is { } drafting)
+            lines.Add("재료표 도면: " + Counts(drafting.Created.Count, drafting.Updated.Count, drafting.Unchanged.Count, drafting.Skipped.Count));
+        if (result.Plan is { } plan)
+            lines.Add("평면 상세도: " + Counts(plan.Created.Count, plan.Updated.Count, 0, plan.Skipped.Count));
+        if (result.Sheet is { } sheet)
+        {
+            lines.Add("시트: " + Counts(sheet.Created.Count, sheet.Updated.Count, sheet.Unchanged.Count, sheet.Skipped.Count));
+            foreach (var name in sheet.Created) lines.Add($"  · 새로 작성: {name}");
+            foreach (var name in sheet.Updated) lines.Add($"  · 갱신: {name}");
+        }
+        var warningCount = result.Warnings.Count + (result.Plan?.Warnings.Count ?? 0) + (result.Sheet?.Warnings.Count ?? 0)
+            + (result.Backfill?.Warnings.Count ?? 0);
+        if (warningCount > 0) lines.AddRange(["", $"경고 {warningCount}건 — 격점상세도 창 결과 목록에서 확인하세요."]);
+        return string.Join(Environment.NewLine, lines);
     }
 
     /// <summary>실행 후 미리보기 재구성. 자동 기록된 수동 배치 부재가 재료표 탭에 바로 보이게.</summary>
@@ -632,7 +740,8 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     }
 
     // 실행 시점에 격점 전부 다시 배치 → Revit 태그 위치(docs/296). 첫 격점 = 미리보기와 같은 결과.
-    // 세트 설정 없는 세트 = Revit 쪽 options.For 와 같은 기본 축·간격
+    // 세트 설정 없는 세트 = Revit 쪽 options.For 와 같은 기본 축·간격.
+    // 태그 위치 = 도면 mm × Revit 뷰 축척 → 미리보기 축척 아닌 시트 축척으로 배치
     private IReadOnlyList<JunctionTagPlacement> TagPlacements()
     {
         var offsets = OffsetSets.Select(x => x.ToOffset()).ToList();
@@ -641,7 +750,7 @@ public sealed class JunctionDetailViewModel : ViewModelBase
                 var sets = junction.Items.Where(x => x.SetId != 0).Select(x => x.SetId).Distinct()
                     .Select(id => JunctionSetOffsets.For(offsets, id, JunctionExpandAxis.Y, JunctionDetailParameters.StepMm))
                     .ToList();
-                return JunctionPreviewLayout.Build(junction.Items, junction.Links ?? [], sets, ViewScale,
+                return JunctionPreviewLayout.Build(junction.Items, junction.Links ?? [], sets, SheetScale,
                     ExpandVertical, TagSide).Placements;
             })
             .Where(x => x.Item.ItemNumber > 0)
@@ -650,3 +759,6 @@ public sealed class JunctionDetailViewModel : ViewModelBase
 
     private void RaiseCommands() => RunCommand?.RaiseCanExecuteChanged();
 }
+
+/// <summary>축척 콤보 항목. Scale = 1:n의 n, null = 사용자 입력.</summary>
+public sealed record ScaleChoice(int? Scale, string Label);

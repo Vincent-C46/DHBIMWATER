@@ -82,4 +82,16 @@ public static class JunctionSymbolShapeMath
         => new(point.X - (basisX.X * localOffset.X + basisY.X * localOffset.Y + basisZ.X * localOffset.Z),
             point.Y - (basisX.Y * localOffset.X + basisY.Y * localOffset.Y + basisZ.Y * localOffset.Z),
             point.Z - (basisX.Z * localOffset.X + basisY.Z * localOffset.Y + basisZ.Z * localOffset.Z));
+
+    /// <summary>세계 X·Y 기호선 → 뷰 오른쪽·위쪽 축. 회전한 평면뷰에서도 부재 위치와 같은 축이라 기호끼리 이어짐.
+    /// right·up 0 벡터면(평면뷰 정보 없음) 그대로.</summary>
+    public static JunctionSymbolShape ToView(JunctionSymbolShape shape, SymbolVector right, SymbolVector up)
+    {
+        if (right is { X: 0, Y: 0 } || up is { X: 0, Y: 0 }) return shape;
+        if (right is { X: 1, Y: 0 } && up is { X: 0, Y: 1 }) return shape;
+        return JunctionSymbolShape.FromPolylines(shape.Polylines
+            .Select(line => (IReadOnlyList<ShapePoint>)line
+                .Select(p => new ShapePoint(p.X * right.X + p.Y * right.Y, p.X * up.X + p.Y * up.Y)).ToList())
+            .ToList());
+    }
 }

@@ -11,7 +11,8 @@ namespace DHBIMWATER.Core.Piping;
 public static class PipeMaterialTableSignature
 {
     // 표 그리기 규칙(열 폭·행 높이·글자) 바꾸면 올린다 → 기존 도면 전부 한 번 다시 그림
-    private const string Version = "v1";
+    // v2: A1 크기 표(칸 2배) + 문자 2.5mm 유형 고정. v3: 문자 = 5 ÷ 뷰 축척 mm(A1 5, A3 2.5)
+    private const string Version = "v3";
     private const char Separator = '\u001F';
 
     public static string Of(string title, IReadOnlyList<PipeMaterialRow> rows, bool includeTypeImage)
