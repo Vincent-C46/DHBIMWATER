@@ -1,5 +1,4 @@
 ﻿using Autodesk.Revit.UI;
-using DidasUsage;
 using DHBIMWATER.Revit.UI.Modules;
 
 namespace DHBIMWATER.Revit.UI
@@ -8,7 +7,8 @@ namespace DHBIMWATER.Revit.UI
     {
         internal static void CreateRibbonPanel(UIControlledApplication app)
         {
-            bool isUserValid = DidasUsageTracker.TryGetUserInfo(out _, out _);
+            // 에이전트 확인 여부 = DidasAgentGate.RequireDidasAgent 스위치
+            bool isUserValid = DidasAgentGate.IsUserAllowed();
             //DHBIMWATER 리본 패널 생성//
             string tabName = "DHBIMWATER";
             app.CreateRibbonTab(tabName);

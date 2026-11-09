@@ -24,12 +24,22 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
     public class DischargeBasinViewModel : ViewModelBase
     {
         #region Constants
-        public const string PositionLeftRight = "좌우측 토출";
+        public const string PositionLeft = "좌측 토출";
+        public const string PositionRight = "우측 토출";
         public const string PositionCenter = "중앙부 토출";
         public const string StepNone = "단차 미적용";
         public const string StepApplied = "단차 적용";
         public const string ConduitCulvert = "암거";
         public const string ConduitPipe = "PIPE";
+
+        private static readonly HashSet<string> PrimaryProfileKeys = new() { "TB", "TF", "TT1", "TT2", "TT3" };
+        private static readonly HashSet<string> PrimaryPlanKeys = new() { "TB1", "TB2", "TLT" };
+
+        // θ로 자동 결정되는 값. 계산만 쓰고 화면에는 안 보임.
+        private static readonly HashSet<string> HiddenPlanKeys = new()
+        {
+            "Theta1", "Theta2", "TB4", "TB5", "TT4", "TT5", "TL5", "TL6", "TL7", "TL8",
+        };
 
         private const string ImageRoot = "pack://application:,,,/DHBIMWATER.UI;component/Resources/PumpStationImages/";
         #endregion
@@ -47,7 +57,9 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         private bool _suspendRecalculate;
 
         // 유형
-        private string _selectedPosition = PositionLeftRight;
+        private string _selectedPosition = PositionRight;
+        private string? _focusedParameter;
+        private bool _isDiagramExpanded = true;
         private string _selectedStep = StepNone;
         private string _selectedConduit = ConduitCulvert;
 
@@ -88,6 +100,7 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
 
             _suspendRecalculate = true;
             BuildRows();
+            SplitRows();
             _suspendRecalculate = false;
 
             Recalculate();
@@ -104,19 +117,31 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         /// <summary>상부 개구부 권고안.</summary>
         public ObservableCollection<DischargeBasinValueRow> OpeningRows { get; } = new();
 
+        /// <summary>종단 탭 밖 표시 행. ProfileRows 행 객체 공유.</summary>
+        public ObservableCollection<DischargeBasinValueRow> PrimaryProfileRows { get; } = new();
+
+        /// <summary>종단 탭 상세 설정 행. ProfileRows 행 객체 공유.</summary>
+        public ObservableCollection<DischargeBasinValueRow> DetailProfileRows { get; } = new();
+
+        /// <summary>평면 탭 밖 표시 행. PlanRows 행 객체 공유.</summary>
+        public ObservableCollection<DischargeBasinValueRow> PrimaryPlanRows { get; } = new();
+
+        /// <summary>평면 탭 상세 설정 행. PlanRows 행 객체 공유.</summary>
+        public ObservableCollection<DischargeBasinValueRow> DetailPlanRows { get; } = new();
+
         private void BuildRows()
         {
             // ── 종단제원 ─────────────────────────────────────────────
-            AddRow(ProfileRows, "TB", "\"TB\"", "토출조 상단고 (EL)", "m", 3,
-                "\"TA\" + (TH1 + TT3) / 1000", "");
-            AddRow(ProfileRows, "TC", "\"TC\"", "지반고 (EL)", "m", 3,
+            AddRow(ProfileRows, "TB", "TB", "토출조 상단고 (EL)", "m", 3,
+                "TA + (TH1 + TT3) / 1000", "");
+            AddRow(ProfileRows, "TC", "TC", "지반고 (EL)", "m", 3,
                 "펌프장HWL + (H3 - 200) / 1000", "(펌프장 상단고 - 200mm)의 m 표기");
-            AddRow(ProfileRows, "TE", "\"TE\"", "토출관 BOP (EL)", "m", 3,
+            AddRow(ProfileRows, "TE", "TE", "토출관 BOP (EL)", "m", 3,
                 "펌프장HWL + (H3 - H7 - D) / 1000", "(펌프장 상단고 - H7 - D)의 m 표기");
-            AddRow(ProfileRows, "TF", "\"TF\"", "토출조 바닥고 (EL)", "m", 3,
-                "\"TE\" - TH3 / 1000", "토출조 바닥고");
+            AddRow(ProfileRows, "TF", "TF", "토출조 바닥고 (EL)", "m", 3,
+                "TE - TH3 / 1000", "토출조 바닥고");
             AddRow(ProfileRows, "TT1", "TT1", "벽체 두께", "mm", 0,
-                "MAX( ROUNDUP(\"TC\"-\"TF\",0)×100 + ROUNDDOWN((\"TB\"-\"TC\")/5,0)×100 , 400 )",
+                "MAX( ROUNDUP(TC-TF,0)×100 + ROUNDDOWN((TB-TC)/5,0)×100 , 400 )",
                 "토압 높이의 10%의 정치수 반영(ROUNDUP) 및 돌출높이 5m 마다 100mm 추가. 또한 최소 400mm 적용. 구조적 최적설계.");
             AddRow(ProfileRows, "TT2", "TT2", "바닥슬래브 두께", "mm", 0,
                 "TT1 + 100", "벽체 두께 + 100mm. 구조적 최적설계.");
@@ -126,12 +151,12 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                 "1000 + ROUNDUP((TH2+D+TH3)/100,0)×100 - (TH2+D+TH3)",
                 "여유고 1m 적용. + 전체 높이를 정치수화 하기 위한 치수 추가.");
             AddRow(ProfileRows, "TH2", "TH2", "수면 ~ 토출관 상단", "mm", 0,
-                "(\"TA\" - \"TE\")×1000 - D", "");
+                "(TA - TE)×1000 - D", "");
             AddRow(ProfileRows, "TH3", "TH3", "토출관 하부 두께", "mm", 0,
                 "D≤1350 → 400 / 1350<D≤1650 → 500 / D>1650 → 600",
                 "기전설계업무편람(2001), 농업생산기반정비사업계획설계기준-배수편(2005), 첨단기술 스마트핸드북(기계, 2020)의 최대값 적용");
             AddRow(ProfileRows, "TH4", "TH4", "단차 하부 높이", "mm", 0,
-                "(\"TC\"-\"TF\")×1000 - TH5 - TT3", "", "step");
+                "(TC-TF)×1000 - TH5 - TT3", "", "step");
             AddRow(ProfileRows, "TH5", "TH5", "포장 여유", "mm", 0,
                 "200 (고정)", "콘크리트 포장 등을 고려하여 200mm 확보", "step");
             AddRow(ProfileRows, "TB6", "TB6", "단차 상부 폭", "mm", 0,
@@ -168,7 +193,7 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                 "형식=암거 → 300, 아니면 0", "암거일 경우 적용. 토출관로 규모는 대부분 크지 않으므로 300으로 고정");
             AddRow(PlanRows, "O1", "O1", "PIPE 사이 간격", "mm", 0,
                 "형식=PIPE AND ON≥2 → 1000, 아니면 0", "여러 본의 PIPE를 설치할 경우 PIPE 사이 작업공간 1m 확보");
-            AddRow(PlanRows, "Theta", "θ", "벌어짐 각", "°", 4,
+            AddRow(PlanRows, "Theta", "θ", "", "°", 4,
                 "좌우측: atan((TB2-TB1)/TLT)\r\n중앙부: atan((TB2-TB1)/TL3)",
                 "TB2 정치수 적용에 의한 각도 보정");
             AddRow(PlanRows, "Theta1", "θ1", "", "°", 4, "(90° + θ) / 2", "");
@@ -193,6 +218,15 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
             AddRow(OpeningRows, "TOL2", "TOL2", "진입 개구부 길이", "mm", 0,
                 "TOL1 + 1000",
                 "토출 밸브 유지관리 및 진입 동선용 상부 개구부 길이. TOL1 + 1m 적용. 펌프 N대 중 1개소에만 적용한다.");
+        }
+
+        /// <summary>전체 행을 주요/상세로 나눔. 원본 순서 유지, 되돌리기는 원본 컬렉션 사용(docs/319).</summary>
+        private void SplitRows()
+        {
+            foreach (var row in ProfileRows.OrderBy(row => row.Code, StringComparer.Ordinal))
+                (PrimaryProfileKeys.Contains(row.Key) ? PrimaryProfileRows : DetailProfileRows).Add(row);
+            foreach (var row in PlanRows.Where(row => !HiddenPlanKeys.Contains(row.Key)).OrderBy(row => row.Code, StringComparer.Ordinal))
+                (PrimaryPlanKeys.Contains(row.Key) ? PrimaryPlanRows : DetailPlanRows).Add(row);
         }
 
         private void AddRow(
@@ -227,20 +261,20 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         #endregion
 
         #region 유형 선택
-        public IReadOnlyList<string> Positions { get; } = new[] { PositionLeftRight, PositionCenter };
+        public IReadOnlyList<string> Positions { get; } = new[] { PositionLeft, PositionRight, PositionCenter };
         public IReadOnlyList<string> Steps { get; } = new[] { StepNone, StepApplied };
         public IReadOnlyList<string> Conduits { get; } = new[] { ConduitCulvert, ConduitPipe };
 
         public string SelectedPosition
         {
             get => _selectedPosition;
-            set { if (SetProperty(ref _selectedPosition, value)) { OnPropertyChanged(nameof(PlanImagePath)); Recalculate(); } }
+            set { if (SetProperty(ref _selectedPosition, value)) { OnPropertyChanged(nameof(PlanImagePath)); OnPropertyChanged(nameof(PlanHighlightGeometry)); Recalculate(); } }
         }
 
         public string SelectedStep
         {
             get => _selectedStep;
-            set { if (SetProperty(ref _selectedStep, value)) { OnPropertyChanged(nameof(ProfileImagePath)); Recalculate(); } }
+            set { if (SetProperty(ref _selectedStep, value)) { OnPropertyChanged(nameof(ProfileImagePath)); OnPropertyChanged(nameof(ProfileHighlightGeometry)); Recalculate(); } }
         }
 
         public string SelectedConduit
@@ -252,6 +286,7 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                 OnPropertyChanged(nameof(IsCulvert));
                 OnPropertyChanged(nameof(IsPipe));
                 OnPropertyChanged(nameof(PlanImagePath));
+                OnPropertyChanged(nameof(PlanHighlightGeometry));
                 Recalculate();
             }
         }
@@ -317,15 +352,46 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         #endregion
 
         #region 이미지
-        public string PlanImagePath => SelectedPosition == PositionCenter
-            ? ImageRoot + "토출조_평면-중앙부.png"
-            : ImageRoot + (IsCulvert ? "토출조_평면-좌우측-암거.png" : "토출조_평면-좌우측-PIPE.png");
+        private string PlanSheet => SelectedPosition == PositionCenter
+            ? "평면-중앙부"
+            : $"평면-{(SelectedPosition == PositionLeft ? "좌측" : "우측")}-{(IsCulvert ? "암거" : "PIPE")}";
 
-        public string ProfileImagePath => SelectedStep == StepApplied
-            ? ImageRoot + "토출조_종단-단차적용.png"
-            : ImageRoot + "토출조_종단-단차미적용.png";
+        private string ProfileSheet => SelectedStep == StepApplied ? "종단-단차적용" : "종단-단차미적용";
 
-        public string OpeningImagePath => ImageRoot + "토출조_개구부-평면.png";
+        private const string OpeningSheet = "개구부-평면";
+
+        public string PlanImagePath => ImageRoot + $"토출조_{PlanSheet}.png";
+
+        /// <summary>포커스 입력칸의 매개변수 키. 도해 강조에 사용.</summary>
+        public string? FocusedParameter
+        {
+            get => _focusedParameter;
+            private set
+            {
+                if (!SetProperty(ref _focusedParameter, value)) return;
+                OnPropertyChanged(nameof(PlanHighlightGeometry));
+                OnPropertyChanged(nameof(ProfileHighlightGeometry));
+                OnPropertyChanged(nameof(OpeningHighlightGeometry));
+            }
+        }
+
+        /// <summary>도해별 강조 경로. 도해에 글자가 없는 매개변수는 null.</summary>
+        public string? PlanHighlightGeometry => FindHighlight(PlanSheet);
+        public string? ProfileHighlightGeometry => FindHighlight(ProfileSheet);
+        public string? OpeningHighlightGeometry => FindHighlight(OpeningSheet);
+
+        private string? FindHighlight(string sheet)
+            => FocusedParameter is { } parameter ? DischargeBasinDiagramLabels.Find(sheet, parameter) : null;
+
+        /// <summary>입력칸 포커스 해제 시 View가 호출.</summary>
+        public void ClearFocusedParameter() => FocusedParameter = null;
+
+        /// <summary>도해 영역 펼침 상태. 세 탭이 공유.</summary>
+        public bool IsDiagramExpanded { get => _isDiagramExpanded; set => SetProperty(ref _isDiagramExpanded, value); }
+
+        public string ProfileImagePath => ImageRoot + $"토출조_{ProfileSheet}.png";
+
+        public string OpeningImagePath => ImageRoot + $"토출조_{OpeningSheet}.png";
         #endregion
 
         #region 힌트
@@ -336,6 +402,7 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         /// <summary>View 의 GotFocus 핸들러가 Tag(기호)를 넘겨 호출한다.</summary>
         public void SetHint(string key)
         {
+            FocusedParameter = key;
             if (_rowsByKey.TryGetValue(key, out var row))
             {
                 SetHintFrom(row);
@@ -359,17 +426,17 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
 
         private static readonly Dictionary<string, (string title, string desc)> _inputHints = new()
         {
-            ["TA"] = ("\"TA\" — H.W.L (EL, m)", "토출조 계획 고수위. TB(상단고)·TH2 산정의 기준값."),
+            ["TA"] = ("TA — H.W.L (EL, m)", "토출조 계획 고수위. TB(상단고)·TH2 산정의 기준값."),
             ["Separation"] = ("펌프장과 이격거리 (m)",
                 "펌프장 최우측 벽 외면에서 토출조 벽체 외면까지의 거리. 제원 수식에는 쓰이지 않고 "
                 + "토출조를 펌프장 오른쪽 어디에 놓을지(배치 원점)를 정한다. "
                 + "※ 바닥슬래브는 벽 외면에서 TB3 만큼 더 나가므로 지중 실간격은 이 값보다 TB3 만큼 좁다 "
                 + "(docs/164_토출조_확인필요사항.md B-1)."),
-            ["ON"] = ("\"ON\" — 토출관로 련수", "토출관로의 련(개소) 수. PIPE 2련 이상이면 O1(1m 작업공간)이 적용된다."),
-            ["OB"] = ("\"OB\" — 토출암거 폭 (mm)", "토출관로 형식이 암거일 때 사용."),
-            ["OH"] = ("\"OH\" — 토출암거 높이 (mm)",
+            ["ON"] = ("ON — 토출관로 련수", "토출관로의 련(개소) 수. PIPE 2련 이상이면 O1(1m 작업공간)이 적용된다."),
+            ["OB"] = ("OB — 토출암거 폭 (mm)", "토출관로 형식이 암거일 때 사용."),
+            ["OH"] = ("OH — 토출암거 높이 (mm)",
                 "토출관로 형식이 암거일 때 사용. ⚠ 중앙부 TL3 수식이 OB 대신 이 값을 참조합니다 (docs/164_토출조_확인필요사항.md A-2)."),
-            ["OD"] = ("\"OD\" — 토출관 직경 (mm)", "토출관로 형식이 PIPE일 때 사용."),
+            ["OD"] = ("OD — 토출관 직경 (mm)", "토출관로 형식이 PIPE일 때 사용."),
             ["RefD"] = ("D — 펌프 직경 (mm)", "펌프장 설계조건에서 연동되는 읽기전용 값. TB1·TL1·TOB1·TH3 등 대부분 제원의 기준값."),
             ["RefN"] = ("N — 펌프 대수", "펌프장 설계조건에서 연동되는 읽기전용 값. TLT(내공 총길이) 산정에 사용."),
             ["RefPumpHwl"] = ("펌프장 HWL (EL, m)", "펌프장 설계조건에서 연동되는 읽기전용 값. TC·TE 산정 기준."),
@@ -378,12 +445,21 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
             ["RefB8PlusT5"] = ("B8 + T5 (mm)",
                 "펌프장 평면제원의 B8 + T5 = 펌프 중심 간격. TL2(펌프 순간격) = (B8+T5) − D 에 사용된다."),
         };
+
+        private static readonly IReadOnlyDictionary<string, string> _inputHintTexts =
+            _inputHints.ToDictionary(pair => pair.Key, pair => pair.Value.desc);
+
+        /// <summary>설계조건 탭 ? 툴팁 문구. _inputHints 단일 출처(docs/319).</summary>
+        public IReadOnlyDictionary<string, string> InputHintTexts => _inputHintTexts;
         #endregion
 
         #region Commands
         public ICommand RevertProfileCommand { get; }
         public ICommand RevertPlanCommand { get; }
         public ICommand CreateDischargeBasinCommand { get; }
+
+        /// <summary>모델리스 창의 생성 실행 위임. 명령이 ExternalEvent로 연결. null이면 직접 실행(docs/320 § B).</summary>
+        public Action<Action>? RunInRevitContext { get; set; }
 
         private void CreateDischargeBasin(object? _)
         {
@@ -405,7 +481,9 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                 return;
             }
 
-            _createUseCase?.Execute(input, geometry);
+            // 모델리스 창: 생성만 API 컨텍스트에서 실행. 입력 검사·계산은 순수 코드(docs/320 § B)
+            if (RunInRevitContext is { } run) run(() => _createUseCase?.Execute(input, geometry));
+            else _createUseCase?.Execute(input, geometry);
         }
         #endregion
 
@@ -425,9 +503,12 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         }
 
         private DischargeBasinInputDto BuildInput(double stationRightEdgeX, double firstPumpCenterY) => new(
-            Position: SelectedPosition == PositionCenter
-                ? DischargeOutletPosition.Center
-                : DischargeOutletPosition.LeftRight,
+            Position: SelectedPosition switch
+            {
+                PositionCenter => DischargeOutletPosition.Center,
+                PositionLeft => DischargeOutletPosition.Left,
+                _ => DischargeOutletPosition.Right,
+            },
             Step: SelectedStep == StepApplied
                 ? DischargeStepType.Applied
                 : DischargeStepType.None,

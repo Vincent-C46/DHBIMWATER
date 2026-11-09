@@ -94,9 +94,9 @@ namespace DHBIMWATER.Application.Services
         public static IReadOnlyList<Point2D> CalculateInnerOutline(
             DischargeBasinInputDto input, DischargeBasinGeometryDto g)
         {
-            if (input.Position == DischargeOutletPosition.LeftRight)
+            if (input.Position != DischargeOutletPosition.Center)
             {
-                // 한쪽으로 벌어지는 사다리꼴. x=0 단부가 TB1, x=TLT 단부가 TB2.
+                // 한쪽으로 벌어지는 사다리꼴. x=0 단부가 TB1, x=TLT 단부가 TB2. 좌측 미러는 배치 변환 담당.
                 return new[]
                 {
                     new Point2D(0, 0),

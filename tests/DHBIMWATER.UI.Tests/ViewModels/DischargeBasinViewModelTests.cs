@@ -202,12 +202,12 @@ public class DischargeBasinViewModelTests
     {
         var vm = CreateReady(out _);
 
-        Assert.Contains("좌우측-암거", vm.PlanImagePath);
+        Assert.Contains("우측-암거", vm.PlanImagePath);
         Assert.Equal(300, Row(vm, "OT").Value);
 
         vm.SelectedConduit = DischargeBasinViewModel.ConduitPipe;
 
-        Assert.Contains("좌우측-PIPE", vm.PlanImagePath);
+        Assert.Contains("우측-PIPE", vm.PlanImagePath);
         Assert.Equal(0, Row(vm, "OT").Value);
         Assert.Equal(1000, Row(vm, "O1").Value);
 
@@ -277,7 +277,7 @@ public class DischargeBasinViewModelTests
         vm.CreateDischargeBasinCommand.Execute(null);
 
         var (input, geometry) = Assert.Single(useCase.Executed);
-        Assert.Equal(DischargeOutletPosition.LeftRight, input.Position);
+        Assert.Equal(DischargeOutletPosition.Right, input.Position);
         Assert.Equal(DischargeStepType.None, input.Step);
         Assert.Equal(3800, geometry.TB1);
         Assert.Equal(8000, geometry.TB2);
@@ -309,5 +309,52 @@ public class DischargeBasinViewModelTests
 
         Assert.Single(dialog.Warns);
         Assert.Empty(useCase.Executed);
+    }
+
+    [Fact]
+    public void PrimaryRows_ContainConfirmedKeysInSourceOrder()
+    {
+        var vm = CreateReady(out _);
+
+        Assert.Equal(new[] { "TB", "TF", "TT1", "TT2", "TT3" }, vm.PrimaryProfileRows.Select(r => r.Key));
+        Assert.Equal(new[] { "TB1", "TB2", "TLT" }, vm.PrimaryPlanRows.Select(r => r.Key));
+    }
+
+    [Fact]
+    public void PrimaryAndDetailRows_CoverSourceRowsWithoutDuplicates()
+    {
+        var vm = CreateReady(out _);
+
+        var profile = vm.PrimaryProfileRows.Concat(vm.DetailProfileRows).ToList();
+        var plan = vm.PrimaryPlanRows.Concat(vm.DetailPlanRows).ToList();
+
+        Assert.Equal(vm.ProfileRows.Count, profile.Count);
+        // θ 파생값은 계산 전용이라 화면 행에서 뺀다.
+        string[] hidden = { "Theta1", "Theta2", "TB4", "TB5", "TT4", "TT5", "TL5", "TL6", "TL7", "TL8" };
+        var shownPlan = vm.PlanRows.Where(r => !hidden.Contains(r.Key)).ToList();
+        Assert.Equal(shownPlan.Count, plan.Count);
+        // 같은 객체여야 재계산·덮어쓰기 표시가 화면 행에 반영된다.
+        Assert.All(vm.ProfileRows, r => Assert.Contains(profile, x => ReferenceEquals(x, r)));
+        Assert.All(shownPlan, r => Assert.Contains(plan, x => ReferenceEquals(x, r)));
+    }
+
+    [Theory]
+    [InlineData("TA")]
+    [InlineData("Separation")]
+    [InlineData("ON")]
+    [InlineData("OB")]
+    [InlineData("OH")]
+    [InlineData("OD")]
+    [InlineData("RefD")]
+    [InlineData("RefN")]
+    [InlineData("RefPumpHwl")]
+    [InlineData("RefH3")]
+    [InlineData("RefH7")]
+    [InlineData("RefB8PlusT5")]
+    public void InputHintTexts_ProvidesTooltipForDesignInputs(string key)
+    {
+        var vm = CreateReady(out _);
+
+        Assert.False(string.IsNullOrWhiteSpace(vm.InputHintTexts[key]));
     }
 }

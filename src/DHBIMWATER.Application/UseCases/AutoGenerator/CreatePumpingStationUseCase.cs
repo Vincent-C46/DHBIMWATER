@@ -25,6 +25,7 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
         private readonly IElementTypeCommandRepo _elementTypeCmdRepo;
         private readonly IExcelReader _excelReader;
         private readonly ClassifyExteriorWallsUseCase _classifyWallsUseCase;
+        private readonly IStructureModelRepo _structureModelRepo;
         #endregion
 
         #region Properties
@@ -47,7 +48,8 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                                            IGenericModelCommandRepo genericModelCmdRepo,
                                            IStairCommandRepo stairCommandRepo, IElementTypeCommandRepo elementTypeCmdRepo,
                                            IExcelReader excelReader,
-                                           ClassifyExteriorWallsUseCase classifyWallsUseCase)
+                                           ClassifyExteriorWallsUseCase classifyWallsUseCase,
+                                           IStructureModelRepo structureModelRepo)
         {
             _levelQueryRepo = levelQueryRepo;
             _levelCmdRepo = levelCmdRepo;
@@ -65,6 +67,7 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
             _elementTypeCmdRepo = elementTypeCmdRepo;
             _excelReader = excelReader;
             _classifyWallsUseCase = classifyWallsUseCase;
+            _structureModelRepo = structureModelRepo;
 
             _tx = tx;
         }
@@ -82,6 +85,10 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
             //_dialogService.Info("Success", $"{excelDict["종단제원 입력"][28][13]}");
             #endregion
 
+            // 기존 펌프장 있으면 개수 확인. 취소면 문서 변경 없음(docs/320 § C)
+            if (StructureRegeneration.Prepare(_structureModelRepo, _dialogService, StructureRegeneration.PumpingStation) is not { } regeneration)
+                return;
+
             using (_tx)
             {
                 try
@@ -92,6 +99,7 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                     #region 0. 공유 매개변수 / 프로젝트 매개변수 생성
                     var defs = GetPumpSharedParameterDefinitions();
                     _sharedParameterRepo.EnsureParameters(defs);
+                    regeneration.DeleteExisting();
                     #endregion
                     #region 1. 레벨 생성
                     var existingLevels = _levelQueryRepo.GetExistingLevelNames();
@@ -220,6 +228,7 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                     #region 9. 타입 설명 추가
                     _setParameterRepo.SetTypeParameter(dto);
                     #endregion
+                    regeneration.MarkCreated();
                     // 트랜잭션 커밋
                     _tx.Commit();
                     _dialogService.Info("Success", "펌프장 작성 완료");
@@ -245,6 +254,22 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                 _dialogService.Warn("Warning", $"계단 생성 실패: {ex.Message}");
             }
             #endregion
+
+            // 계단은 메인 Transaction 밖이라 별도로 표시. 안 하면 재생성 때 계단이 남음(docs/320 § C)
+            using (_tx)
+            {
+                try
+                {
+                    _tx.Begin("Mark PumpingStation");
+                    regeneration.MarkCreated();
+                    _tx.Commit();
+                }
+                catch (Exception ex)
+                {
+                    _tx.Rollback();
+                    _dialogService.Warn("Warning", $"계단 구조물 표시 실패: {ex.Message}");
+                }
+            }
         }
 
         // 공유 매개변작성
@@ -280,6 +305,17 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                                                              ParameterCategory.Stairs,},
                 UserModifiable = false,
             };
+
+            var defStructure = new SharedParameterDefinition()
+            {
+                Name = StructureRegeneration.ParameterName,
+                SpecType = ParameterSpecType.Text,
+                GroupType = ParameterGroupType.Data,
+                BindingType = ParameterBindingType.Instance,
+                Categories = def2.Categories,
+                UserModifiable = false,
+            };
+            defs.Add(defStructure);
 
             var def3 = new SharedParameterDefinition()
             {

@@ -5,11 +5,13 @@ using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Application.UseCases.Documentation;
 
-/// <summary>격점마다 시트 1장 + 평면·3D·드래프팅(배관재료표 도면) 뷰 배치.
+/// <summary>격점마다 시트 1장 + 평면·3D·3D 평면·드래프팅(배관재료표 도면) 뷰 배치.
 /// 평면·도면 UseCase 다음에 따로 트랜잭션 — 시트 실패해도 앞 뷰 안 되돌림.</summary>
 public sealed class CreateJunctionDetailSheetUseCase
 {
     public const string ThreeDPrefix = CreateJunctionDetailViewUseCase.NamePrefix + "_3D";
+    // 3D 뷰를 위에서 내려다본 뷰(시트 좌하단)
+    public const string ThreeDTopPrefix = CreateJunctionDetailViewUseCase.NamePrefix + "_3D평면";
     public const string SheetNumberPrefix = "격점";
 
     private readonly ITransactionContext _transaction;
@@ -80,13 +82,14 @@ public sealed class CreateJunctionDetailSheetUseCase
         if (string.IsNullOrWhiteSpace(group.JunctionId))
             return new JunctionDetailSheetRequest(group, $"{CreateJunctionDetailViewUseCase.NamePrefix} (미지정)",
                 $"{SheetNumberPrefix}_미지정", "격점상세도_미지정", CreatePipeMaterialDraftingUseCase.UnassignedName,
-                $"{ThreeDPrefix}_미지정");
+                $"{ThreeDPrefix}_미지정", ThreeDTopViewName: $"{ThreeDTopPrefix}_미지정");
         var id = group.JunctionId;
         return new JunctionDetailSheetRequest(group,
             $"{CreateJunctionDetailViewUseCase.NamePrefix} ({PipeMaterialViewName.Sanitize(id)})",
             PipeMaterialViewName.For(SheetNumberPrefix, id),
             PipeMaterialViewName.For(CreateJunctionDetailViewUseCase.NamePrefix, id),
             PipeMaterialViewName.For(CreatePipeMaterialDraftingUseCase.NamePrefix, id),
-            PipeMaterialViewName.For(ThreeDPrefix, id));
+            PipeMaterialViewName.For(ThreeDPrefix, id),
+            ThreeDTopViewName: PipeMaterialViewName.For(ThreeDTopPrefix, id));
     }
 }

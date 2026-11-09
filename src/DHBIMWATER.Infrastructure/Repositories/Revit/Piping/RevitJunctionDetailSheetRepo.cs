@@ -6,7 +6,7 @@ using DHBIMWATER.Shared.Errors;
 
 namespace DHBIMWATER.Infrastructure.Repositories.Revit.Piping;
 
-/// <summary>격점상세도 시트 1장 = 좌상단 평면 + 좌하단 3D + 우측 드래프팅(배관재료표 도면).
+/// <summary>격점상세도 시트 1장 = 좌상단 평면 + 우상단 3D + 좌하단 3D 평면(3D를 위에서 본 뷰) + 우하단 드래프팅(배관재료표 도면).
 /// 같은 이름 시트에 뷰 다 있으면 손대지 않음, 빠진 뷰만 추가·배치.</summary>
 internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
 {
@@ -23,7 +23,8 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
     private const double ViewOffsetMm = 20;
     private const double ViewGapMm = 20;
     // 배치 규칙 바꾸면 올림 → 이전 규칙으로 놓인 시트 한 번 다시 배치
-    private const string LayoutVersion = "area-v1";
+    // area-v2(2026-11-09): 3D 우상단, 드래프팅 우하단, 3D 평면 좌하단 추가
+    private const string LayoutVersion = "area-v2";
     // 겹침 피해 밀어내기 최대 횟수
     private const int MaxShift = 10;
 
@@ -38,6 +39,9 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
         var plan = FindView<ViewPlan>(document, request.PlanViewName, x => x.ViewType == ViewType.FloorPlan);
         var drafting = FindView<ViewDrafting>(document, request.DraftingViewName, _ => true);
         var threeD = FindView<View3D>(document, request.ThreeDViewName, x => !x.IsPerspective);
+        // 3D 평면 이름 비면 안 만듦(이전 요청 호환)
+        var wantsTop = !string.IsNullOrWhiteSpace(request.ThreeDTopViewName);
+        var top = wantsTop ? FindView<View3D>(document, request.ThreeDTopViewName, x => !x.IsPerspective) : null;
         var sheet = new FilteredElementCollector(document).OfClass(typeof(ViewSheet)).Cast<ViewSheet>()
             .FirstOrDefault(x => !x.IsPlaceholder && string.Equals(x.Name, request.SheetName, StringComparison.Ordinal));
 
@@ -48,10 +52,11 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
         // 드래프팅 축척은 도곽 크기로 정함 → 사용자가 도곽 바꿨으면 다시 맞추고 재배치
         // 배치 규칙 버전 다른 시트(이전 규칙 배치)도 전부 다시 배치
         var scaleChanged = (threeD is not null && threeD.Scale != request.ViewScale)
+            || (top is not null && top.Scale != request.ViewScale)
             || (sheet is not null && drafting is not null && drafting.Scale != DraftingScale(document, sheet))
             || (sheet is not null && JunctionDetailSheetStorageSchema.ReadLayoutVersion(sheet) != LayoutVersion);
         if (sheet is not null && threeD is not null && !Missing(threeD) && (plan is null || !Missing(plan))
-            && (drafting is null || !Missing(drafting)) && !scaleChanged)
+            && (drafting is null || !Missing(drafting)) && (!wantsTop || !Missing(top)) && !scaleChanged)
         {
             warnings.AddRange(AbsentWarnings(request, plan, drafting));
             return new JunctionDetailSheetChange(JunctionDetailSheetStatus.Unchanged, warnings);
@@ -73,14 +78,18 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
             if (threeD is null || Missing(threeD))
                 threeD = Configure3D(document, threeD ?? Create3D(document, request.ThreeDViewName), instances, request.ViewScale);
             else if (threeD.Scale != request.ViewScale) SetScale(threeD, request.ViewScale);
+            if (wantsTop && (top is null || Missing(top)))
+                top = ConfigureTop(document, top ?? Create3D(document, request.ThreeDTopViewName), instances, request.ViewScale);
+            else if (top is not null && top.Scale != request.ViewScale) SetScale(top, request.ViewScale);
             if (drafting is not null) SetDraftingScale(drafting, DraftingScale(document, sheet), warnings);
             warnings.AddRange(AbsentWarnings(request, plan, drafting));
 
             // 새로 놓은 뷰포트만 배치·유형 지정. 이미 놓인 뷰포트 위치는 사용자 몫 — 축척 바뀐 때만 전부 다시 배치
             var planPort = Place(document, sheet, plan, placed, warnings);
             var threeDPort = Place(document, sheet, threeD, placed, warnings);
+            var topPort = Place(document, sheet, top, placed, warnings);
             var draftingPort = Place(document, sheet, drafting, placed, warnings);
-            var added = new[] { planPort, threeDPort, draftingPort }.OfType<Viewport>().ToList();
+            var added = new[] { planPort, threeDPort, topPort, draftingPort }.OfType<Viewport>().ToList();
             if (added.Count == 0 && !scaleChanged)
             {
                 sub.RollBack();
@@ -88,7 +97,7 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
             }
             ApplyViewportType(document, added, warnings);
             document.Regenerate();
-            Arrange(document, sheet, plan, threeD, drafting, scaleChanged ? null : added, warnings);
+            Arrange(document, sheet, plan, threeD, top, drafting, scaleChanged ? null : added, warnings);
             JunctionDetailSheetStorageSchema.WriteLayoutVersion(sheet, LayoutVersion);
             sub.Commit();
             return new JunctionDetailSheetChange(
@@ -231,6 +240,24 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
         return view;
     }
 
+    // 3D 평면 = 3D 뷰와 같은 설정(단면 상자·숨김) + 위에서 수직으로 내려다봄(위쪽 = 세계 +Y)
+    private static View3D ConfigureTop(Document document, View3D view, IReadOnlyList<FamilyInstance> instances, int scale)
+    {
+        Configure3D(document, view, instances, scale);
+        var center = XYZ.Zero;
+        var height = 0.0;
+        if (view.IsSectionBoxActive)
+        {
+            var box = view.GetSectionBox();
+            center = box.Transform.OfPoint((box.Min + box.Max) / 2);
+            height = (box.Max.Z - box.Min.Z) / 2;
+        }
+        // 직교 뷰라 눈 높이는 방향만 정함. 단면 상자 위로 띄움
+        var eye = center + XYZ.BasisZ * (height + RevitUnitConverter.MmToFt(10000));
+        view.SetOrientation(new ViewOrientation3D(eye, XYZ.BasisY, -XYZ.BasisZ));
+        return view;
+    }
+
     private static Viewport? Place(Document document, ViewSheet sheet, View? view, ISet<ElementId> placed,
         List<string> warnings)
     {
@@ -261,10 +288,11 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
         }
     }
 
-    // 배치 영역(도곽 안쪽) 모서리 기준. 뷰포트 상자(GetBoxOutline) 좌상단 = 평면, 좌하단 = 3D, 우상단 = 드래프팅,
-    // 각각 영역 같은 모서리에서 ViewOffset 만큼 안쪽. 놓을 때마다 이미 놓인 상자와 겹치면 오른쪽으로 밀어냄. 영역 밖·겹침 남으면 경고.
-    // added null = 축척 바뀜 → 세 뷰포트 전부 다시 배치. 안 옮기는 뷰포트(사용자 위치)는 장애물로만 씀
-    private static void Arrange(Document document, ViewSheet sheet, View? plan, View? threeD, View? drafting,
+    // 배치 영역(도곽 안쪽) 모서리 기준. 뷰포트 상자(GetBoxOutline) 좌상단 = 평면, 좌하단 = 3D 평면, 우상단 = 3D, 우하단 = 드래프팅,
+    // 각각 영역 같은 모서리에서 ViewOffset 만큼 안쪽. 왼쪽 열은 이미 놓인 상자와 겹치면 오른쪽으로 밀어냄.
+    // 오른쪽 열은 오른쪽 정렬 고정(밀면 영역 밖) — 겹치면 경고만. 영역 밖·겹침 남으면 경고.
+    // added null = 축척 바뀜 → 뷰포트 전부 다시 배치. 안 옮기는 뷰포트(사용자 위치)는 장애물로만 씀
+    private static void Arrange(Document document, ViewSheet sheet, View? plan, View? threeD, View? top, View? drafting,
         IReadOnlyList<Viewport>? added, List<string> warnings)
     {
         var (frameMin, frameMax) = Frame(document, sheet);
@@ -276,7 +304,7 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
         // 배치 영역 경계. 아래 앵커는 영역 모서리 + offset
         var right = frameMax.X - Ft(AreaRightMm);
         var bottom = frameMin.Y + Ft(AreaBottomMm);
-        var top = frameMax.Y - Ft(AreaTopMm);
+        var areaTop = frameMax.Y - Ft(AreaTopMm);
         var areaLeft = frameMin.X + Ft(AreaLeftMm);
         var left = areaLeft + offset;
         var ports = new FilteredElementCollector(document, sheet.Id).OfClass(typeof(Viewport)).Cast<Viewport>().ToList();
@@ -285,28 +313,24 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
 
         var planPort = PortOf(plan);
         var threeDPort = PortOf(threeD);
+        var topPort = PortOf(top);
         var draftingPort = PortOf(drafting);
-        var moving = new[] { planPort, threeDPort, draftingPort }.Where(IsNew).Select(x => x!.Id).ToHashSet();
+        var moving = new[] { planPort, threeDPort, topPort, draftingPort }.Where(IsNew).Select(x => x!.Id).ToHashSet();
         // 장애물 = 시트의 다른 뷰포트 전부(안 옮기는 것). 놓은 순서대로 추가
         var placed = ports.Where(x => !moving.Contains(x.Id)).Select(Box).ToList();
-        var moved = new Dictionary<ElementId, Rect>();
 
-        if (IsNew(planPort)) Put(planPort!, left, top - offset, alignTop: true);
-        if (IsNew(threeDPort)) Put(threeDPort!, left, bottom + offset, alignTop: false);
-        if (IsNew(draftingPort))
+        // 왼쪽 열 먼저 → 오른쪽 열이 겹침 경고로 공간 부족 알림
+        if (IsNew(planPort)) Put(planPort!, left, areaTop - offset, alignTop: true);
+        if (IsNew(topPort)) Put(topPort!, left, bottom + offset, alignTop: false);
+        if (IsNew(threeDPort)) PutRight(threeDPort!, areaTop - offset, alignTop: true);
+        if (IsNew(draftingPort)) PutRight(draftingPort!, bottom + offset, alignTop: false);
+
+        // 상자 오른쪽 끝을 영역 오른쪽 − offset에 고정
+        void PutRight(Viewport port, double y, bool alignTop)
         {
-            // 드래프팅 = 상자 우상단을 영역 우상단 − offset에 고정(오른쪽 정렬). 겹쳐도 안 밀고 경고만 —
-            // 밀면 오른쪽 영역 밖으로 나감. 경고에 폭 적어 원인 확인용
-            var box = Box(draftingPort!);
-            var width = box.MaxX - box.MinX;
-            Put(draftingPort!, right - offset - width, top - offset, alignTop: true, shift: false);
-            var column = new[] { planPort, threeDPort }.OfType<Viewport>()
-                .Select(x => moved.TryGetValue(x.Id, out var r) ? r : Box(x)).ToList();
-            if (column.Count > 0 && column.Max(x => x.MaxX) + gap > right - offset - width)
-                warnings.Add($"{sheet.Name}: 재료표 폭 {Mm(width):0}mm, 평면·3D 오른쪽 끝 {Mm(column.Max(x => x.MaxX) - frameMin.X):0}mm(도곽 왼쪽 기준) — 공간이 모자라 겹칠 수 있습니다.");
+            var box = Box(port);
+            Put(port, right - offset - (box.MaxX - box.MinX), y, alignTop, shift: false);
         }
-
-        double Mm(double ft) => RevitUnitConverter.FtToMm(ft);
 
         void Put(Viewport port, double x, double y, bool alignTop, bool shift = true)
         {
@@ -318,9 +342,8 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
                 target = target with { MinX = hit.MaxX + gap, MaxX = hit.MaxX + gap + w };
             port.SetBoxCenter(new XYZ((target.MinX + target.MaxX) / 2, (target.MinY + target.MaxY) / 2, 0));
             placed.Add(target);
-            moved[port.Id] = target;
             if (target.MinX < areaLeft - 1e-6 || target.MaxX > right + 1e-6 || target.MinY < bottom - 1e-6
-                || target.MaxY > top + 1e-6 || placed.Take(placed.Count - 1).Any(o => o.Overlaps(target, 0)))
+                || target.MaxY > areaTop + 1e-6 || placed.Take(placed.Count - 1).Any(o => o.Overlaps(target, 0)))
                 warnings.Add($"{sheet.Name}: '{document.GetElement(port.ViewId)?.Name}' 뷰가 배치 영역에 다 안 들어가거나 다른 뷰와 겹칩니다. 축척을 줄이거나 위치를 손으로 옮기세요.");
         }
     }

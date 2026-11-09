@@ -2065,6 +2065,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         var placedBypassSets = 0;
         var unassignedValves = 0;
         var gateFamilyName = ValveFamilyNames.FirstOrDefault(x => x.Name.Contains("게이트", StringComparison.Ordinal))?.Name;
+        var butterflyFamilyName = ValveFamilyNames.FirstOrDefault(x => x.Name.Contains("버터플라이", StringComparison.Ordinal))?.Name;
         foreach (var fitting in resolved.Fittings ?? [])
         {
             var edge = FindEdgeBetween(fitting.SegmentStart, fitting.SegmentEnd);
@@ -2077,8 +2078,10 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             }
             else
             {
+                // 버터플라이 역할 = 버터플라이 패밀리, 나머지 = 게이트(종전)
+                var familyName = fitting.Role == ValveRole.Butterfly ? butterflyFamilyName : gateFamilyName;
                 var familyTypeName = _accessoryFamilyTypeNames.FirstOrDefault(x =>
-                    GetFamilyName(x) == gateFamilyName
+                    familyName is not null && GetFamilyName(x) == familyName
                     && NominalDiameterParser.Parse(x) is { } diameter
                     && Math.Abs(diameter - edge.DiameterMm) <= 0.5) ?? string.Empty;
                 _network.AddInlineFitting(edge.Id, InlineFittingTypeKey, familyTypeName, fitting.T, preservePosition: true);
@@ -2110,7 +2113,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             + (pipeVoid is { HasKnownNominal: false } ? $" · Void 지름 {pipeVoid.DiameterMm:0.#} mm에 맞는 DN 없음 — 관경 확인" : string.Empty)
             + (isAirRoom && pipeVoid is null ? " · 본관 관통 Void를 못 찾아 중앙 직관으로 그림 — 높이·관경 직접 확인" : string.Empty)
             + (dropped > 0 ? $" · 짧은 선 {dropped}개 제외" : string.Empty)
-            + (unassignedValves > 0 ? $" · 게이트 밸브 유형을 찾지 못해 밸브 {unassignedValves}개는 패밀리 미지정" : string.Empty)
+            + (unassignedValves > 0 ? $" · 맞는 밸브 유형(게이트·버터플라이)을 찾지 못해 밸브 {unassignedValves}개는 패밀리 미지정" : string.Empty)
             + (placedBypassSets > 0 && HandbookBypassDiameterMm(_diameterMm) is null
                 ? $" · 바이패스 세트는 {ValveBypassSpecTable.RangeText(_pipeMaterial, _steelFittingClass)} 본관에서만 생성됩니다(현재 DN{_diameterMm:0}) — 기본 관경을 바꾼 뒤 다시 적용하세요."
                 : string.Empty);

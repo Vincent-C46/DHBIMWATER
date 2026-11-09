@@ -22,7 +22,7 @@ public sealed class JunctionDetailViewModelTests
         Assert.Equal(400, set.StepMm);
         Assert.True(set.IsY);
         Assert.Equal(50, vm.ViewScale);
-        Assert.Equal(25, vm.SheetScale);
+        Assert.Equal(30, vm.SheetScale);
         // 태그 유형 0개 → 체크 해제로 보이고 실행에도 false(docs/291)
         Assert.False(vm.CanPlaceTags);
         Assert.False(vm.PlaceTags);
@@ -311,8 +311,10 @@ public sealed class JunctionDetailViewModelTests
     public void Scale_PresetAndCustom_UpdateViewScale_InvalidCustomBlocksRun()
     {
         var vm = Create();
-        Assert.Equal("1:25", vm.SelectedScale.Label);
-        Assert.False(vm.IsCustomScale);
+        // 기본 1:30은 목록에 없음 → 사용자 30
+        Assert.Equal("사용자", vm.SelectedScale.Label);
+        Assert.Equal("30", vm.CustomScaleText);
+        Assert.True(vm.IsCustomScale);
 
         var width = vm.PreviewCanvasWidth;
 

@@ -26,6 +26,7 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
         private readonly IConcreteSettingsRepo _concreteSettingsRepo;
         private readonly IElementTypeQueryRepo _elementTypeQueryRepo;
         private readonly IViewCommandRepo _viewCmdRepo;
+        private readonly IStructureModelRepo _structureModelRepo;
         #endregion
 
         #region Constructor
@@ -43,7 +44,8 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
             ClassifyExteriorWallsUseCase classifyWallsUseCase,
             IConcreteSettingsRepo concreteSettingsRepo,
             IElementTypeQueryRepo elementTypeQueryRepo,
-            IViewCommandRepo viewCmdRepo)
+            IViewCommandRepo viewCmdRepo,
+            IStructureModelRepo structureModelRepo)
         {
             _tx = tx;
             _dialogService = dialogService;
@@ -60,12 +62,17 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
             _concreteSettingsRepo = concreteSettingsRepo;
             _elementTypeQueryRepo = elementTypeQueryRepo;
             _viewCmdRepo = viewCmdRepo;
+            _structureModelRepo = structureModelRepo;
         }
         #endregion
 
         #region Methods
         public void Execute(ReservoirCreationRequestDto dto)
         {
+            // 기존 배수지 있으면 개수 확인. 취소면 문서 변경 없음(docs/320 § C)
+            if (StructureRegeneration.Prepare(_structureModelRepo, _dialogService, StructureRegeneration.Reservoir) is not { } regeneration)
+                return;
+
             using (_tx)
             {
                 try
@@ -74,6 +81,7 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
 
                     #region 0. 공유 매개변수 생성
                     _sharedParameterRepo.EnsureParameters(GetReservoirSharedParameterDefinitions());
+                    regeneration.DeleteExisting();
                     #endregion
 
                     #region 1. 레벨 생성
@@ -176,6 +184,7 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
 
                     // TODO: 오프닝 배치 (파이프 관통 슬리브 등) — ReservoirGeometryCalculator.CalculateOpenings() 추가 후 구현
 
+                    regeneration.MarkCreated();
                     _tx.Commit();
 
                     var message = "배수지 작성 완료";
@@ -210,6 +219,7 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
             {
                 new SharedParameterDefinition { Name = "DH_ElementCode", SpecType = ParameterSpecType.Text,  GroupType = ParameterGroupType.Data,         BindingType = ParameterBindingType.Instance, Categories = structuralCategories },
                 new SharedParameterDefinition { Name = "DH_Addin",       SpecType = ParameterSpecType.Text,  GroupType = ParameterGroupType.Data,         BindingType = ParameterBindingType.Instance, Categories = structuralCategories, UserModifiable = false },
+                new SharedParameterDefinition { Name = StructureRegeneration.ParameterName, SpecType = ParameterSpecType.Text, GroupType = ParameterGroupType.Data, BindingType = ParameterBindingType.Instance, Categories = structuralCategories, UserModifiable = false },
                 new SharedParameterDefinition { Name = "DH_Class",       SpecType = ParameterSpecType.Text,  GroupType = ParameterGroupType.Data,         BindingType = ParameterBindingType.Instance, Categories = structuralCategories },
                 new SharedParameterDefinition { Name = "DH_Category",    SpecType = ParameterSpecType.Text,  GroupType = ParameterGroupType.Data,         BindingType = ParameterBindingType.Instance, Categories = structuralCategories },
                 new SharedParameterDefinition { Name = "DH_Zone",        SpecType = ParameterSpecType.Text,  GroupType = ParameterGroupType.Data,         BindingType = ParameterBindingType.Instance, Categories = structuralCategories },

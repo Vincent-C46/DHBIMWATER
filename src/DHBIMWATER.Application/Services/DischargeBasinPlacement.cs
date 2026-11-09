@@ -34,7 +34,9 @@ namespace DHBIMWATER.Application.Services
     /// </summary>
     /// <param name="OriginX">로컬 y=0 평면의 프로젝트 X (mm)</param>
     /// <param name="OriginY">로컬 x=0 평면의 프로젝트 Y (mm)</param>
-    public readonly record struct DischargeBasinPlacement(double OriginX, double OriginY)
+    /// <param name="MirrorLength">좌측 토출 미러 길이(TLT). 값 있으면 내공 길이 중심선 기준 Y 미러(docs/320 § A).
+    /// 펌프 배열이 TLT 안에서 대칭이라 OriginY 공식 그대로 펌프 중심 일치. null = 우측·중앙부.</param>
+    public readonly record struct DischargeBasinPlacement(double OriginX, double OriginY, double? MirrorLength = null)
     {
         /// <summary>펌프장 연동값과 이격거리로 배치 원점을 잡는다.</summary>
         public static DischargeBasinPlacement For(DischargeBasinInputDto input, DischargeBasinGeometryDto g)
@@ -42,21 +44,24 @@ namespace DHBIMWATER.Application.Services
                 // 벽체 외면(= OriginX − TT1)이 펌프장 우측 벽 외면에서 이격거리(m)만큼 떨어지도록.
                 input.StationRightEdgeX + input.Separation * 1000 + g.TT1,
                 // 1번 펌프 중심(로컬 x)이 펌프장 1번 펌프 중심(프로젝트 Y)에 오도록.
-                input.FirstPumpCenterY - DischargeBasinLayoutCalculator.PumpCenterX(input, g, 0));
+                input.FirstPumpCenterY - DischargeBasinLayoutCalculator.PumpCenterX(input, g, 0),
+                input.Position == DischargeOutletPosition.Left ? g.TLT : null);
 
-        public Point2D Map(Point2D p) => new(OriginX + p.Y, OriginY + p.X);
+        private double MapY(double localX) => MirrorLength is { } length ? OriginY + length - localX : OriginY + localX;
 
-        public Point3D Map(Point3D p) => new(OriginX + p.Y, OriginY + p.X, p.Z);
+        public Point2D Map(Point2D p) => new(OriginX + p.Y, MapY(p.X));
+
+        public Point3D Map(Point3D p) => new(OriginX + p.Y, MapY(p.X), p.Z);
 
         /// <summary>
         /// 다각형 변환. 축 교환으로 진행 방향이 뒤집히므로 <b>점 순서를 되돌려 반시계를 유지</b>한다
         /// (바깥 오프셋·코너 마이터가 반시계를 전제한다).
+        /// 좌측 미러는 축 교환 + 미러 = 회전이라 진행 방향 유지 → 점 순서 그대로.
         /// </summary>
         public IReadOnlyList<Point2D> MapOutline(IReadOnlyList<Point2D> points)
         {
-            var mapped = new List<Point2D>(points.Count);
-            for (var i = points.Count - 1; i >= 0; i--)
-                mapped.Add(Map(points[i]));
+            var mapped = points.Select(Map).ToList();
+            if (MirrorLength is null) mapped.Reverse();
             return mapped;
         }
     }

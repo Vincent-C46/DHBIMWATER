@@ -176,12 +176,19 @@
 	  </Resource>
 	</ItemGroup>
 
-	<!-- 토출조 도해. 수령자료 엑셀(토출조 input data\*.xlsx) 내장 EMF를 PNG로 추출한 것. docs/img/164_토출조/ -->
+	<!-- 토출조 도해. 좌측·우측 평면은 tools/generate_discharge_plan_diagrams.py가 같은 폴더 .svg와 함께 생성(docs/320).
+	     나머지는 수령자료 엑셀(토출조 input data\*.xlsx) 내장 EMF를 PNG로 추출한 것. docs/img/164_토출조/ -->
 	<ItemGroup>
-		<Resource Include="Resources\PumpStationImages\토출조_평면-좌우측-암거.png">
+		<Resource Include="Resources\PumpStationImages\토출조_평면-좌측-암거.png">
 		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Resource>
-		<Resource Include="Resources\PumpStationImages\토출조_평면-좌우측-PIPE.png">
+		<Resource Include="Resources\PumpStationImages\토출조_평면-좌측-PIPE.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="Resources\PumpStationImages\토출조_평면-우측-암거.png">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="Resources\PumpStationImages\토출조_평면-우측-PIPE.png">
 		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Resource>
 		<Resource Include="Resources\PumpStationImages\토출조_평면-중앙부.png">

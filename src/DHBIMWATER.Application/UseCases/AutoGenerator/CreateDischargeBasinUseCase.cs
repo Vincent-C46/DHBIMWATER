@@ -35,6 +35,7 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
     private readonly IElementParameterCommandRepo _elementParameterCommand;
     private readonly IDialogService _dialog;
     private readonly IConcreteSettingsRepo _concreteSettings;
+    private readonly IStructureModelRepo _structureModel;
 
     public CreateDischargeBasinUseCase(
         ITransactionContext transaction,
@@ -49,7 +50,8 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
         ISharedParameterRepository sharedParameter,
         IElementParameterCommandRepo elementParameterCommand,
         IDialogService dialog,
-        IConcreteSettingsRepo concreteSettings)
+        IConcreteSettingsRepo concreteSettings,
+        IStructureModelRepo structureModel)
     {
         _transaction = transaction;
         _levelQuery = levelQuery;
@@ -64,6 +66,7 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
         _elementParameterCommand = elementParameterCommand;
         _dialog = dialog;
         _concreteSettings = concreteSettings;
+        _structureModel = structureModel;
     }
 
     /// <summary>
@@ -81,6 +84,10 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
             return;
         }
 
+        // 기존 토출조 있으면 개수 확인. 취소면 문서 변경 없음(docs/320 § C)
+        if (StructureRegeneration.Prepare(_structureModel, _dialog, StructureRegeneration.DischargeBasin) is not { } regeneration)
+            return;
+
         using (_transaction)
         {
             try
@@ -89,6 +96,7 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
 
                 // 이 호출이 없으면 각 Repo 의 LookupParameter("DH_*") 가 null 을 돌려주고 ?.Set 이 조용히 무시된다.
                 _sharedParameter.EnsureParameters(GetSharedParameterDefinitions());
+                regeneration.DeleteExisting();
 
                 var basinLevels = EnsureLevels(geometry);
 
@@ -141,6 +149,7 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
                 // 레벨 후처리 — 평면뷰가 없으면 만들고, 3D 범위를 모델에 맞춘다(펌프장과 같은 마무리).
                 FinishLevels(basinLevels);
 
+                regeneration.MarkCreated();
                 _transaction.Commit();
 
                 var frameNote = input.Frame is null
@@ -265,6 +274,7 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
         return new List<SharedParameterDefinition>
         {
             new() { Name = "DH_Addin",       SpecType = ParameterSpecType.Text,  GroupType = ParameterGroupType.Data, BindingType = ParameterBindingType.Instance, Categories = categories, UserModifiable = false },
+            new() { Name = StructureRegeneration.ParameterName, SpecType = ParameterSpecType.Text, GroupType = ParameterGroupType.Data, BindingType = ParameterBindingType.Instance, Categories = categories, UserModifiable = false },
             new() { Name = "DH_ElementCode", SpecType = ParameterSpecType.Text,  GroupType = ParameterGroupType.Data, BindingType = ParameterBindingType.Instance, Categories = categories },
             new() { Name = "DH_Category",    SpecType = ParameterSpecType.Text,  GroupType = ParameterGroupType.Data, BindingType = ParameterBindingType.Instance, Categories = categories },
             new() { Name = "DH_Zone",        SpecType = ParameterSpecType.Text,  GroupType = ParameterGroupType.Data, BindingType = ParameterBindingType.Instance, Categories = categories },

@@ -35,5 +35,9 @@ namespace DHBIMWATER.UI.Views.Modeling
                 element = VisualTreeHelper.GetParent(element);
             }
         }
+
+        /// <summary>입력칸을 벗어나면 도해 강조 해제. 다음 칸 GotFocus가 뒤따라 다시 설정.</summary>
+        private void OnParameterLostFocus(object sender, RoutedEventArgs e)
+            => (DataContext as DischargeBasinViewModel)?.ClearFocusedParameter();
     }
 }

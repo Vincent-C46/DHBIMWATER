@@ -3214,6 +3214,23 @@ public sealed class PipeLayoutViewModelTests
         Assert.DoesNotContain("바이패스 세트는", vm.Status);
     }
 
+    // 타이밸브실(2026-11-09): 선 5본(T 2개), 바이패스 3세트, 버터플라이 6개(버터플라이 패밀리 선택)
+    [Fact]
+    public void ApplyTemplate_TieRoom_ThreeBypassSetsWithTwoButterflyValvesEach()
+    {
+        var vm = CreateDrawingViewModel(["DH_게이트 밸브 : 300A", "DH_버터플라이 밸브 : 300A"]);
+        vm.ApplyOutline(CreateOutline(4000, 3000));
+        vm.ValveRoomZone = "타이밸브실";
+
+        vm.ApplyTemplateCommand.Execute(null);
+
+        Assert.Equal(5, vm.Edges.Count);
+        Assert.Equal(3, vm.BypassSetItems.Count);
+        var valves = vm.InlineFittings.Where(x => !x.IsBypassSet).ToList();
+        Assert.Equal(6, valves.Count);
+        Assert.All(valves, x => Assert.Equal("DH_버터플라이 밸브 : 300A", x.FamilyTypeName));
+    }
+
     [Fact]
     public void ApplyTemplate_SluiceRoom_MissingMatchingGateTypeReportsUnassignedValve()
     {

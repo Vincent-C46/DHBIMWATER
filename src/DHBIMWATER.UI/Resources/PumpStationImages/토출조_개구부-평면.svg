@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 560" width="1800" height="560">
+<rect width="1800" height="560" fill="#FFFFFF"/>
+<g fill="none" stroke="#000000" stroke-linecap="round" stroke-linejoin="round">
+<polygon points="149,163 1786,163 1786,543 149,543" stroke-width="3"/>
+<line x1="471" y1="204" x2="1746" y2="204" stroke-width="3" stroke-dasharray="44 26"/>
+<line x1="189" y1="333" x2="189" y2="503" stroke-width="3" stroke-dasharray="44 26"/>
+<line x1="189" y1="503" x2="1746" y2="503" stroke-width="3" stroke-dasharray="44 26"/>
+<line x1="1746" y1="204" x2="1746" y2="503" stroke-width="3" stroke-dasharray="44 26"/>
+<polygon points="189,204 471,204 471,333 189,333" stroke-width="3"/>
+<line x1="189" y1="204" x2="471" y2="333" stroke-width="3"/>
+<line x1="189" y1="333" x2="471" y2="204" stroke-width="3"/>
+<line x1="175" y1="50" x2="485" y2="50" stroke-width="3"/>
+<circle cx="189" cy="50" r="5" fill="#000000" stroke="none"/>
+<circle cx="471" cy="50" r="5" fill="#000000" stroke="none"/>
+<line x1="189" y1="50" x2="189" y2="131" stroke-width="3"/>
+<line x1="471" y1="50" x2="471" y2="131" stroke-width="3"/>
+<polygon points="673,204 875,204 875,333 673,333" stroke-width="3"/>
+<line x1="673" y1="204" x2="875" y2="333" stroke-width="3"/>
+<line x1="673" y1="333" x2="875" y2="204" stroke-width="3"/>
+<line x1="659" y1="50" x2="889" y2="50" stroke-width="3"/>
+<circle cx="673" cy="50" r="5" fill="#000000" stroke="none"/>
+<circle cx="875" cy="50" r="5" fill="#000000" stroke="none"/>
+<line x1="673" y1="50" x2="673" y2="131" stroke-width="3"/>
+<line x1="875" y1="50" x2="875" y2="131" stroke-width="3"/>
+<polygon points="1077,204 1278,204 1278,333 1077,333" stroke-width="3"/>
+<line x1="1077" y1="204" x2="1278" y2="333" stroke-width="3"/>
+<line x1="1077" y1="333" x2="1278" y2="204" stroke-width="3"/>
+<line x1="1063" y1="50" x2="1292" y2="50" stroke-width="3"/>
+<circle cx="1077" cy="50" r="5" fill="#000000" stroke="none"/>
+<circle cx="1278" cy="50" r="5" fill="#000000" stroke="none"/>
+<line x1="1077" y1="50" x2="1077" y2="131" stroke-width="3"/>
+<line x1="1278" y1="50" x2="1278" y2="131" stroke-width="3"/>
+<polygon points="1480,204 1682,204 1682,333 1480,333" stroke-width="3"/>
+<line x1="1480" y1="204" x2="1682" y2="333" stroke-width="3"/>
+<line x1="1480" y1="333" x2="1682" y2="204" stroke-width="3"/>
+<line x1="1466" y1="50" x2="1696" y2="50" stroke-width="3"/>
+<circle cx="1480" cy="50" r="5" fill="#000000" stroke="none"/>
+<circle cx="1682" cy="50" r="5" fill="#000000" stroke="none"/>
+<line x1="1480" y1="50" x2="1480" y2="131" stroke-width="3"/>
+<line x1="1682" y1="50" x2="1682" y2="131" stroke-width="3"/>
+<line x1="56" y1="202" x2="56" y2="335" stroke-width="3"/>
+<line x1="118" y1="204" x2="56" y2="204" stroke-width="3"/>
+<circle cx="56" cy="204" r="5" fill="#000000" stroke="none"/>
+<line x1="118" y1="333" x2="56" y2="333" stroke-width="3"/>
+<circle cx="56" cy="333" r="5" fill="#000000" stroke="none"/>
+</g>
+<g fill="#000000" font-family="Arial" font-size="26" text-anchor="middle" dominant-baseline="central">
+<text x="330" y="28">TOL2</text>
+<rect x="288.125" y="235.64" width="83.75" height="28.72" fill="#FFFFFF"/>
+<text x="330" y="250">OPEN</text>
+<rect x="251.945" y="272.64" width="156.109" height="28.72" fill="#FFFFFF"/>
+<text x="330" y="287">TOB1xTOL2</text>
+<text x="774" y="28">TOL1</text>
+<rect x="732.125" y="235.64" width="83.75" height="28.72" fill="#FFFFFF"/>
+<text x="774" y="250">OPEN</text>
+<rect x="695.945" y="272.64" width="156.109" height="28.72" fill="#FFFFFF"/>
+<text x="774" y="287">TOB1xTOL1</text>
+<text x="1177.5" y="28">TOL1</text>
+<rect x="1135.62" y="235.64" width="83.75" height="28.72" fill="#FFFFFF"/>
+<text x="1177.5" y="250">OPEN</text>
+<rect x="1099.45" y="272.64" width="156.109" height="28.72" fill="#FFFFFF"/>
+<text x="1177.5" y="287">TOB1xTOL1</text>
+<text x="1581" y="28">TOL1</text>
+<rect x="1539.12" y="235.64" width="83.75" height="28.72" fill="#FFFFFF"/>
+<text x="1581" y="250">OPEN</text>
+<rect x="1502.95" y="272.64" width="156.109" height="28.72" fill="#FFFFFF"/>
+<text x="1581" y="287">TOB1xTOL1</text>
+<text x="36" y="268" transform="rotate(-90 36 268)">TOB1</text>
+</g>
+</svg>

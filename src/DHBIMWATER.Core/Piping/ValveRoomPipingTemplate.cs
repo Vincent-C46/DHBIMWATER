@@ -20,7 +20,8 @@ public sealed record TemplatePoint(TemplatePointKind Kind, string? PortLabel, do
 public sealed record TemplateSegment(TemplatePoint Start, TemplatePoint End, double? DiameterRatio = null, bool EndAtInteriorWall = false);
 
 /// <summary>밸브 역할. 1차 카탈로그는 비어 있다 — 패밀리 매칭·배치는 후속 지시서(docs/171 § 2-2, docs/172 § 0-5).</summary>
-public enum ValveRole { Sluice, Air, Mud, Check, Other }
+// Butterfly = 추천 배치가 이름에 "버터플라이" 든 패밀리를 고름(2026-11-09). 나머지는 게이트 밸브 패밀리
+public enum ValveRole { Sluice, Air, Mud, Check, Other, Butterfly }
 
 // TODO(docs/175): 이음관이 독립 부속이 되어 JointBefore/JointAfter 플래그는 쓰이지 않는다.
 //   카탈로그에 밸브가 들어올 때 TemplateFitting(TypeKey) 형태로 교체한다. 호출자가 없어 지금은 그대로 둔다.

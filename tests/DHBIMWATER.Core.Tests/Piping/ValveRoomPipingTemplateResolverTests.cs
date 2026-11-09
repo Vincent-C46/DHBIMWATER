@@ -255,6 +255,32 @@ public sealed class ValveRoomPipingTemplateResolverTests
         Assert.Throws<DHBIMWATER.Shared.Errors.DhbimwaterException>(() => ValveRoomPipingTemplateResolver.Resolve(template, Outline(), false, Diameter));
     }
 
+    // 타이밸브실(2026-11-09): IN 2·OUT 2, 위·아래 본관 + 가운데 연결관(H 모양). 선 5본·바이패스 3세트·세트마다 버터플라이 2개
+    [Fact]
+    public void TieValveRoom_HShape_ButterflyWithBypassOnEveryRun()
+    {
+        var template = ValveRoomPipingTemplateCatalog.Default("타이밸브실")!;
+
+        var resolved = ValveRoomPipingTemplateResolver.Resolve(template, Outline(), fromFarEdge: false, Diameter);
+
+        Assert.Equal(2, resolved.Ports.Count(x => x.Flow == PortFlow.In));
+        Assert.Equal(2, resolved.Ports.Count(x => x.Flow == PortFlow.Out));
+        Assert.Equal(5, resolved.Segments.Count);
+        // 위·아래 T 절점 = 본관 두 선 공유 끝 + 연결관 양 끝
+        var upperTee = resolved.Segments[0].End;
+        var lowerTee = resolved.Segments[2].End;
+        Assert.Equal(upperTee, resolved.Segments[1].Start);
+        Assert.Equal(lowerTee, resolved.Segments[3].Start);
+        Assert.Equal(lowerTee, resolved.Segments[4].Start);
+        Assert.Equal(upperTee, resolved.Segments[4].End);
+        Assert.Equal(6, resolved.Fittings!.Count(f => !f.IsBypassSet && f.Role == ValveRole.Butterfly));
+        var sets = resolved.Fittings!.Where(f => f.IsBypassSet).ToList();
+        Assert.Equal(3, sets.Count);
+        // 위·아래 세트 = T 절점 중심(본관 선 끝)
+        Assert.Contains(sets, f => f.SegmentEnd == upperTee && f.T == 1.0 && f.Side == 1);
+        Assert.Contains(sets, f => f.SegmentEnd == lowerTee && f.T == 1.0 && f.Side == -1);
+    }
+
     // ── § B-3 카탈로그 무결성 ────────────────────────────────────────────────────
 
     [Fact]

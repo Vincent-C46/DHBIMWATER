@@ -24,7 +24,6 @@ namespace DHBIMWATER.UI.Views.Modeling
         {
             InitializeComponent();
             DataContext = waterTankViewModel;
-            waterTankViewModel.CloseAction = Close;
             waterTankViewModel.ConcreteLauncher.ShowDialog = vm => ConcreteSettingsView.Show(this, vm);   // docs/249 § E
         }
     }

@@ -5,8 +5,11 @@ namespace DHBIMWATER.Application.DTOs.Revit.DischargeBasin
     /// </summary>
     public enum DischargeOutletPosition
     {
-        /// <summary>좌우측 토출 — 한 방향으로 벌어지는 사다리꼴. 기준각 12°.</summary>
-        LeftRight,
+        /// <summary>좌측 토출 — 평면 도해 왼쪽이 TB2. 우측의 미러. 제원 수식은 우측과 같음.</summary>
+        Left,
+
+        /// <summary>우측 토출 — 평면 도해 오른쪽이 TB2. 한 방향으로 벌어지는 사다리꼴. 기준각 12°.</summary>
+        Right,
 
         /// <summary>중앙부 토출 — 좌우 대칭 사다리꼴. 기준각 20°, 절곡부 여유폭 TL4 적용.</summary>
         Center,

@@ -18,8 +18,37 @@ public static class ValveRoomPipingTemplateCatalog
         // K-water 표준도 공기밸브실(2.0×2.0, D1500~1600, 2026-10-28). 중앙 수직 공기밸브는 프리셋 범위 밖 — 수직분기(docs/301)로 직접 넣음.
         // 외곽에 본관 관통 Void가 있으면 이 직관 대신 ForMainPipeVoid를 씀(2026-10-29). 이건 Void 없을 때 폴백.
         Straight(AirValveRoom),
-        // 표준도 없음 — 2026-10-08 임의 샘플(우회 루프) 삭제, 도면 받을 때까지 직관만(2026-10-28 사용자 결정).
-        Straight("타이밸브실"),
+        // 타이밸브실(2026-11-09 사용자 지정). IN 2개·OUT 2개, 위·아래 두 본관을 가운데 연결관으로 이은 H(I자 눕힘) 모양.
+        // 위·아래 본관은 연결관 T 절점(x 0.5)에서 두 선으로 나눔 — 같은 좌표 끝점이 한 절점으로 붙어 T가 됨.
+        // 바이패스 세트 3개(위·아래 본관, 연결관), 세트마다 밸브부관 사이에 버터플라이밸브 2개.
+        // 위·아래 = T 절점 중심 세트(T에 붙은 본관 선 끝 t 1, docs/273 § C) + T 양쪽 밸브 1개씩.
+        //   밸브는 T 가까이(t 0.9 / 0.1) 둠 — 세트 안 밸브는 T 커넥터부터 붙여 배치됨(docs/297 § G), 세트 반폭 밖이면 안 잡힘.
+        // 연결관 = 중앙 세트(t 0.5) + 그 안 밸브 2개(t 0.45 / 0.55, 각 A 쪽으로 붙음).
+        // 바이패스 쪽: 위 본관 +1(위, 바깥), 아래 본관 -1(아래, 바깥), 연결관 +1(진행 방향 왼쪽 = 도면 왼쪽).
+        // TODO: 외곽이 이토밸브실 형상이라 중간벽이 있음. 연결관 x 0.5가 중간벽과 겹치면 캔버스에서 손으로 옮김
+        new("타이밸브실", "타이밸브실(IN 2·OUT 2, 버터플라이+바이패스)",
+            Ports:
+            [
+                new(PortFlow.In, OutlineSide.Left, 0.75, "IN"),
+                new(PortFlow.In, OutlineSide.Left, 0.25, "IN2"),
+                new(PortFlow.Out, OutlineSide.Right, 0.75, "OUT"),
+                new(PortFlow.Out, OutlineSide.Right, 0.25, "OUT2"),
+            ],
+            Segments:
+            [
+                new(TemplatePoint.Port("IN"), TemplatePoint.Relative(0.5, 0.75)),
+                new(TemplatePoint.Relative(0.5, 0.75), TemplatePoint.Port("OUT")),
+                new(TemplatePoint.Port("IN2"), TemplatePoint.Relative(0.5, 0.25)),
+                new(TemplatePoint.Relative(0.5, 0.25), TemplatePoint.Port("OUT2")),
+                new(TemplatePoint.Relative(0.5, 0.25), TemplatePoint.Relative(0.5, 0.75)),
+            ],
+            Valves:
+            [
+                new(0, 0.9, ValveRole.Butterfly), new(1, 0.1, ValveRole.Butterfly),
+                new(2, 0.9, ValveRole.Butterfly), new(3, 0.1, ValveRole.Butterfly),
+                new(4, 0.45, ValveRole.Butterfly), new(4, 0.55, ValveRole.Butterfly),
+            ],
+            BypassSets: [new(0, 1.0, +1), new(2, 1.0, -1), new(4, 0.5, +1)]),
         // K-water 표준도 제수밸브실(7.0×5.0, D1600~1650, 2026-10-28). IN2는 표준도에 없어 뺌(사용자 결정).
         // y 0.55 = (W1 709 + W4 1247 + D/2 800)/5000. 본관 밸브(버터플라이) = 우회 분기 두 점 정중앙 x 0.443.
         // 부제수밸브 우회관 = 바이패스 세트(+1 = 진행 방향 왼쪽 = 도면 상단 W2 측). 분기 간격·우회 관경은 세트가 핸드북으로 정함.

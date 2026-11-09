@@ -5,7 +5,7 @@
         xmlns:controls="clr-namespace:DHBIMWATER.UI.Controls"
         xmlns:vm="clr-namespace:DHBIMWATER.UI.ViewModels.Documentation"
         xmlns:sys="clr-namespace:System;assembly=mscorlib"
-        Title="격점상세도" Width="1260" Height="850" MinWidth="1080" MinHeight="700"
+        Title="도면상세도" Width="1260" Height="850" MinWidth="1080" MinHeight="700"
         WindowStartupLocation="CenterOwner" Background="{DynamicResource MainBackgroundBrush}"
         WindowStyle="None" AllowsTransparency="False"
         FontFamily="Segoe UI, Malgun Gothic">

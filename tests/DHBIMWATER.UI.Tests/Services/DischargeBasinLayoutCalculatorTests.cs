@@ -21,10 +21,10 @@ public class DischargeBasinLayoutCalculatorTests
         OutletConduitType conduit = OutletConduitType.Culvert)
         => new(
             Position: position, Step: step, ConduitType: conduit,
-            TA: position == DischargeOutletPosition.LeftRight ? 9.4 : 9.7,
+            TA: position != DischargeOutletPosition.Center ? 9.4 : 9.7,
             Separation: 3, ON: 2, OB: 2000, OH: 2000, OD: 2000,
             D: 1500, N: 4, PumpHwl: 5, H3: 1200,
-            H7: position == DischargeOutletPosition.LeftRight ? 1000 : 2000,
+            H7: position != DischargeOutletPosition.Center ? 1000 : 2000,
             B8PlusT5: 5000);
 
     private static (DischargeBasinInputDto Input, DischargeBasinGeometryDto Geometry) Case(
@@ -41,7 +41,7 @@ public class DischargeBasinLayoutCalculatorTests
     [Fact]
     public void LeftRight_InnerOutline_IsTrapezoidWideningTowardOutlet()
     {
-        var (input, g) = Case(DischargeOutletPosition.LeftRight);
+        var (input, g) = Case(DischargeOutletPosition.Right);
 
         var outline = DischargeBasinLayoutCalculator.CalculateInnerOutline(input, g);
 
@@ -118,7 +118,7 @@ public class DischargeBasinLayoutCalculatorTests
     [Fact]
     public void LeftRight_CornerAngles_MatchExcelTheta1AndTheta2()
     {
-        var (input, g) = Case(DischargeOutletPosition.LeftRight);
+        var (input, g) = Case(DischargeOutletPosition.Right);
         var outline = DischargeBasinLayoutCalculator.CalculateInnerOutline(input, g);
 
         var atTb1 = DischargeBasinLayoutCalculator.InteriorAngle(outline, 3) / 2 * 180 / Math.PI;
@@ -137,7 +137,7 @@ public class DischargeBasinLayoutCalculatorTests
     [Fact]
     public void Levels_UseBasinFloorAndRoofElevations()
     {
-        var (_, g) = Case(DischargeOutletPosition.LeftRight);
+        var (_, g) = Case(DischargeOutletPosition.Right);
 
         var levels = DischargeBasinLayoutCalculator.CalculateLevels(g);
 
@@ -153,7 +153,7 @@ public class DischargeBasinLayoutCalculatorTests
     [Fact]
     public void Slabs_BaseIsThickerAndProjectsBeyondWall()
     {
-        var (input, g) = Case(DischargeOutletPosition.LeftRight);
+        var (input, g) = Case(DischargeOutletPosition.Right);
 
         var slabs = DischargeBasinLayoutCalculator.CalculateSlabs(input, g);
 
@@ -179,7 +179,7 @@ public class DischargeBasinLayoutCalculatorTests
     [Fact]
     public void Walls_OnePerEdgeWithRoofClearance()
     {
-        var (input, g) = Case(DischargeOutletPosition.LeftRight);
+        var (input, g) = Case(DischargeOutletPosition.Right);
 
         var walls = DischargeBasinLayoutCalculator.CalculateWalls(input, g);
 
@@ -212,7 +212,7 @@ public class DischargeBasinLayoutCalculatorTests
     [Fact]
     public void Walls_RightAngleCorner_TilesWithoutGapOrOverlap()
     {
-        var (input, g) = Case(DischargeOutletPosition.LeftRight);
+        var (input, g) = Case(DischargeOutletPosition.Right);
         var half = g.TT1 / 2;
         var placement = DischargeBasinPlacement.For(input, g);
 
@@ -241,7 +241,7 @@ public class DischargeBasinLayoutCalculatorTests
     [Fact]
     public void Openings_OnePerPumpWithOneAccessOpening()
     {
-        var (input, g) = Case(DischargeOutletPosition.LeftRight);
+        var (input, g) = Case(DischargeOutletPosition.Right);
 
         var openings = DischargeBasinLayoutCalculator.CalculateSlabOpenings(input, g);
 
@@ -270,7 +270,7 @@ public class DischargeBasinLayoutCalculatorTests
     [Fact]
     public void PumpCenters_SpanMatchesTotalInnerLength()
     {
-        var (input, g) = Case(DischargeOutletPosition.LeftRight);
+        var (input, g) = Case(DischargeOutletPosition.Right);
 
         var first = DischargeBasinLayoutCalculator.PumpCenterX(input, g, 0);
         var last = DischargeBasinLayoutCalculator.PumpCenterX(input, g, input.N - 1);
@@ -288,7 +288,7 @@ public class DischargeBasinLayoutCalculatorTests
     [Fact]
     public void Frame_IsAbsentByDefault_SoNoColumnsOrGirders()
     {
-        var (input, g) = Case(DischargeOutletPosition.LeftRight);
+        var (input, g) = Case(DischargeOutletPosition.Right);
 
         Assert.Null(input.Frame);
         Assert.Empty(DischargeBasinLayoutCalculator.CalculateColumns(input, g));
@@ -299,7 +299,7 @@ public class DischargeBasinLayoutCalculatorTests
     [Fact]
     public void Frame_WhenSupplied_PutsColumnsBetweenPumpsOnTheColumnLine()
     {
-        var (baseInput, g) = Case(DischargeOutletPosition.LeftRight);
+        var (baseInput, g) = Case(DischargeOutletPosition.Right);
         var input = baseInput with { Frame = new DischargeBasinFrameSpec(3800, "기둥류 : 기둥 A") };
 
         var columns = DischargeBasinLayoutCalculator.CalculateColumns(input, g);
@@ -326,7 +326,7 @@ public class DischargeBasinLayoutCalculatorTests
     [Fact]
     public void Frame_WhenSupplied_GirderSpansInnerLengthUnderRoof()
     {
-        var (baseInput, g) = Case(DischargeOutletPosition.LeftRight);
+        var (baseInput, g) = Case(DischargeOutletPosition.Right);
         var input = baseInput with { Frame = new DischargeBasinFrameSpec(3800, "기둥류 : 기둥 A") };
 
         var girder = Assert.Single(DischargeBasinLayoutCalculator.CalculateGirders(input, g));
@@ -345,7 +345,7 @@ public class DischargeBasinLayoutCalculatorTests
     [Fact]
     public void Frame_WithoutGirder_KeepsColumnsButDropsGirder()
     {
-        var (baseInput, g) = Case(DischargeOutletPosition.LeftRight);
+        var (baseInput, g) = Case(DischargeOutletPosition.Right);
         var input = baseInput with { Frame = new DischargeBasinFrameSpec(3800, "기둥류 : 기둥 A", CreateGirder: false) };
 
         var columns = DischargeBasinLayoutCalculator.CalculateColumns(input, g);
@@ -404,11 +404,73 @@ public class DischargeBasinLayoutCalculatorTests
         Assert.Equal(g.TH3, opening.OffsetZ, Precision);
     }
 
+    // ── 좌측 토출 미러(docs/320 § A) ─────────────────────────────
+
+    [Fact]
+    public void Left_GeometryMatchesRight()
+    {
+        var (_, right) = PlacedCase(DischargeOutletPosition.Right);
+        var (_, left) = PlacedCase(DischargeOutletPosition.Left);
+        Assert.Equal(right.TB2, left.TB2, Precision);
+        Assert.Equal(right.TLT, left.TLT, Precision);
+        Assert.Equal(right.TT5, left.TT5);
+    }
+
+    [Fact]
+    public void Left_OutlineStaysCounterClockwiseWithWideEndAtLowY()
+    {
+        var (input, g) = PlacedCase(DischargeOutletPosition.Left);
+        var outline = DischargeBasinLayoutCalculator.CalculateProjectOutline(input, g);
+
+        var area = 0.0;
+        for (var i = 0; i < outline.Count; i++)
+        {
+            var a = outline[i];
+            var b = outline[(i + 1) % outline.Count];
+            area += a.X * b.Y - b.X * a.Y;
+        }
+        Assert.True(area > 0);
+
+        // 가장 먼 +X 점 = TB2 단부 → 낮은 Y(OriginY)
+        var placement = DischargeBasinPlacement.For(input, g);
+        var far = outline.OrderByDescending(p => p.X).First();
+        Assert.Equal(placement.OriginX + g.TB2, far.X, Precision);
+        Assert.Equal(placement.OriginY, far.Y, Precision);
+    }
+
+    [Fact]
+    public void Left_PumpOpeningsAlignWithRightPositions()
+    {
+        var (rightInput, rightGeometry) = PlacedCase(DischargeOutletPosition.Right);
+        var (leftInput, leftGeometry) = PlacedCase(DischargeOutletPosition.Left);
+        var right = DischargeBasinLayoutCalculator.CalculateWallOpenings(rightInput, rightGeometry).Select(o => o.Position.Y).OrderBy(y => y).ToList();
+        var left = DischargeBasinLayoutCalculator.CalculateWallOpenings(leftInput, leftGeometry).Select(o => o.Position.Y).OrderBy(y => y).ToList();
+        Assert.Equal(right.Count, left.Count);
+        for (var i = 0; i < right.Count; i++)
+            Assert.Equal(right[i], left[i], Precision);
+    }
+
+    [Fact]
+    public void Left_EntryOpeningSitsAtTb1EndWall()
+    {
+        var (input, g) = PlacedCase(DischargeOutletPosition.Left);
+        var placement = DischargeBasinPlacement.For(input, g);
+        var entry = DischargeBasinLayoutCalculator.CalculateSlabOpenings(input, g)[0];
+        Assert.Equal(placement.OriginY + g.TLT - g.TOL2 / 2, entry.Position.Y, Precision);
+    }
+
+    [Fact]
+    public void Center_IsNotMirrored()
+    {
+        var (input, g) = PlacedCase(DischargeOutletPosition.Center);
+        Assert.Null(DischargeBasinPlacement.For(input, g).MirrorLength);
+    }
+
     // ── 펌프장 기준 배치 ──────────────────────────────────────────
 
     /// <summary>펌프장 우측 예시 — 전체길이 30,000 / 1번 펌프 중심 Y 2,500 / 이격 3 m.</summary>
     private static (DischargeBasinInputDto Input, DischargeBasinGeometryDto Geometry) PlacedCase(
-        DischargeOutletPosition position = DischargeOutletPosition.LeftRight)
+        DischargeOutletPosition position = DischargeOutletPosition.Right)
     {
         var input = Input(position) with { StationRightEdgeX = 30000, FirstPumpCenterY = 2500 };
         var overrides = position == DischargeOutletPosition.Center ? ExcelUnselectedConduit : null;
@@ -455,7 +517,7 @@ public class DischargeBasinLayoutCalculatorTests
     /// 반시계가 깨지면 바깥 오프셋이 안쪽으로 파고들어 슬래브·벽체가 통째로 뒤집힌다.
     /// </summary>
     [Theory]
-    [InlineData(DischargeOutletPosition.LeftRight)]
+    [InlineData(DischargeOutletPosition.Right)]
     [InlineData(DischargeOutletPosition.Center)]
     public void Placement_KeepsOutlineCounterClockwiseAndWideEndTowardPlusY(DischargeOutletPosition position)
     {
@@ -525,10 +587,10 @@ public class DischargeBasinLayoutCalculatorTests
     [Fact]
     public void Step_IsNotBuildableYet()
     {
-        Assert.Null(Reason(DischargeOutletPosition.LeftRight));
+        Assert.Null(Reason(DischargeOutletPosition.Right));
         Assert.Null(Reason(DischargeOutletPosition.Center));
 
-        Assert.Contains("단차", Reason(DischargeOutletPosition.LeftRight, DischargeStepType.Applied)!);
+        Assert.Contains("단차", Reason(DischargeOutletPosition.Right, DischargeStepType.Applied)!);
         Assert.Contains("단차", Reason(DischargeOutletPosition.Center, DischargeStepType.Applied)!);
 
         static string? Reason(DischargeOutletPosition position, DischargeStepType step = DischargeStepType.None)
@@ -545,7 +607,7 @@ public class DischargeBasinLayoutCalculatorTests
     [Fact]
     public void Step_RaisedWidthPlusWallExceedsNarrowEnd()
     {
-        var input = Input(DischargeOutletPosition.LeftRight, DischargeStepType.Applied);
+        var input = Input(DischargeOutletPosition.Right, DischargeStepType.Applied);
         var g = DischargeBasinGeometryCalculator.Calculate(input);
 
         Assert.Equal(3700, g.TB6!.Value, Precision);

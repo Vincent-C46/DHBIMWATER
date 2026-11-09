@@ -145,7 +145,7 @@ namespace DHBIMWATER.Application.Services
             double? theta2Deg = null, tb5 = null, tt5 = null;
             double? tl3 = null, tl4 = null, tl5 = null, tl6 = null, tl7 = null, tl8 = null;
 
-            if (input.Position == DischargeOutletPosition.LeftRight)
+            if (input.Position != DischargeOutletPosition.Center)
             {
                 // ── [2-L] 좌우측 토출 ──
                 tb2 = V("TB2", RoundUp((tb1 + tlt * Math.Tan(Deg2Rad(LeftRightBaseAngleDeg))) / 100.0) * 100);
@@ -208,7 +208,7 @@ namespace DHBIMWATER.Application.Services
             {
                 // ⚠ 좌우측 -100 / 중앙부 -200 으로 파일마다 다르다. 엑셀 원본 그대로.
                 //   → docs/164_토출조_확인필요사항.md A-4 참조
-                var delta = input.Position == DischargeOutletPosition.LeftRight ? 100 : 200;
+                var delta = input.Position != DischargeOutletPosition.Center ? 100 : 200;
                 tb6 = V("TB6", tb1 - delta);
             }
 

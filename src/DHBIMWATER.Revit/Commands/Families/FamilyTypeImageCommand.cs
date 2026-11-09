@@ -1,8 +1,8 @@
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
-using DidasUsage;
 using DHBIMWATER.Revit.DependencyInjection;
+using DHBIMWATER.Revit.UI;
 using DHBIMWATER.UI.Views.Utilities;
 
 namespace DHBIMWATER.Revit.Commands.Families;
@@ -17,7 +17,8 @@ public class FamilyTypeImageCommand : CommandBase
     protected override Result ExecuteInternal(ExternalCommandData commandData, ref string message, ElementSet elements)
     {
         // 리본 버튼은 RibbonBuilder가 사용자 확인 실패 시 비활성화한다. 외부 도구 항목은 그 경로를 안 거치므로 여기서 같은 확인.
-        if (!DidasUsageTracker.TryGetUserInfo(out _, out _))
+        // 확인 여부 = DidasAgentGate.RequireDidasAgent 스위치
+        if (!DidasAgentGate.IsUserAllowed())
         {
             TaskDialog.Show("유형 이미지 일괄 지정", "사용자 확인에 실패해 실행할 수 없습니다.");
             return Result.Cancelled;

@@ -8,8 +8,8 @@ public static class JunctionDetailParameters
     public const double StepMm = 400;
     // 창 미리보기 캔버스 축척. 시트 축척과 무관하게 고정
     public const int ViewScale = 50;
-    // 시트에 놓는 평면·3D 뷰 기본 축척(A1 도곽 기준). 창에서 바꿀 수 있음
-    public const int SheetScale = 25;
+    // 시트에 놓는 평면·3D 뷰 기본 축척(A1 도곽 기준). 1:30은 Revit 기본 목록에 없어 창에서 "사용자" 30으로 뜸(2026-11-09). 창에서 바꿀 수 있음
+    public const int SheetScale = 30;
     // 새 시트 기본 도곽 = 이름에 이 단어 든 제목 블록
     public const string DefaultTitleBlockKeyword = "A1";
 

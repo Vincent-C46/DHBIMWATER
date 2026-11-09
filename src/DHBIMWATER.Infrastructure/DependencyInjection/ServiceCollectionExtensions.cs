@@ -59,6 +59,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IAirValveVoidCommandRepo, RevitAirValveVoidCommandRepo>();
         services.AddTransient<IDrainPitVoidCommandRepo, RevitDrainPitVoidCommandRepo>();
         services.AddTransient<IElementParameterCommandRepo, RevitElementParameterCommandRepo>();
+        services.AddTransient<IStructureModelRepo, RevitStructureModelRepo>();
         services.AddTransient<IProjectInformationQueryRepo, RevitProjectInformationQueryRepo>();
         services.AddTransient<IProjectInformationCommandRepo, RevitProjectInformationCommandRepo>();
         services.AddTransient<IOpeningCommandRepo, RevitOpeningCommandRepo>();
@@ -130,6 +131,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IAirValveVoidCommandRepo, MockAirValveVoidCommandRepo>();
         services.AddTransient<IDrainPitVoidCommandRepo, MockDrainPitVoidCommandRepo>();
         services.AddTransient<IElementParameterCommandRepo, MockElementParameterCommandRepo>();
+        services.AddTransient<IStructureModelRepo, MockStructureModelRepo>();
         services.AddTransient<IProjectInformationQueryRepo, MockProjectInformationQueryRepo>();
         services.AddTransient<IProjectInformationCommandRepo, MockProjectInformationCommandRepo>();
         services.AddTransient<IOpeningCommandRepo, MockOpeningCommandRepo>();

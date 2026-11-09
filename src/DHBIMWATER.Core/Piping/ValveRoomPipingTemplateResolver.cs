@@ -41,7 +41,7 @@ public static class ValveRoomPipingTemplateResolver
         foreach (var v in template.Valves)
         {
             var seg = SegmentAt(v.SegmentIndex);
-            fittings.Add(new ResolvedFitting(seg.Start, seg.End, v.T, false, 0));
+            fittings.Add(new ResolvedFitting(seg.Start, seg.End, v.T, false, 0, v.Role));
         }
         foreach (var b in template.BypassSets ?? [])
         {

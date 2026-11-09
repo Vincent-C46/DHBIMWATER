@@ -62,9 +62,6 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
 
         public string CodeLabel => string.IsNullOrEmpty(Code) ? string.Empty : Code + ":";
 
-        /// <summary>산식근거에 확인 필요 표시(⚠)가 붙은 항목인지.</summary>
-        public bool NeedsReview => Basis.Contains('⚠');
-
         /// <summary>사용자가 이 칸을 직접 고쳤을 때 발생한다.</summary>
         public event Action<DischargeBasinValueRow>? UserEdited;
 

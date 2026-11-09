@@ -54,7 +54,7 @@ public class DischargeBasinGeometryCalculatorTests
             B8PlusT5: b8PlusT5);
 
     private static DischargeBasinInputDto LeftRight(DischargeStepType step = DischargeStepType.None)
-        => Input(DischargeOutletPosition.LeftRight, step, ta: 9.4, h7: 1000);
+        => Input(DischargeOutletPosition.Right, step, ta: 9.4, h7: 1000);
 
     private static DischargeBasinInputDto Center(DischargeStepType step = DischargeStepType.None)
         => Input(DischargeOutletPosition.Center, step, ta: 9.7, h7: 2000);
@@ -257,7 +257,7 @@ public class DischargeBasinGeometryCalculatorTests
     [InlineData(1651, 600)]
     public void Th3_SwitchesOnPumpDiameter(double d, double expected)
     {
-        var input = Input(DischargeOutletPosition.LeftRight, DischargeStepType.None,
+        var input = Input(DischargeOutletPosition.Right, DischargeStepType.None,
                           ta: 9.4, h7: 1000, d: d);
 
         var g = DischargeBasinGeometryCalculator.Calculate(input);
@@ -268,7 +268,7 @@ public class DischargeBasinGeometryCalculatorTests
     [Fact]
     public void Culvert_SetsOtAndClearsO1()
     {
-        var input = Input(DischargeOutletPosition.LeftRight, DischargeStepType.None,
+        var input = Input(DischargeOutletPosition.Right, DischargeStepType.None,
                           ta: 9.4, h7: 1000, conduit: OutletConduitType.Culvert);
 
         var g = DischargeBasinGeometryCalculator.Calculate(input);
@@ -280,7 +280,7 @@ public class DischargeBasinGeometryCalculatorTests
     [Fact]
     public void Pipe_SingleRun_ClearsBothSpacings()
     {
-        var input = Input(DischargeOutletPosition.LeftRight, DischargeStepType.None,
+        var input = Input(DischargeOutletPosition.Right, DischargeStepType.None,
                           ta: 9.4, h7: 1000, conduit: OutletConduitType.Pipe, on: 1);
 
         var g = DischargeBasinGeometryCalculator.Calculate(input);
@@ -292,7 +292,7 @@ public class DischargeBasinGeometryCalculatorTests
     [Fact]
     public void Pipe_MultipleRuns_SetsO1()
     {
-        var input = Input(DischargeOutletPosition.LeftRight, DischargeStepType.None,
+        var input = Input(DischargeOutletPosition.Right, DischargeStepType.None,
                           ta: 9.4, h7: 1000, conduit: OutletConduitType.Pipe, on: 2);
 
         var g = DischargeBasinGeometryCalculator.Calculate(input);

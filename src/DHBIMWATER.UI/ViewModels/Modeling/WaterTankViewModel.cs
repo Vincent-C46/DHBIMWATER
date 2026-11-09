@@ -77,7 +77,8 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         public ICommand CreateWTankCommand { get; }
         public ICommand ExportSettingCommand { get; }
         public ICommand ImportSettingCommand { get; }
-        public Action? CloseAction { get; set; }
+        /// <summary>모델리스 창의 생성 실행 위임. 명령이 ExternalEvent로 연결. null이면 직접 실행(docs/320 § B).</summary>
+        public Action<Action>? RunInRevitContext { get; set; }
 
         // 설계조건
         public double Q
@@ -329,8 +330,9 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         private void CreateWaterTank(object? obj)
         {
             var requestDto = BuildCreationRequestDto();
-            _createReservoirUseCase.Execute(requestDto);
-            CloseAction?.Invoke();
+            // 모델리스 창: 생성은 API 컨텍스트에서 실행. 생성 후 창 유지(docs/320 § B)
+            if (RunInRevitContext is { } run) run(() => _createReservoirUseCase.Execute(requestDto));
+            else _createReservoirUseCase.Execute(requestDto);
         }
         private ReservoirCreationRequestDto BuildCreationRequestDto()
         {

@@ -6,7 +6,9 @@ namespace DHBIMWATER.Core.Piping;
 public sealed record ResolvedSegment(Point2D Start, Point2D End, double DiameterMm);
 
 /// <summary>해석된 인라인 부속 1개. 소속 선은 양 끝 좌표로 가리킨다 — 선분할·병합에도 VM이 위치로 다시 찾는다.</summary>
-public sealed record ResolvedFitting(Point2D SegmentStart, Point2D SegmentEnd, double T, bool IsBypassSet, int Side);
+/// <param name="Role">밸브 역할. VM이 패밀리 고를 때 씀(Butterfly = 버터플라이 패밀리). 바이패스 세트는 Other.</param>
+public sealed record ResolvedFitting(Point2D SegmentStart, Point2D SegmentEnd, double T, bool IsBypassSet, int Side,
+    ValveRole Role = ValveRole.Other);
 
 /// <summary>외곽·관경을 넣어 풀어낸 프리셋. VM은 이것을 그대로 그래프에 옮긴다(docs/172 § B-2).</summary>
 public sealed record ResolvedPipingTemplate(IReadOnlyList<PipePort> Ports, IReadOnlyList<ResolvedSegment> Segments,

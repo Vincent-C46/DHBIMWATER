@@ -11,13 +11,34 @@
         d:DataContext="{d:DesignInstance vm:PumpingStationViewModel, IsDesignTimeCreatable=False}"
         
         Title="DHBIMWATER - PumpingStation Builder"
-        SizeToContent="Height" Width="1300" MinWidth="900" MaxWidth="1900" MinHeight="300"
+        SizeToContent="Height" MaxWidth="1900"
         MaxHeight="1000"
         WindowStartupLocation="CenterScreen"
         Background="#F4F7F9" 
         AllowsTransparency="False" 
         WindowStyle="None"
         FontFamily="Segoe UI, Malgun Gothic">
+
+    <!-- 토출조 모드는 입력·도해·안내 3열이라 최소 높이 다름. 폭은 도해 접기와 얽혀 코드비하인드 담당(docs/321). -->
+    <Window.Style>
+        <Style TargetType="Window">
+            <Setter Property="MinHeight" Value="300"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsBasinMode}" Value="True">
+                    <Setter Property="MinHeight" Value="620"/>
+                </DataTrigger>
+                <!-- 도해 접으면 창도 축소. 뒤 트리거가 이겨서 DataTrigger 뒤에 둠(docs/321). -->
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsBasinMode}" Value="True"/>
+                        <Condition Binding="{Binding DischargeBasin.IsDiagramExpanded}" Value="False"/>
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="Width" Value="900"/>
+                    <Setter Property="MinWidth" Value="900"/>
+                </MultiDataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Style>
 
     <Window.Resources>
         <ResourceDictionary>

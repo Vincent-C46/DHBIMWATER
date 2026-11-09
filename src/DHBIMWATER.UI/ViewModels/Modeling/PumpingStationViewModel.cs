@@ -948,6 +948,9 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         public ICommand CreatePumpingStationCommand { get; }
         public ICommand ImportExcelCommand { get; }
         public Action? CloseAction { get; set; }
+
+        /// <summary>모델리스 창의 생성 실행 위임. 명령이 ExternalEvent로 연결. null이면 직접 실행(docs/320 § B).</summary>
+        public Action<Action>? RunInRevitContext { get; set; }
         #endregion
 
         #region 모드 전환 (펌프장 / 토출조)
@@ -1082,7 +1085,14 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         }
         private void CreatePumpingStation(object? obj)
         {
-            designConditionDto = new PumpDesignConditionDto(SelectedPumpingStationType, SelectedEntranceType, D, HD, H2, N, LWL, HWL, SupportBlockWidth, SupportBlockHeight);
+            // 모델리스 창: 콘크리트 읽기부터 생성까지 API 컨텍스트에서 실행(docs/320 § B)
+            if (RunInRevitContext is { } run) run(CreatePumpingStationCore);
+            else CreatePumpingStationCore();
+        }
+
+        private void CreatePumpingStationCore()
+        {
+            designConditionDto =new PumpDesignConditionDto(SelectedPumpingStationType, SelectedEntranceType, D, HD, H2, N, LWL, HWL, SupportBlockWidth, SupportBlockHeight);
             profileSpecDto = new PumpProfileSpecDto(B1, B3, B4, B6, B7, H1, H5, H6, SelectedTheta, L1, L2, L3, L4, H3, H4, H7, OB1, OH1, HB1, HH1, NS, HS, NS1, HS1, T1, T2, T3, T4, T5Prime, GB1, GH1, B2, IsRectangularOpening, B5);
             planSpecDto = new PumpPlanSpecDto(B8, B9, L5, B10, T5, T6);
             //typeSelectionDto = new PumpTypeSelectionDto(T1, T2, T3, T4, T5, T6, GB1, GH1);
@@ -1095,7 +1105,7 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
             _ = _usageLogger.LogAsync();
             _createPumpingStationUseCase.Execute(creationRequestDto);
             // 작성 후 창을 닫지 않는다 — 토출조 생성 버튼과 동일하게 창을 유지한다(사용자 요청, 2026-09-15).
-            // 창은 Owner=Revit 메인창인 모달(ShowDialog)이라 닫지 않아도 Revit 위에 그대로 남는다. 닫기는 TitleBar의 닫기 버튼.
+            // 창은 Owner=Revit 메인창인 모델리스라 닫지 않아도 Revit 위에 그대로 남는다. 닫기는 TitleBar의 닫기 버튼.
         }
         // 프로퍼티 업데이트
         // 생성시 초기화 메서드

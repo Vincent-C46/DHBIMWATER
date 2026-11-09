@@ -75,6 +75,45 @@ public sealed class PipeLayoutPipeKindTests
         Assert.Equal(PipeKindCatalog.Water1, vm.PipeKindLabel);
     }
 
+    [Fact]
+    public void 콤보_바인딩_강관_토글후_빈칸_아님_PROBE()
+    {
+        string? kind = null, steel = null; Exception? err = null;
+        var t = new Thread(() =>
+        {
+            try
+            {
+                var vm = new PipeLayoutViewModel(new StubTypeRepo());
+                var kindCombo = new System.Windows.Controls.ComboBox { DataContext = vm };
+                kindCombo.SetBinding(System.Windows.Controls.ItemsControl.ItemsSourceProperty, new System.Windows.Data.Binding(nameof(vm.PipeKindLabels)) { Mode = System.Windows.Data.BindingMode.OneWay });
+                kindCombo.SetBinding(System.Windows.Controls.Primitives.Selector.SelectedItemProperty, new System.Windows.Data.Binding(nameof(vm.PipeKindLabel)) { Mode = System.Windows.Data.BindingMode.TwoWay });
+                var steelCombo = new System.Windows.Controls.ComboBox { DataContext = vm };
+                steelCombo.SetBinding(System.Windows.Controls.ItemsControl.ItemsSourceProperty, new System.Windows.Data.Binding(nameof(vm.SteelFittingClassLabels)) { Mode = System.Windows.Data.BindingMode.OneWay });
+                steelCombo.SetBinding(System.Windows.Controls.Primitives.Selector.SelectedItemProperty, new System.Windows.Data.Binding(nameof(vm.SteelFittingClassLabel)) { Mode = System.Windows.Data.BindingMode.TwoWay });
+                if (System.Windows.Application.Current == null) _ = new System.Windows.Application();
+                var view = new DHBIMWATER.UI.Views.Modeling.PipeLayoutView(vm);
+                view.WindowStartupLocation = System.Windows.WindowStartupLocation.Manual; view.Left = -20000; view.ShowInTaskbar = false; view.ShowActivated = false;
+                view.Show();
+                void Pump() => System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                Pump();
+                ((System.Windows.Controls.Expander)view.FindName("SectionPipe")).IsExpanded = true;
+                Pump();
+                vm.IsSteelSelected = true;
+                Pump();
+                var combos = new List<System.Windows.Controls.ComboBox>();
+                void Walk(object d) { if (d is System.Windows.Controls.ComboBox c) combos.Add(c); if (d is System.Windows.DependencyObject o) foreach (var ch in System.Windows.LogicalTreeHelper.GetChildren(o)) Walk(ch); }
+                Walk(view);
+                string Sel(string path) { var c = combos.FirstOrDefault(x => System.Windows.Data.BindingOperations.GetBinding(x, System.Windows.Controls.Primitives.Selector.SelectedItemProperty)?.Path.Path == path); return c is null ? "<nocombo>" : $"{c.SelectedItem ?? "<null>"}|text={c.Text}|items={c.Items.Count}"; }
+                kind = Sel(nameof(vm.PipeKindLabel));
+                view.Close(); steel = Sel(nameof(vm.SteelFittingClassLabel)) + " vm=" + vm.SteelFittingClassLabel + "/" + vm.PipeKindLabel;
+            }
+            catch (Exception ex) { err = ex; }
+        });
+        t.SetApartmentState(ApartmentState.STA); t.Start(); t.Join();
+        Assert.Null(err);
+        Assert.Equal("X", $"kind={kind} || steel={steel}".Replace(" ", "_"));
+    }
+
     private sealed class StubTypeRepo : IElementTypeQueryRepo
     {
         public IEnumerable<string> GetPipeAccessoryTypeNames() => [];
