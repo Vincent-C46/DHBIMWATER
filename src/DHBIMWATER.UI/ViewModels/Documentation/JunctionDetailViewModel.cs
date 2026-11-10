@@ -663,12 +663,12 @@ public sealed class JunctionDetailViewModel : ViewModelBase
             ResultText = string.Join(Environment.NewLine, ResultLines);
             StatusText = "완료";
             ReloadPreview();
-            _dialog?.Info("격점상세도", CompletionMessage(result));
+            _dialog?.Info("배관상세도", CompletionMessage(result));
         }
         catch (Exception ex)
         {
             ResultLines.Add("실행 실패: " + ex.Message); ResultText = ResultLines.Last(); StatusText = "실패";
-            _dialog?.Warn("격점상세도", "실행 실패: " + ex.Message);
+            _dialog?.Warn("배관상세도", "실행 실패: " + ex.Message);
         }
         finally { IsRunning = false; }
     }
@@ -676,7 +676,7 @@ public sealed class JunctionDetailViewModel : ViewModelBase
     /// <summary>완료 대화상자 본문. 항목별 새로 작성·갱신·그대로 개수 + 새로·갱신 시트 이름. 0인 항목은 뺌, 자세한 건 창 결과 목록.</summary>
     public static string CompletionMessage(JunctionDetailRunResult result)
     {
-        var lines = new List<string> { "도면상세도 작성을 마쳤습니다.", "" };
+        var lines = new List<string> { "배관상세도 작성을 마쳤습니다.", "" };
         static string Counts(int created, int updated, int unchanged, int skipped)
         {
             var parts = new List<string>();
@@ -700,7 +700,7 @@ public sealed class JunctionDetailViewModel : ViewModelBase
         }
         var warningCount = result.Warnings.Count + (result.Plan?.Warnings.Count ?? 0) + (result.Sheet?.Warnings.Count ?? 0)
             + (result.Backfill?.Warnings.Count ?? 0);
-        if (warningCount > 0) lines.AddRange(["", $"경고 {warningCount}건 — 도면상세도 창 결과 목록에서 확인하세요."]);
+        if (warningCount > 0) lines.AddRange(["", $"경고 {warningCount}건 — 배관상세도 창 결과 목록에서 확인하세요."]);
         return string.Join(Environment.NewLine, lines);
     }
 

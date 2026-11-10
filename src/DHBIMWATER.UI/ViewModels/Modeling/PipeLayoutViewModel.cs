@@ -2072,8 +2072,11 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             if (edge is null) continue;
             if (fitting.IsBypassSet)
             {
+                // 2개 세트 프리셋 = V2 = V1 패밀리, 단관 기본 300(docs/322). T 몸통·세트 안 밸브 폭 보정(docs/297 § G)이 2개 세트만 됨.
+                var bypassFamily = BypassValveFamilyName ?? string.Empty;
+                var second = fitting.TwoValves && bypassFamily.Length > 0 ? bypassFamily : null;
                 _network.AddInlineFitting(edge.Id, BypassSet.TypeKey, string.Empty, fitting.T, preservePosition: true,
-                    bypass: new BypassSetSpec(BypassValveFamilyName ?? string.Empty, 0, fitting.Side));
+                    bypass: new BypassSetSpec(bypassFamily, 0, fitting.Side, second, second is null ? 0 : BypassSet.DefaultSpoolLengthMm));
                 placedBypassSets++;
             }
             else

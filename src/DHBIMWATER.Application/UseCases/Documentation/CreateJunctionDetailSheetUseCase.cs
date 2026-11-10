@@ -12,7 +12,7 @@ public sealed class CreateJunctionDetailSheetUseCase
     public const string ThreeDPrefix = CreateJunctionDetailViewUseCase.NamePrefix + "_3D";
     // 3D 뷰를 위에서 내려다본 뷰(시트 좌하단)
     public const string ThreeDTopPrefix = CreateJunctionDetailViewUseCase.NamePrefix + "_3D평면";
-    public const string SheetNumberPrefix = "격점";
+    public const string SheetNumberPrefix = "배관상세도";
 
     private readonly ITransactionContext _transaction;
     private readonly IJunctionDetailRepo _junctions;
@@ -45,7 +45,7 @@ public sealed class CreateJunctionDetailSheetUseCase
         {
             try
             {
-                _transaction.Begin("격점상세도 시트 생성·갱신");
+                _transaction.Begin("배관상세도 시트 생성·갱신");
                 foreach (var group in groups)
                 {
                     var request = BuildRequest(group) with { TitleBlockId = titleBlockId, ViewScale = viewScale };
@@ -81,7 +81,7 @@ public sealed class CreateJunctionDetailSheetUseCase
     {
         if (string.IsNullOrWhiteSpace(group.JunctionId))
             return new JunctionDetailSheetRequest(group, $"{CreateJunctionDetailViewUseCase.NamePrefix} (미지정)",
-                $"{SheetNumberPrefix}_미지정", "격점상세도_미지정", CreatePipeMaterialDraftingUseCase.UnassignedName,
+                $"{SheetNumberPrefix}_미지정", "배관상세도_미지정", CreatePipeMaterialDraftingUseCase.UnassignedName,
                 $"{ThreeDPrefix}_미지정", ThreeDTopViewName: $"{ThreeDTopPrefix}_미지정");
         var id = group.JunctionId;
         return new JunctionDetailSheetRequest(group,

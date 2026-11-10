@@ -330,13 +330,15 @@ internal sealed partial class RevitPipeSegmentCommandRepo
     /// <para><paramref name="teeCentered"/>에 든 세트는 소속 엣지 쪽 A 하나만 예약한다 — 반대편 A는 그 엣지가 따로 받는다(docs/273 § C-3).</para></summary>
     private static List<(Guid Id, OccupiedSpan Span)> BypassSetSpans(
         Document document, FamilySymbolCache symbols, PipeEdgeDefinition edge, PipeNetworkDefinition network,
-        PipeSegmentFamilySelection families, SkipPlan skipPlan, XYZ startAnchor, XYZ direction,
+        PipeSegmentFamilySelection families, SkipPlan skipPlan, XYZ startAnchor, XYZ direction, double lengthMm,
         IDictionary<string, string> unusableValves, ICollection<PipeConnectionFailure> skipped,
         IDictionary<Guid, double> axisCenters, ISet<Guid> droppedFittings,
         IDictionary<Guid, BypassLayout> layouts, IDictionary<BypassLayoutKey, BypassLayout> cache, ICollection<string> warnings,
         IReadOnlyDictionary<Guid, TeeCenteredSet> teeCentered)
     {
         var axis = new EdgeAxis(startAnchor, direction);
+        // 캔버스 절점 중심 사이 길이(mm) — 레그 합 = 이 값 − 커넥터 사이 길이(최소 길이 사유 안내용)
+        var canvasLengthMm = edge.Start.DistanceTo(edge.End);
         // 구간마다 세트 Id를 단다 — 위치 오류면 세트 통째로 건너뛴다(docs/251 § B).
         var spans = new List<(Guid Id, OccupiedSpan Span)>();
         foreach (var fitting in network.InlineFittings.Where(x => x.EdgeId == edge.Id && x.IsBypassSet && !droppedFittings.Contains(x.Id)))
@@ -356,6 +358,16 @@ internal sealed partial class RevitPipeSegmentCommandRepo
                     // 사전 계획이 정한 중심 — 배치(PlaceBypassSet)도 이 값으로 A를 놓음.
                     axisCenters[fitting.Id] = teeSet.CenterMm;
                     spans.Add((fitting.Id, teeSet.OwnerSpan));
+                    continue;
+                }
+                // 최소 길이 판정(docs/322) — 세트 본관 점유가 배관보다 길면 이 세트만 건너뜀. 나머지 부재는 그대로 만듦.
+                var shortReason = BypassSet.EdgeTooShortReason(lengthMm,
+                    2 * (layout.TeeCenterOffsetMm + layout.TeeMainHalfMm), canvasLengthMm - lengthMm);
+                if (shortReason is not null)
+                {
+                    skipped.Add(CreateFailure(canvasPoint, BypassSet.TypeKey, valveFamily, 0, shortReason, network) with { FittingId = fitting.Id });
+                    droppedFittings.Add(fitting.Id);
+                    layouts.Remove(fitting.Id);
                     continue;
                 }
                 axisCenters[fitting.Id] = center;

@@ -3229,6 +3229,21 @@ public sealed class PipeLayoutViewModelTests
         var valves = vm.InlineFittings.Where(x => !x.IsBypassSet).ToList();
         Assert.Equal(6, valves.Count);
         Assert.All(valves, x => Assert.Equal("DH_버터플라이 밸브 : 300A", x.FamilyTypeName));
+        // docs/322: 세트 3개 = 밸브 2개 세트(V2 = V1, 단관 300)
+        Assert.All(vm.BypassSetItems, x => Assert.Contains("단관 300mm", x.BypassSummary));
+    }
+
+    // docs/322: 2개 세트는 타이밸브실만 — 제수밸브실 세트는 종전대로 밸브 1개
+    [Fact]
+    public void ApplyTemplate_SluiceRoom_BypassSetKeepsSingleValve()
+    {
+        var vm = CreateDrawingViewModel(["DH_게이트 밸브 : 300A"]);
+        vm.ApplyOutline(CreateOutline(4000, 3000));
+        vm.ValveRoomZone = "제수밸브실";
+
+        vm.ApplyTemplateCommand.Execute(null);
+
+        Assert.DoesNotContain("단관", Assert.Single(vm.BypassSetItems).BypassSummary);
     }
 
     [Fact]

@@ -22,9 +22,12 @@ public static class ValveRoomPipingTemplateCatalog
         // 위·아래 본관은 연결관 T 절점(x 0.5)에서 두 선으로 나눔 — 같은 좌표 끝점이 한 절점으로 붙어 T가 됨.
         // 바이패스 세트 3개(위·아래 본관, 연결관), 세트마다 밸브부관 사이에 버터플라이밸브 2개.
         // 위·아래 = T 절점 중심 세트(T에 붙은 본관 선 끝 t 1, docs/273 § C) + T 양쪽 밸브 1개씩.
-        //   밸브는 T 가까이(t 0.9 / 0.1) 둠 — 세트 안 밸브는 T 커넥터부터 붙여 배치됨(docs/297 § G), 세트 반폭 밖이면 안 잡힘.
+        //   밸브는 T에서 고정 300mm(TieValveOffsetMm) — 세트 안 밸브는 T 커넥터부터 붙여 배치됨(docs/297 § G).
+        //   Revit은 T에서 세트 반폭(최소 500mm, BypassSet.EstimatedHalfSpanMm) 안 밸브만 세트 안으로 봄 → 비율이면 큰 밸브실에서 빠짐.
         // 연결관 = 중앙 세트(t 0.5) + 그 안 밸브 2개(t 0.45 / 0.55, 각 A 쪽으로 붙음).
         // 바이패스 쪽: 위 본관 +1(위, 바깥), 아래 본관 -1(아래, 바깥), 연결관 +1(진행 방향 왼쪽 = 도면 왼쪽).
+        // 세트 3개 모두 바이패스 밸브 2개(V2 = V1, 단관 300, docs/322) — 1개 세트는 T 몸통 보정 안 돼 A가 T와 겹쳐 빠졌음.
+        // 연결관이 짧으면 Revit이 실측 최소 길이로 그 세트만 건너뜀(사유에 필요한 T–T 거리).
         // TODO: 외곽이 이토밸브실 형상이라 중간벽이 있음. 연결관 x 0.5가 중간벽과 겹치면 캔버스에서 손으로 옮김
         new("타이밸브실", "타이밸브실(IN 2·OUT 2, 버터플라이+바이패스)",
             Ports:
@@ -44,11 +47,11 @@ public static class ValveRoomPipingTemplateCatalog
             ],
             Valves:
             [
-                new(0, 0.9, ValveRole.Butterfly), new(1, 0.1, ValveRole.Butterfly),
-                new(2, 0.9, ValveRole.Butterfly), new(3, 0.1, ValveRole.Butterfly),
+                new(0, 0.9, ValveRole.Butterfly, OffsetMm: -TieValveOffsetMm), new(1, 0.1, ValveRole.Butterfly, OffsetMm: TieValveOffsetMm),
+                new(2, 0.9, ValveRole.Butterfly, OffsetMm: -TieValveOffsetMm), new(3, 0.1, ValveRole.Butterfly, OffsetMm: TieValveOffsetMm),
                 new(4, 0.45, ValveRole.Butterfly), new(4, 0.55, ValveRole.Butterfly),
             ],
-            BypassSets: [new(0, 1.0, +1), new(2, 1.0, -1), new(4, 0.5, +1)]),
+            BypassSets: [new(0, 1.0, +1, TwoValves: true), new(2, 1.0, -1, TwoValves: true), new(4, 0.5, +1, TwoValves: true)]),
         // K-water 표준도 제수밸브실(7.0×5.0, D1600~1650, 2026-10-28). IN2는 표준도에 없어 뺌(사용자 결정).
         // y 0.55 = (W1 709 + W4 1247 + D/2 800)/5000. 본관 밸브(버터플라이) = 우회 분기 두 점 정중앙 x 0.443.
         // 부제수밸브 우회관 = 바이패스 세트(+1 = 진행 방향 왼쪽 = 도면 상단 W2 측). 분기 간격·우회 관경은 세트가 핸드북으로 정함.
@@ -68,6 +71,9 @@ public static class ValveRoomPipingTemplateCatalog
     public static ValveRoomPipingTemplate? Default(string? zone)
         => string.IsNullOrWhiteSpace(zone) ? null
          : BuiltIn.FirstOrDefault(x => string.Equals(x.Zone, zone, StringComparison.Ordinal));
+
+    /// <summary>타이밸브실 T 양쪽 버터플라이밸브의 T 절점 거리(mm). 세트 반폭 최소 500 안쪽.</summary>
+    private const double TieValveOffsetMm = 300;
 
     /// <summary>공기밸브실 유형명. 추천 배치가 고정 프리셋 대신 Void 자리를 쓰는 유형이다(2026-10-29).</summary>
     public const string AirValveRoom = "공기밸브실";

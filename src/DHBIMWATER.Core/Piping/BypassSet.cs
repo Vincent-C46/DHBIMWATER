@@ -47,6 +47,20 @@ public static class BypassSet
     public static double EstimatedHalfSpanMm(double mainDiameterMm, double bypassDiameterMm)
         => Math.Max(500, mainDiameterMm * 0.9 + bypassDiameterMm);
 
+    /// <summary>세트가 놓일 배관이 짧을 때 건너뛰기 사유(docs/322). 짧지 않으면 null.
+    /// <paramref name="requiredMm"/> = 세트 본관 점유 길이(A 바깥 커넥터 사이 = 2·(A 중심 거리 + A 주관 반폭)).
+    /// <paramref name="edgeLengthMm"/> = 양 끝 절점 부속 커넥터 사이 배관 길이. <paramref name="nodeLegsMm"/> = 양 끝 절점 중심 → 커넥터 거리 합.
+    /// 사용자는 캔버스 절점 중심 거리로 고치므로 그 값(+ 레그)도 같이 알려 준다.</summary>
+    public static string? EdgeTooShortReason(double edgeLengthMm, double requiredMm, double nodeLegsMm, double toleranceMm = 1e-6)
+    {
+        if (edgeLengthMm + toleranceMm >= requiredMm) return null;
+        var legs = Math.Max(0, nodeLegsMm);
+        return FormattableString.Invariant(
+            $"배관이 짧아 바이패스 세트를 놓을 수 없습니다 — 세트 본관 {requiredMm:N0}mm 필요, 배관 {edgeLengthMm:N0}mm. ") +
+            FormattableString.Invariant(
+                $"양 끝 절점 중심 사이를 {requiredMm + legs:N0}mm 이상으로 늘리세요(현재 {edgeLengthMm + legs:N0}mm).");
+    }
+
     /// <summary>캔버스 개략 표시용 — 본관 중심선에서 바이패스 관 중심선까지(mm).</summary>
     public static double EstimatedOffsetMm(double mainDiameterMm, double bypassDiameterMm)
         => Math.Max(400, mainDiameterMm * 0.5 + bypassDiameterMm * 2);

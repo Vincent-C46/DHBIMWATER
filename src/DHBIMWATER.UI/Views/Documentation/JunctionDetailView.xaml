@@ -5,7 +5,7 @@
         xmlns:controls="clr-namespace:DHBIMWATER.UI.Controls"
         xmlns:vm="clr-namespace:DHBIMWATER.UI.ViewModels.Documentation"
         xmlns:sys="clr-namespace:System;assembly=mscorlib"
-        Title="도면상세도" Width="1260" Height="850" MinWidth="1080" MinHeight="700"
+        Title="배관상세도" Width="1260" Height="850" MinWidth="1080" MinHeight="700"
         WindowStartupLocation="CenterOwner" Background="{DynamicResource MainBackgroundBrush}"
         WindowStyle="None" AllowsTransparency="False"
         FontFamily="Segoe UI, Malgun Gothic">
@@ -222,7 +222,7 @@
                 </Border>
 
                 <TabControl Grid.Row="1" Style="{StaticResource PrimaryTabControlStyle}">
-                    <TabItem Header="격점 평면 상세도" Style="{StaticResource PrimaryTabItemStyle}">
+                    <TabItem Header="배관상세도" Style="{StaticResource PrimaryTabItemStyle}">
                         <Grid Background="{StaticResource WhiteBrush}">
                             <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                             <!-- 760×450 설계 좌표를 Viewbox가 창 크기에 맞춰 줄인다. 종전에는 창 높이보다 큰 좌표(y=370)를 그대로 써서 아래가 잘렸다. -->

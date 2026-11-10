@@ -24,7 +24,8 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
     private const double ViewGapMm = 20;
     // 배치 규칙 바꾸면 올림 → 이전 규칙으로 놓인 시트 한 번 다시 배치
     // area-v2(2026-11-09): 3D 우상단, 드래프팅 우하단, 3D 평면 좌하단 추가
-    private const string LayoutVersion = "area-v2";
+    // area-v3(2026-11-10): 자르기 영역 숨김, 3D 2개 음영(SD), 좌하단 중심 X = 좌상단 중심 X
+    private const string LayoutVersion = "area-v3";
     // 겹침 피해 밀어내기 최대 횟수
     private const int MaxShift = 10;
 
@@ -51,10 +52,12 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
         // 평면 축척은 평면 단계가 이미 바꿈 → 3D 축척 다르면 축척 바뀐 실행.
         // 드래프팅 축척은 도곽 크기로 정함 → 사용자가 도곽 바꿨으면 다시 맞추고 재배치
         // 배치 규칙 버전 다른 시트(이전 규칙 배치)도 전부 다시 배치
+        // 규칙 버전 다름 = 이전 규칙 시트 → 이미 있는 뷰의 표시(자르기 영역·음영)도 한 번 다시 맞춤
+        var layoutChanged = sheet is not null && JunctionDetailSheetStorageSchema.ReadLayoutVersion(sheet) != LayoutVersion;
         var scaleChanged = (threeD is not null && threeD.Scale != request.ViewScale)
             || (top is not null && top.Scale != request.ViewScale)
             || (sheet is not null && drafting is not null && drafting.Scale != DraftingScale(document, sheet))
-            || (sheet is not null && JunctionDetailSheetStorageSchema.ReadLayoutVersion(sheet) != LayoutVersion);
+            || layoutChanged;
         if (sheet is not null && threeD is not null && !Missing(threeD) && (plan is null || !Missing(plan))
             && (drafting is null || !Missing(drafting)) && (!wantsTop || !Missing(top)) && !scaleChanged)
         {
@@ -96,6 +99,10 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
                 return new JunctionDetailSheetChange(JunctionDetailSheetStatus.Unchanged, warnings);
             }
             ApplyViewportType(document, added, warnings);
+            // 새로 놓은 뷰 + 규칙 바뀐 시트의 뷰 전부: 자르기 영역 숨김, 3D는 음영. 이미 놓인 뷰는 사용자 설정 보존
+            foreach (var view in new View?[] { plan, threeD, top }.OfType<View>()
+                         .Where(v => layoutChanged || added.Any(x => x.ViewId == v.Id)))
+                ApplyDisplay(view, warnings);
             document.Regenerate();
             Arrange(document, sheet, plan, threeD, top, drafting, scaleChanged ? null : added, warnings);
             JunctionDetailSheetStorageSchema.WriteLayoutVersion(sheet, LayoutVersion);
@@ -207,7 +214,8 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
     {
         SetScale(view, scale);
         view.DetailLevel = ViewDetailLevel.Medium;
-        view.DisplayStyle = DisplayStyle.HLR;
+        // 음영(Revit 단축키 SD) — 재질 색 보이게(2026-11-10 사용자)
+        view.DisplayStyle = DisplayStyle.Shading;
         foreach (var category in new[] { BuiltInCategory.OST_Levels, BuiltInCategory.OST_SectionBox })
         {
             var id = new ElementId(category);
@@ -256,6 +264,18 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
         var eye = center + XYZ.BasisZ * (height + RevitUnitConverter.MmToFt(10000));
         view.SetOrientation(new ViewOrientation3D(eye, XYZ.BasisY, -XYZ.BasisZ));
         return view;
+    }
+
+    // 시트 배치 뷰 표시: 자르기 영역 숨김(자르기 자체는 유지), 3D = 음영(SD). 뷰 템플릿이 표시 유형 잡으면 경고만
+    private static void ApplyDisplay(View view, List<string> warnings)
+    {
+        var crop = view.get_Parameter(BuiltInParameter.VIEWER_CROP_REGION_VISIBLE);
+        if (crop is { IsReadOnly: false }) crop.Set(0);
+        else if (crop is not null) warnings.Add($"'{view.Name}': 자르기 영역 보이기를 끄지 못했습니다(뷰 템플릿 확인).");
+        if (view is not View3D) return;
+        var style = view.get_Parameter(BuiltInParameter.MODEL_GRAPHICS_STYLE);
+        if (style is { IsReadOnly: false }) view.DisplayStyle = DisplayStyle.Shading;
+        else warnings.Add($"'{view.Name}': 뷰 템플릿이 있어 음영(SD)으로 바꾸지 못했습니다.");
     }
 
     private static Viewport? Place(Document document, ViewSheet sheet, View? view, ISet<ElementId> placed,
@@ -318,10 +338,19 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
         var moving = new[] { planPort, threeDPort, topPort, draftingPort }.Where(IsNew).Select(x => x!.Id).ToHashSet();
         // 장애물 = 시트의 다른 뷰포트 전부(안 옮기는 것). 놓은 순서대로 추가
         var placed = ports.Where(x => !moving.Contains(x.Id)).Select(Box).ToList();
+        // 이번에 옮긴 뷰포트의 새 상자(Box는 SetBoxCenter 직후 Regenerate 전엔 옛 값일 수 있음)
+        var moved = new Dictionary<ElementId, Rect>();
 
         // 왼쪽 열 먼저 → 오른쪽 열이 겹침 경고로 공간 부족 알림
         if (IsNew(planPort)) Put(planPort!, left, areaTop - offset, alignTop: true);
-        if (IsNew(topPort)) Put(topPort!, left, bottom + offset, alignTop: false);
+        // 좌하단 = 좌상단 평면과 중심 X 같게(세로 중심선 정렬). 평면 없으면 왼쪽 정렬. 겹쳐도 안 밂 — 경고만
+        if (IsNew(topPort))
+        {
+            var planBox = planPort is null ? (Rect?)null : moved.TryGetValue(planPort.Id, out var r) ? r : Box(planPort);
+            var width = Box(topPort!).MaxX - Box(topPort!).MinX;
+            if (planBox is { } p) Put(topPort!, (p.MinX + p.MaxX) / 2 - width / 2, bottom + offset, alignTop: false, shift: false);
+            else Put(topPort!, left, bottom + offset, alignTop: false);
+        }
         if (IsNew(threeDPort)) PutRight(threeDPort!, areaTop - offset, alignTop: true);
         if (IsNew(draftingPort)) PutRight(draftingPort!, bottom + offset, alignTop: false);
 
@@ -342,6 +371,7 @@ internal sealed class RevitJunctionDetailSheetRepo : IJunctionDetailSheetRepo
                 target = target with { MinX = hit.MaxX + gap, MaxX = hit.MaxX + gap + w };
             port.SetBoxCenter(new XYZ((target.MinX + target.MaxX) / 2, (target.MinY + target.MaxY) / 2, 0));
             placed.Add(target);
+            moved[port.Id] = target;
             if (target.MinX < areaLeft - 1e-6 || target.MaxX > right + 1e-6 || target.MinY < bottom - 1e-6
                 || target.MaxY > areaTop + 1e-6 || placed.Take(placed.Count - 1).Any(o => o.Overlaps(target, 0)))
                 warnings.Add($"{sheet.Name}: '{document.GetElement(port.ViewId)?.Name}' 뷰가 배치 영역에 다 안 들어가거나 다른 뷰와 겹칩니다. 축척을 줄이거나 위치를 손으로 옮기세요.");

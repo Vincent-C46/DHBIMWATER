@@ -340,15 +340,15 @@ public sealed class JunctionDetailViewModelTests
     public void CompletionMessage_ListsCreatedUpdatedUnchanged_AndWarningCount()
     {
         var result = new JunctionDetailRunResult(null, null, null,
-            new JunctionDetailResult(["격점상세도_A"], ["격점상세도_B"], [], [], ["평면 경고"]), ["전체 경고"],
-            new JunctionDetailSheetResult(["격점상세도 (A)"], ["격점상세도 (B)"], ["격점상세도 (C)"], [], []));
+            new JunctionDetailResult(["배관상세도_A"], ["배관상세도_B"], [], [], ["평면 경고"]), ["전체 경고"],
+            new JunctionDetailSheetResult(["배관상세도 (A)"], ["배관상세도 (B)"], ["배관상세도 (C)"], [], []));
 
         var message = JunctionDetailViewModel.CompletionMessage(result);
 
         Assert.Contains("평면 상세도: 새로 작성 1 · 갱신 1", message);
         Assert.Contains("시트: 새로 작성 1 · 갱신 1 · 그대로 1", message);
-        Assert.Contains("새로 작성: 격점상세도 (A)", message);
-        Assert.Contains("갱신: 격점상세도 (B)", message);
+        Assert.Contains("새로 작성: 배관상세도 (A)", message);
+        Assert.Contains("갱신: 배관상세도 (B)", message);
         Assert.Contains("경고 2건", message);
         Assert.DoesNotContain("재료 일람표", message);
     }

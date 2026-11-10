@@ -25,11 +25,15 @@ public enum ValveRole { Sluice, Air, Mud, Check, Other, Butterfly }
 
 // TODO(docs/175): 이음관이 독립 부속이 되어 JointBefore/JointAfter 플래그는 쓰이지 않는다.
 //   카탈로그에 밸브가 들어올 때 TemplateFitting(TypeKey) 형태로 교체한다. 호출자가 없어 지금은 그대로 둔다.
-public sealed record TemplateValve(int SegmentIndex, double T, ValveRole Role, bool JointBefore = false, bool JointAfter = false);
+/// <param name="OffsetMm">null = <see cref="T"/> 비율 그대로. 값 있으면 T 무시하고 선 끝에서 고정 거리(mm):
+/// 양수 = 시작점에서, 음수 = 끝점에서. 외곽 크기 달라도 T 절점 옆 같은 자리에 놓을 때 씀(2026-11-10).</param>
+public sealed record TemplateValve(int SegmentIndex, double T, ValveRole Role, bool JointBefore = false, bool JointAfter = false,
+    double? OffsetMm = null);
 
 /// <summary>프리셋 바이패스 세트 1개(2026-10-08). 패밀리는 비워 두고 위치·방향만 정한다 — 유형은 사용자가 고른다.</summary>
 /// <param name="Side">+1 = 선 진행 방향(시작→끝)의 왼쪽, -1 = 오른쪽(<see cref="BypassSetSpec.Side"/>).</param>
-public sealed record TemplateBypassSet(int SegmentIndex, double T, int Side);
+/// <param name="TwoValves">true = 밸브 2개 세트(V2 = V1 패밀리, 단관 기본 300, docs/322). T 중심 세트의 T 몸통·세트 안 밸브 폭 보정은 2개 세트만 됨.</param>
+public sealed record TemplateBypassSet(int SegmentIndex, double T, int Side, bool TwoValves = false);
 
 /// <summary>밸브실 유형별 추천 배관 프리셋. 좌표는 전부 외곽 내측 경계상자에 대한 비율(0~1)이라
 /// 외곽 크기가 달라도 같은 모양이 나온다.</summary>

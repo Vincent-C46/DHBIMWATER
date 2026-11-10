@@ -18,7 +18,7 @@ namespace DHBIMWATER.Revit.UI.Modules
             PushButtonData valveRoomBtn = new PushButtonData("ValveRoomCommand", "밸브실\n모델링", Assembly.GetExecutingAssembly().Location, RevitCommandType<ValveRoomCommand>.FullName);
             PushButtonData pipeLayoutBtn = new PushButtonData("PipeLayoutCommand", "밸브실\n배관", Assembly.GetExecutingAssembly().Location, RevitCommandType<PipeLayoutCommand>.FullName);
 
-            PushButtonData junctionDetailBtn = new PushButtonData("JunctionDetailCommand", "도면상세도", Assembly.GetExecutingAssembly().Location, RevitCommandType<JunctionDetailCommand>.FullName)
+            PushButtonData junctionDetailBtn = new PushButtonData("JunctionDetailCommand", "배관상세도\n작성", Assembly.GetExecutingAssembly().Location, RevitCommandType<JunctionDetailCommand>.FullName)
             {
                 ToolTip = "격점별 배관재료표와 평면 상세도 작성 옵션을 설정하고 실행합니다.",
                 LongDescription = "작성 항목, 심볼 오프셋 간격과 축척, 번호 태그, 형상 이미지, 기존 도면 뷰 처리 방법을 설정합니다."
@@ -43,7 +43,7 @@ namespace DHBIMWATER.Revit.UI.Modules
             valveRoomBtn.LargeImage = RibbonButtonImages.GetIcon("valve.png");
             pipeLayoutBtn.LargeImage = RibbonButtonImages.GetIcon("pipe.png");
             junctionDetailBtn.LargeImage = RibbonButtonImages.GetIcon("valve_symbol.png");
-            pipeMaterialRefreshBtn.LargeImage = RibbonButtonImages.GetIcon("Quantity.png");
+            pipeMaterialRefreshBtn.LargeImage = RibbonButtonImages.GetIcon("cycle.png");
             coordinateLinkBtn.LargeImage = RibbonButtonImages.GetIcon("link.png");
             placementStationBtn.LargeImage = RibbonButtonImages.GetIcon("link.png");
 

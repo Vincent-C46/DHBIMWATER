@@ -27,6 +27,7 @@
 	  <None Remove="Resources\Icons\pipe_2.png" />
 	  <None Remove="Resources\Icons\pump.png" />
 	  <None Remove="Resources\Icons\Quantity.png" />
+	  <None Remove="Resources\Icons\cycle.png" />
 	  <None Remove="Resources\Icons\revit.png" />
 	  <None Remove="Resources\Icons\Sheet.png" />
 	  <None Remove="Resources\Icons\Trash.png" />
@@ -133,6 +134,7 @@
 	  <Resource Include="Resources\Icons\Quantity.png">
 	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 	  </Resource>
+	  <Resource Include="Resources\Icons\cycle.png" />
 	  <Resource Include="Resources\Icons\Sheet.png">
 	    <Generator>새 버전이면 복사</Generator>
 	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

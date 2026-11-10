@@ -276,9 +276,17 @@ public sealed class ValveRoomPipingTemplateResolverTests
         Assert.Equal(6, resolved.Fittings!.Count(f => !f.IsBypassSet && f.Role == ValveRole.Butterfly));
         var sets = resolved.Fittings!.Where(f => f.IsBypassSet).ToList();
         Assert.Equal(3, sets.Count);
+        Assert.All(sets, f => Assert.True(f.TwoValves));   // docs/322 — 밸브 2개 세트
         // 위·아래 세트 = T 절점 중심(본관 선 끝)
         Assert.Contains(sets, f => f.SegmentEnd == upperTee && f.T == 1.0 && f.Side == 1);
         Assert.Contains(sets, f => f.SegmentEnd == lowerTee && f.T == 1.0 && f.Side == -1);
+        // T 양쪽 밸브 = 외곽 크기 무관 T에서 300mm
+        foreach (var valve in resolved.Fittings!.Where(f => !f.IsBypassSet && !(f.SegmentStart == lowerTee && f.SegmentEnd == upperTee)))
+        {
+            var position = new Point2D(valve.SegmentStart.X + (valve.SegmentEnd.X - valve.SegmentStart.X) * valve.T,
+                valve.SegmentStart.Y + (valve.SegmentEnd.Y - valve.SegmentStart.Y) * valve.T);
+            Assert.Equal(300, Math.Min(position.DistanceTo(upperTee), position.DistanceTo(lowerTee)), 6);
+        }
     }
 
     // ── § B-3 카탈로그 무결성 ────────────────────────────────────────────────────

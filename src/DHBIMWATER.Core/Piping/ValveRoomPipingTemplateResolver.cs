@@ -41,14 +41,22 @@ public static class ValveRoomPipingTemplateResolver
         foreach (var v in template.Valves)
         {
             var seg = SegmentAt(v.SegmentIndex);
-            fittings.Add(new ResolvedFitting(seg.Start, seg.End, v.T, false, 0, v.Role));
+            fittings.Add(new ResolvedFitting(seg.Start, seg.End, ValveT(v, seg), false, 0, v.Role));
         }
         foreach (var b in template.BypassSets ?? [])
         {
             var seg = SegmentAt(b.SegmentIndex);
-            fittings.Add(new ResolvedFitting(seg.Start, seg.End, b.T, true, b.Side));
+            fittings.Add(new ResolvedFitting(seg.Start, seg.End, b.T, true, b.Side, TwoValves: b.TwoValves));
         }
         return new ResolvedPipingTemplate(ports, segments, fittings);
+
+        // 고정 거리 → 비율. 선보다 길면 0~1로 자름
+        static double ValveT(TemplateValve v, ResolvedSegment seg)
+        {
+            var length = seg.Start.DistanceTo(seg.End);
+            if (v.OffsetMm is not { } offset || length < 1e-9) return v.T;
+            return Math.Clamp(offset >= 0 ? offset / length : 1 + offset / length, 0, 1);
+        }
 
         Point2D ToPoint(TemplatePoint p) => p.Kind switch
         {

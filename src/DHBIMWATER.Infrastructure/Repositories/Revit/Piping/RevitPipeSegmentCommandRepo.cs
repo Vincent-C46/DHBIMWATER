@@ -183,7 +183,7 @@ internal sealed partial class RevitPipeSegmentCommandRepo : IPipeCommandRepo
             var occupied = new List<(Guid Id, OccupiedSpan Span)>();
             // 세트 A를 먼저 잰다 — 본관 밸브·이음관이 A 주관 커넥터에 밀착하려면 A 자리를 알아야 한다(docs/257 § B-1).
             // 겹침 판정(InlineSpanFilter)은 구간을 정렬해서 보므로 이 순서가 결과를 바꾸지 않는다.
-            occupied.AddRange(BypassSetSpans(document, symbols, edge, network, families, skipPlan, startAnchor, direction,
+            occupied.AddRange(BypassSetSpans(document, symbols, edge, network, families, skipPlan, startAnchor, direction, lengthMm,
                 unusableValves, skipped, inlineAxisCenters, droppedFittings, bypassLayouts, bypassLayoutCache, warnings, teeCenteredSets));
             // tee 중심 세트의 A는 두 A 사이 판정(BypassTeePair)에 넣지 않는다 — A가 엣지마다 하나뿐이고, 밸브는 T 절점 앵커와
             // A 구간 경계(InlineJointSnap)에 밀착한다(docs/273 § C-3b). 이 엣지에 놓이는 A 구간(소속·반대편)은 밀착 후보로만 넘긴다.

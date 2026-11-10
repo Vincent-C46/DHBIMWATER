@@ -11,6 +11,25 @@ public sealed class BypassSetTests
     private const string BypassValve = "DH_게이트 밸브 : 300A";
     private const string CheckValve = "DH_역지 밸브 : 300A";
 
+    // docs/322 — 배관(커넥터 사이)이 세트 본관 점유보다 짧으면 사유, 같거나 길면 null
+    [Fact]
+    public void EdgeTooShortReason_ShortEdge_ReportsRequiredNodeDistance()
+    {
+        // 타이밸브실 연결관 재현: 절점 중심 1250, T 레그 488 ×2 → 배관 274. 세트 1300 필요.
+        var reason = BypassSet.EdgeTooShortReason(274, 1300, 976);
+
+        Assert.NotNull(reason);
+        Assert.Contains("1,300mm 필요", reason);
+        Assert.Contains("2,276mm 이상", reason);
+        Assert.Contains("현재 1,250mm", reason);
+    }
+
+    [Theory]
+    [InlineData(1300)]
+    [InlineData(1500)]
+    public void EdgeTooShortReason_LongEnoughEdge_ReturnsNull(double edgeMm)
+        => Assert.Null(BypassSet.EdgeTooShortReason(edgeMm, 1300, 976));
+
     [Fact]
     public void AddInlineFitting_WithBypass_IsSentToDefinition()
     {

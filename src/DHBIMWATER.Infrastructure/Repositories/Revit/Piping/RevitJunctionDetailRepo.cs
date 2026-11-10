@@ -285,7 +285,7 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
     }
 
     private static string ViewName(string junctionId)
-        => string.IsNullOrWhiteSpace(junctionId) ? "격점상세도_미지정"
+        => string.IsNullOrWhiteSpace(junctionId) ? "배관상세도_미지정"
             : PipeMaterialViewName.For(CreateJunctionDetailViewUseCase.NamePrefix, junctionId);
 
     internal static Level? SelectLevel(Document document, FamilyInstance? root,
@@ -311,7 +311,7 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
 
     private static void RemovePreviousFilter(Document document, ViewPlan view)
     {
-        var name = $"격점상세도_필터_{view.Id.Value}";
+        var name = $"배관상세도_필터_{view.Id.Value}";
         var filter = new FilteredElementCollector(document).OfClass(typeof(ParameterFilterElement))
             .Cast<ParameterFilterElement>().FirstOrDefault(x => x.Name == name);
         if (filter is not null && view.GetFilters().Contains(filter.Id)) view.RemoveFilter(filter.Id);
@@ -419,7 +419,7 @@ internal sealed class RevitJunctionDetailRepo : IJunctionDetailRepo
             ?? throw new InvalidOperationException("DH_격점번호 공유 매개변수가 없어 뷰 필터를 만들 수 없습니다.");
         var rule = ParameterFilterRuleFactory.CreateEqualsRule(parameter.Id, junctionId);
         var condition = new ElementParameterFilter(rule, true);
-        var name = $"격점상세도_필터_{view.Id.Value}";
+        var name = $"배관상세도_필터_{view.Id.Value}";
         var filter = new FilteredElementCollector(document).OfClass(typeof(ParameterFilterElement))
             .Cast<ParameterFilterElement>().FirstOrDefault(x => x.Name == name);
         if (filter is null)
