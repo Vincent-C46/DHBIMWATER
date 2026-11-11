@@ -29,29 +29,8 @@ public static class ValveRoomPipingTemplateCatalog
         // 세트 3개 모두 바이패스 밸브 2개(V2 = V1, 단관 300, docs/322) — 1개 세트는 T 몸통 보정 안 돼 A가 T와 겹쳐 빠졌음.
         // 연결관이 짧으면 Revit이 실측 최소 길이로 그 세트만 건너뜀(사유에 필요한 T–T 거리).
         // TODO: 외곽이 이토밸브실 형상이라 중간벽이 있음. 연결관 x 0.5가 중간벽과 겹치면 캔버스에서 손으로 옮김
-        new("타이밸브실", "타이밸브실(IN 2·OUT 2, 버터플라이+바이패스)",
-            Ports:
-            [
-                new(PortFlow.In, OutlineSide.Left, 0.75, "IN"),
-                new(PortFlow.In, OutlineSide.Left, 0.25, "IN2"),
-                new(PortFlow.Out, OutlineSide.Right, 0.75, "OUT"),
-                new(PortFlow.Out, OutlineSide.Right, 0.25, "OUT2"),
-            ],
-            Segments:
-            [
-                new(TemplatePoint.Port("IN"), TemplatePoint.Relative(0.5, 0.75)),
-                new(TemplatePoint.Relative(0.5, 0.75), TemplatePoint.Port("OUT")),
-                new(TemplatePoint.Port("IN2"), TemplatePoint.Relative(0.5, 0.25)),
-                new(TemplatePoint.Relative(0.5, 0.25), TemplatePoint.Port("OUT2")),
-                new(TemplatePoint.Relative(0.5, 0.25), TemplatePoint.Relative(0.5, 0.75)),
-            ],
-            Valves:
-            [
-                new(0, 0.9, ValveRole.Butterfly, OffsetMm: -TieValveOffsetMm), new(1, 0.1, ValveRole.Butterfly, OffsetMm: TieValveOffsetMm),
-                new(2, 0.9, ValveRole.Butterfly, OffsetMm: -TieValveOffsetMm), new(3, 0.1, ValveRole.Butterfly, OffsetMm: TieValveOffsetMm),
-                new(4, 0.45, ValveRole.Butterfly), new(4, 0.55, ValveRole.Butterfly),
-            ],
-            BypassSets: [new(0, 1.0, +1, TwoValves: true), new(2, 1.0, -1, TwoValves: true), new(4, 0.5, +1, TwoValves: true)]),
+        // 실측 벽 여유(docs/323)가 있으면 PipeLayout이 TieWithWallClearance로 바꿔 씀. 이건 실측 없을 때 폴백(0.25 / 0.75).
+        Tie(0.25),
         // K-water 표준도 제수밸브실(7.0×5.0, D1600~1650, 2026-10-28). IN2는 표준도에 없어 뺌(사용자 결정).
         // y 0.55 = (W1 709 + W4 1247 + D/2 800)/5000. 본관 밸브(버터플라이) = 우회 분기 두 점 정중앙 x 0.443.
         // 부제수밸브 우회관 = 바이패스 세트(+1 = 진행 방향 왼쪽 = 도면 상단 W2 측). 분기 간격·우회 관경은 세트가 핸드북으로 정함.
@@ -72,6 +51,46 @@ public static class ValveRoomPipingTemplateCatalog
         => string.IsNullOrWhiteSpace(zone) ? null
          : BuiltIn.FirstOrDefault(x => string.Equals(x.Zone, zone, StringComparison.Ordinal));
 
+    /// <summary>타이밸브실 이름. 실측 벽 여유 분기(docs/323)에 씀.</summary>
+    public const string TieValveRoom = "타이밸브실";
+
+    /// <summary>타이밸브실 — 위·아래 본관을 내벽에서 <paramref name="wallClearanceMm"/>(실측 c, docs/323) 떨어뜨림.
+    /// 외곽이 비었거나 c가 폭 절반 이상이면 null(폴백 = <see cref="Default"/>의 비율 배치).</summary>
+    public static ValveRoomPipingTemplate? TieWithWallClearance(ValveRoomOutline outline, double wallClearanceMm)
+    {
+        if (outline.IsEmpty || outline.HeightMm <= 0 || !double.IsFinite(wallClearanceMm) || wallClearanceMm <= 0) return null;
+        var low = wallClearanceMm / outline.HeightMm;
+        return low < 0.5 ? Tie(low) : null;
+    }
+
+    /// <summary>타이밸브실 H 배치. <paramref name="low"/> = 아래 본관 y 비율, 위 본관 = 1 − low. 포트 비율도 같은 값(왼·오른 변 길이 = 외곽 높이).</summary>
+    private static ValveRoomPipingTemplate Tie(double low)
+    {
+        var high = 1 - low;
+        return new(TieValveRoom, "타이밸브실(IN 2·OUT 2, 버터플라이+바이패스)",
+            Ports:
+            [
+                new(PortFlow.In, OutlineSide.Left, high, "IN"),
+                new(PortFlow.In, OutlineSide.Left, low, "IN2"),
+                new(PortFlow.Out, OutlineSide.Right, high, "OUT"),
+                new(PortFlow.Out, OutlineSide.Right, low, "OUT2"),
+            ],
+            Segments:
+            [
+                new(TemplatePoint.Port("IN"), TemplatePoint.Relative(0.5, high)),
+                new(TemplatePoint.Relative(0.5, high), TemplatePoint.Port("OUT")),
+                new(TemplatePoint.Port("IN2"), TemplatePoint.Relative(0.5, low)),
+                new(TemplatePoint.Relative(0.5, low), TemplatePoint.Port("OUT2")),
+                new(TemplatePoint.Relative(0.5, low), TemplatePoint.Relative(0.5, high)),
+            ],
+            Valves:
+            [
+                new(0, 0.9, ValveRole.Butterfly, OffsetMm: -TieValveOffsetMm), new(1, 0.1, ValveRole.Butterfly, OffsetMm: TieValveOffsetMm),
+                new(2, 0.9, ValveRole.Butterfly, OffsetMm: -TieValveOffsetMm), new(3, 0.1, ValveRole.Butterfly, OffsetMm: TieValveOffsetMm),
+                new(4, 0.45, ValveRole.Butterfly), new(4, 0.55, ValveRole.Butterfly),
+            ],
+            BypassSets: [new(0, 1.0, +1, TwoValves: true), new(2, 1.0, -1, TwoValves: true), new(4, 0.5, +1, TwoValves: true)]);
+    }
     /// <summary>타이밸브실 T 양쪽 버터플라이밸브의 T 절점 거리(mm). 세트 반폭 최소 500 안쪽.</summary>
     private const double TieValveOffsetMm = 300;
 

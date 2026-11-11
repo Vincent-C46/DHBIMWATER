@@ -35,14 +35,16 @@ public sealed class ValveRoomStandardDimensionCatalogTests
     }
 
     [Fact]
-    public void 타이밸브실과_표_밖_관경은_null()
+    public void 표_밖_관경은_null()
     {
-        Assert.Null(ValveRoomStandardDimensionCatalog.Find("타이밸브실", 300));
+        Assert.Null(ValveRoomStandardDimensionCatalog.Find("타이밸브실", 1350));
         Assert.Null(ValveRoomStandardDimensionCatalog.Find("이토밸브실", 1350));
     }
 
     [Theory]
     [InlineData("이토밸브실", 300, null, 1500, 1500, 1900)]
+    [InlineData("타이밸브실", 700, null, 2000, 2500, 3200)]
+    [InlineData("타이밸브실", 1200, null, 2500, 3000, 4500)]
     [InlineData("감압밸브실", 600, null, 8000, 3000, 1800)]
     [InlineData("공기밸브실", 3000, null, 2000, 2200, 1900)]
     [InlineData("유량계실", 300, "전자식", 5000, 2500, 1900)]

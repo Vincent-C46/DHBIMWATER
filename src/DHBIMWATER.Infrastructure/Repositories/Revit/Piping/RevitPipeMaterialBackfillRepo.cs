@@ -259,42 +259,23 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
 
     /// <summary>값이 비어 있는 계획관로 가변 패밀리 — 일반 모델 Adaptive 중 `DH_Addin`이 비고 배치점이 2개(직관 계열)·5개(곡관)인 것(docs/267 § 2-1).
     /// 선택 안에 후보가 있으면 그것만 본다(<see cref="Candidates"/>와 같은 태도).</summary>
-    private List<FamilyInstance> AdaptiveCandidates(Document document)
-    {
-        var selection = _uiDocument()?.Selection.GetElementIds().ToList() ?? [];
-        if (selection.Count > 0)
-        {
-            var selected = AdaptiveCandidatesIn(new FilteredElementCollector(document, selection));
-            if (selected.Count > 0) return selected;
-        }
-        return AdaptiveCandidatesIn(new FilteredElementCollector(document));
-    }
+    private List<FamilyInstance> AdaptiveCandidates(Document document) => Scoped(document, AdaptiveCandidatesIn);
 
-    // 선택 안에 대상 있으면 그것만, 없으면 문서 전체(Candidates와 같은 태도)
+    // 선택 있으면 선택 안만, 없으면 문서 전체. 그룹마다 따로 판정 안 함 — 한 그룹이 선택에 없어도 문서 전체로 새지 않게
     private List<T> Scoped<T>(Document document, Func<FilteredElementCollector, List<T>> query)
+        => query(SelectionScope() is { } selection ? new FilteredElementCollector(document, selection) : new FilteredElementCollector(document));
+
+    /// <summary>Revit 선택 요소 Id. 비었으면 null = 문서 전체. 모든 부재 그룹(이음쇠·밸브·가변 패밀리·MEP 배관·관종 대상)이 같은 범위를 씀.</summary>
+    private List<ElementId>? SelectionScope()
     {
         var selection = _uiDocument()?.Selection.GetElementIds().ToList() ?? [];
-        if (selection.Count > 0)
-        {
-            var selected = query(new FilteredElementCollector(document, selection));
-            if (selected.Count > 0) return selected;
-        }
-        return query(new FilteredElementCollector(document));
+        return selection.Count > 0 ? selection : null;
     }
 
     private static string? NonEmpty(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
     // DH_관종 빈 배관 부재 — 이음쇠·밸브(밸브실 배관도 관종 기록), 계획관로 가변 패밀리, MEP 배관
-    private List<Element> MaterialTargets(Document document)
-    {
-        var selection = _uiDocument()?.Selection.GetElementIds().ToList() ?? [];
-        if (selection.Count > 0)
-        {
-            var selected = MaterialTargetsIn(document, selection);
-            if (selected.Count > 0) return selected;
-        }
-        return MaterialTargetsIn(document, null);
-    }
+    private List<Element> MaterialTargets(Document document) => MaterialTargetsIn(document, SelectionScope());
 
     private static List<Element> MaterialTargetsIn(Document document, ICollection<ElementId>? scope)
     {
@@ -450,11 +431,15 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
                 ?? (points.Count == 2 ? UC.FtToMm(points[0]!.DistanceTo(points[1]!)) : 0d);
             if (_rules.AdaptivePartFor(points.Count, lengthMm) is not { } part) continue;
 
-            // 패밀리 관종 칸 없으면 DH_관종(부재 정보 갱신이 재질로 채운 값) 사용
-            var rawMaterial = ReadText(instance, names.Material)
-                ?? NonEmpty(instance.LookupParameter(PipeAlignmentParameters.Material)?.AsString());
+            // DH_관종 이미 있으면 그 값 우선·덮지 않음(사용자 입력·FillMaterials 결과 보존). 비었을 때만 패밀리 관종 칸을 코드로 바꿔 씀.
+            // 패밀리 값이 코드로 안 바뀌면(키워드 판정 실패) 원문 안 씀 — 하류가 정확한 코드만 읽음.
+            var existingMaterial = NonEmpty(instance.LookupParameter(PipeAlignmentParameters.Material)?.AsString());
+            var familyMaterial = ReadText(instance, names.Material);
+            var familyParsed = PipeAlignmentParameters.MaterialFromModelValue(familyMaterial) ?? PipeMaterialKeywords.Resolve(familyMaterial);
+            var rawMaterial = existingMaterial ?? (familyParsed is { } fm ? PipeAlignmentParameters.Code(fm) : null);
             var materialCode = PipeAlignmentParameters.MaterialFromModelValue(rawMaterial) is { } material
                 ? PipeAlignmentParameters.Code(material) : rawMaterial;
+            var writeMaterial = existingMaterial is null ? materialCode : null;
             var diameterText = ReadDiameterText(instance, names.NominalDiameter);
             var flags = PipeJointCountWriter.ReadFlags(instance);
             var parsedMaterial = PipeAlignmentParameters.MaterialFromModelValue(rawMaterial);
@@ -491,8 +476,8 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
 
             writer.Text(instance, PipeAlignmentParameters.Addin, PipeAlignmentParameters.AddinValue);
             writer.Text(instance, PipeAlignmentParameters.Part, part);
-            if (!string.IsNullOrWhiteSpace(materialCode)) writer.Text(instance, PipeAlignmentParameters.Material, materialCode);
-            else missingMaterial++;
+            if (!string.IsNullOrWhiteSpace(writeMaterial)) writer.Text(instance, PipeAlignmentParameters.Material, writeMaterial);
+            else if (string.IsNullOrWhiteSpace(materialCode)) missingMaterial++;
             if (diameterText is not null) writer.Text(instance, PipeAlignmentParameters.NominalDiameter, diameterText);
             else missingDiameter++;
             if (points.Count == 2) writer.LengthM(instance, PipeAlignmentParameters.Length, lengthMm / 1000d);
@@ -673,19 +658,12 @@ internal sealed class RevitPipeMaterialBackfillRepo : IPipeMaterialBackfillRepo
         return head;
     }
 
-    /// <summary>재기록 대상. 선택 요소 안에 후보가 있으면 그것만 본다 —
+    /// <summary>재기록 대상. 선택이 있으면 선택 안만 본다(대상 0개여도 문서 전체로 안 넓힘) —
     /// DHBIMWATER가 만들지 않은 부속까지 건드리는 것을 사용자가 막을 수 있는 유일한 수단이다(docs/136 § 2).</summary>
     private (IReadOnlyList<FamilyInstance> Candidates, bool FromSelection) Candidates(Document document)
-    {
-        // Revit이 돌려주는 ICollection<ElementId>는 IReadOnlyCollection으로 바로 안 넘어간다. 한 번 굳혀서 쓴다.
-        var selection = _uiDocument()?.Selection.GetElementIds().ToList() ?? [];
-        if (selection.Count > 0)
-        {
-            var selected = Ordered(PipeMaterialPartCollector.UntaggedInstances(document, selection));
-            if (selected.Count > 0) return (selected, true);
-        }
-        return (Ordered(PipeMaterialPartCollector.UntaggedInstances(document)), false);
-    }
+        => SelectionScope() is { } selection
+            ? (Ordered(PipeMaterialPartCollector.UntaggedInstances(document, selection)), true)
+            : (Ordered(PipeMaterialPartCollector.UntaggedInstances(document)), false);
 
     /// <summary>문서 배관 부재의 격점번호 중 사전순 첫 값. 없으면 null.</summary>
     private static string? DocumentJunctionId(Document document)

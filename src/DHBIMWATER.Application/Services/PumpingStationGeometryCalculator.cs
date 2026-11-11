@@ -1344,13 +1344,17 @@ namespace DHBIMWATER.Application.Services
             var totalWidth = pr.T4 * 2 + (pl.B8 * d.N) + (pl.T5 * (d.N - 1));
             double x2 = d.SelectedPumpingStationType == "Type2" ? totalLength - pr.T3 - pr.B7 - pr.T3 - pr.B6 - pr.B5 / 2 - pr.L4 - pr.L3 : totalLength - pr.T4 - pr.B7 - pr.T3 - pr.B6 - pr.B5 / 2 - pr.L4 - pr.L3;
 
+            // 보 상면 = 상부슬래브 상면(CalculateSlabs의 upperSlabDef.ElevationZ와 같은 식).
+            // 종전엔 커브를 상면 − GH1/2(중심 가정)에 뒀는데 Revit 기본 Z맞춤이 상단이라 보가 GH1/2 내려앉았다.
+            double girderTopZ = d.HWL * 1000 + pr.H3;
+
             var beamDefs = new List<BeamDefinition>();
             for (int i = 0; i < d.N; i++)
             {
                 var beamDef1 = new BeamDefinition()
                 {
-                    StartPoint = new Point3D(pr.B1 + pr.B2 + pr.GB1 / 2, (pl.B8 + pl.T5) * i, d.HWL * 1000 + pr.H3 - pr.GH1 / 2),
-                    EndPoint = new Point3D(pr.B1 + pr.B2 + pr.GB1 / 2, (pl.B8 + pl.T5) * i + pl.B8, d.HWL * 1000 + pr.H3 - pr.GH1 / 2),
+                    StartPoint = new Point3D(pr.B1 + pr.B2 + pr.GB1 / 2, (pl.B8 + pl.T5) * i, girderTopZ),
+                    EndPoint = new Point3D(pr.B1 + pr.B2 + pr.GB1 / 2, (pl.B8 + pl.T5) * i + pl.B8, girderTopZ),
                     Width = pr.GB1,
                     Height = pr.GH1,
                     LevelName = UpperSlabLevelName,
@@ -1358,22 +1362,24 @@ namespace DHBIMWATER.Application.Services
                     ElementCode = "G1",
                     Zone = "",
                     Part = "GIRDER",
+                    ZJustification = 0, // 상단 맞춤 — 커브 z = 보 상면 = 상부슬래브 상면
                 };
                 var beamDef2 = new BeamDefinition()
                 {
-                    StartPoint = new Point3D(pr.B1 + pr.B2 + pr.B3 - pr.GB1 / 2, (pl.B8 + pl.T5) * i, d.HWL * 1000 + pr.H3 - pr.GH1 / 2),
-                    EndPoint = new Point3D(pr.B1 + pr.B2 + pr.B3 - pr.GB1 / 2, (pl.B8 + pl.T5) * i + pl.B8, d.HWL * 1000 + pr.H3 - pr.GH1 / 2),
+                    StartPoint = new Point3D(pr.B1 + pr.B2 + pr.B3 - pr.GB1 / 2, (pl.B8 + pl.T5) * i, girderTopZ),
+                    EndPoint = new Point3D(pr.B1 + pr.B2 + pr.B3 - pr.GB1 / 2, (pl.B8 + pl.T5) * i + pl.B8, girderTopZ),
                     Width = pr.GB1,
                     Height = pr.GH1,
                     LevelName = UpperSlabLevelName,
                     ElementCode = "G1",
                     Zone = "",
                     Part = "GIRDER",
+                    ZJustification = 0, // 상단 맞춤 — 커브 z = 보 상면 = 상부슬래브 상면
                 };
                 var beamDef3 = new BeamDefinition()
                 {
-                    StartPoint = new Point3D(pr.B1 + pr.B2 + pr.B3 + pr.B4 - pr.GB1 / 2, (pl.B8 + pl.T5) * i, d.HWL * 1000 + pr.H3 - pr.GH1 / 2),
-                    EndPoint = new Point3D(pr.B1 + pr.B2 + pr.B3 + pr.B4 - pr.GB1 / 2, (pl.B8 + pl.T5) * i + pl.B8, d.HWL * 1000 + pr.H3 - pr.GH1 / 2),
+                    StartPoint = new Point3D(pr.B1 + pr.B2 + pr.B3 + pr.B4 - pr.GB1 / 2, (pl.B8 + pl.T5) * i, girderTopZ),
+                    EndPoint = new Point3D(pr.B1 + pr.B2 + pr.B3 + pr.B4 - pr.GB1 / 2, (pl.B8 + pl.T5) * i + pl.B8, girderTopZ),
                     Width = pr.GB1,
                     Height = pr.GH1,
                     LevelName = UpperSlabLevelName,
@@ -1381,6 +1387,7 @@ namespace DHBIMWATER.Application.Services
                     ElementCode = "G1",
                     Zone = "",
                     Part = "GIRDER",
+                    ZJustification = 0, // 상단 맞춤 — 커브 z = 보 상면 = 상부슬래브 상면
                 };
 
                 beamDefs.Add(beamDef1);

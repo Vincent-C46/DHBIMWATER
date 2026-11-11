@@ -39,6 +39,9 @@ public class ValveRoomCommand : CommandBase
         viewModel.ConcreteLauncher.RunInRevitContext = viewModel.RunInRevitContext;
         // 제원표 읽기·저장도 같은 경로(docs/312).
         viewModel.DimensionCatalogLauncher.RunInRevitContext = viewModel.RunInRevitContext;
+        // 타이밸브실 최소 폭 실측(docs/323) — 생성 직전 경고용. 관종 = 주철(밸브실 창에 관종 입력 없음)
+        var measureTie = ServiceContainer.GetService<MeasureTieValveRoomUseCase>();
+        viewModel.MeasureTieLayout = diameterMm => measureTie.Execute(diameterMm);
         viewModel.CreateModelAction = request =>
         {
             handler.PendingRequest = request;

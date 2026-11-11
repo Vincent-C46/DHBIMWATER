@@ -50,8 +50,9 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             StructuralFramingUtils.DisallowJoinAtEnd(beam, 1);
 
             // 헌치는 여기서 Z맞춤을 적용한다. 밸브실 보(VR-B)는 AlignBeamTopToCurveZ가 설정·검증까지 맡는다(docs/198 § A).
-            // 그 외(PumpingStation GIRDER·Reservoir 등)는 기존대로 Revit 기본 Z맞춤을 사용한다.
-            if (beamDef.Part == "HAUNCH")
+            // 펌프장 보(GIRDER)도 Z맞춤 명시(상단) — 커브 z = 상부슬래브 상면. 기본값에 기대지 않는다.
+            // 그 외(Reservoir 등)는 기존대로 Revit 기본 Z맞춤을 사용한다.
+            if (beamDef.Part == "HAUNCH" || beamDef.Part == "GIRDER")
                 beam.get_Parameter(BuiltInParameter.Z_JUSTIFICATION).Set(beamDef.ZJustification);
 
             // 단면 회전(Cross-Section Rotation). 내부 단위가 라디안이라 도 → 라디안 변환이 필요하다.
@@ -64,6 +65,12 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             if (beamDef.ElementCode == "VR-B")
             {
                 AlignBeamTopToCurveZ(beam, beamType, beamDef.ZJustification, UC.MmToFt(beamDef.StartPoint.Z));
+                JoinWithUpperSlab(beam, joinTargetSlabId);
+            }
+            else if (beamDef.Part == "GIRDER")
+            {
+                // 펌프장 보: 맞춤 반영 후 상부슬래브와 결합(슬래브가 보를 자름). 맞춤 → 재생성 → 결합 순서.
+                doc.Regenerate();
                 JoinWithUpperSlab(beam, joinTargetSlabId);
             }
 

@@ -39,5 +39,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Mock
             mockDialogService.Info("Opening Creation", $"{openingDef.Name} 작성완료");
             return;
         }
+
+        public IReadOnlyList<string> TakeWarnings() => [];
     }
 }

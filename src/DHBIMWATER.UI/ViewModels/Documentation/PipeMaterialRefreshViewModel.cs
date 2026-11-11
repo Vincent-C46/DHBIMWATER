@@ -55,7 +55,8 @@ public sealed class PipeMaterialRefreshViewModel : ViewModelBase
         get => _fallbackMaterial;
         set { if (SetProperty(ref _fallbackMaterial, value)) OnPropertyChanged(nameof(CanRun)); }
     }
-    public string ScopeText => _scan.FromSelection ? "선택한 부재 범위" : "문서 전체 (선택한 부재 중 대상이 없음)";
+    // 선택 있으면 모든 부재 그룹이 선택 안만 봄(대상 0개여도 문서 전체로 안 넓힘)
+    public string ScopeText => _scan.FromSelection ? "선택한 부재 범위" : "문서 전체 (선택한 부재 없음)";
 
     /// <summary>true = 이미 값 있는 부재 개수까지 수량 규칙으로 다시 씀. 손으로 고친 개수 덮어씀.</summary>
     public bool RecountAll

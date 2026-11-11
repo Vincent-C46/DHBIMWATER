@@ -146,6 +146,21 @@ public class PipeLayoutCommand : CommandBase
         handler.ElementsSelected = (requested, selected) => view.Dispatcher.Invoke(() =>
             viewModel.ApplySelectInRevitResult(requested, selected));
 
+        // 타이밸브실 최소 폭 실측(docs/323) — 프로브 놓고 롤백하는 트랜잭션이라 API 컨텍스트 필요. 생성 핸들러 슬롯과 안 겹치게 별도 핸들러.
+        // ExternalEvent는 창 수명 동안 쓰고 Dispose 안 함(ValveRoomCommand와 같은 이유, docs/157 § A).
+        var actionHandler = new RevitActionHandler("PipeLayout");
+        var actionEvent = ExternalEvent.Create(actionHandler);
+        viewModel.RunInRevitContext = action =>
+        {
+            actionHandler.Enqueue(() => view.Dispatcher.Invoke(action));
+            var status = actionEvent.Raise();
+            if (!IsRejected(status)) return;
+            actionHandler.Clear();
+            viewModel.ApplyRequestError(RejectedMessage(status));
+        };
+        var measureTie = ServiceContainer.GetService<MeasureTieValveRoomUseCase>();
+        viewModel.MeasureTieLayout = (diameterMm, material, steelClass) => measureTie.Execute(diameterMm, material, steelClass);
+
         // 패밀리 설정 저장은 DataStorage 쓰기(트랜잭션)라 API 컨텍스트가 필요하다 — 모델리스 창이므로 ExternalEvent로 보낸다(docs/175 § E-6).
         // 설정 창은 모달(ShowDialog)이라 요청은 창이 닫힌 뒤에야 실행된다 — ViewModel이 [저장]에서 창을 닫고, 결과는 아래 콜백으로 본창 상태줄에 찍는다.
         viewModel.SaveFamilySettingsAction = settings =>

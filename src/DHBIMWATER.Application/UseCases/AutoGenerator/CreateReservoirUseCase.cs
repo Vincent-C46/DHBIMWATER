@@ -167,8 +167,11 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                     var genericDefs = ReservoirGeometryCalculator.CalculateGenericModels(dto).ToList();
                     var genericLevels = _levelQueryRepo.GetLevelIds(genericDefs.Select(g => g.LevelName));
                     var genericSymbols = genericDefs.Select(g => g.SymbolName).Distinct().ToDictionary(name => name, _elementTypeCmdRepo.FindGenericModelSymbol);
-                    foreach (var def in genericDefs)
+                    // 로드 안 된 패밀리는 완료창에 1개 1줄로 알리고 배치 건너뜀. 인스턴스마다 경고 뜨던 것 방지.
+                    var placementWarnings = genericSymbols.Where(kv => kv.Value == 0).Select(kv => $"패밀리 없음(배치 안 함): {kv.Key}").ToList();
+                    foreach (var def in genericDefs.Where(g => genericSymbols[g.SymbolName] != 0))
                         _genericModelCmdRepo.PlaceInstance(def, genericLevels[def.LevelName], genericSymbols[def.SymbolName]);
+                    placementWarnings.AddRange(_genericModelCmdRepo.TakeWarnings());
                     #endregion
 
                     #region 7. 상부 슬래브 결합 (레거시 RH:2940-2975)
@@ -188,6 +191,8 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                     _tx.Commit();
 
                     var message = "배수지 작성 완료";
+                    if (placementWarnings.Count > 0)
+                        message += $"\n\n배치 경고 {placementWarnings.Count}건:\n" + string.Join("\n", placementWarnings);
                     if (joinWarnings.Count > 0)
                         message += $"\n\n결합 경고 {joinWarnings.Count}건:\n" + string.Join("\n", joinWarnings.Take(10));
                     _dialogService.Info("Success", message);

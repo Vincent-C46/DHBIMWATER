@@ -30,6 +30,10 @@ public sealed class PipeMaterialRefreshViewModelTests
     }
 
     [Fact]
+    public void NoSelection_ShowsDocumentScope()
+        => Assert.Equal("문서 전체 (선택한 부재 없음)", Create(new PipeMaterialBackfillScan(1, false)).ScopeText);
+
+    [Fact]
     public void UnresolvedMaterialOnly_RunsOnlyAfterFallbackChosen()
     {
         var vm = Create(new PipeMaterialBackfillScan(0, false, MaterialMissingCount: 3, MaterialUnresolvedCount: 3));

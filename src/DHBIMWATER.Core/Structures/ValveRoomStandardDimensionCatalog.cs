@@ -16,12 +16,13 @@ public sealed record ValveRoomStandardDimension(
     string Section);
 
 /// <summary>상수도시설 밸브실 표준도 설계설명서 표 4.1~4.6 제원(docs/02 PDF, docs/304).
-/// <para>타이밸브실 표 없음 — 사용자 결정으로 비워 둠. 찾으면 null.</para>
+/// <para>타이밸브실 표 = 표준도에 없음. 이토밸브실 표 복사 + 길이·폭 맞바꿈(2026-11-11 사용자 결정).</para>
 /// <para>새 유형 추가 = <see cref="Default"/>에 표 1개 추가. 조회 코드 수정 불필요.</para></summary>
 public static class ValveRoomStandardDimensionCatalog
 {
     public const string Sluice = "제수밸브실";
     public const string Mud = "이토밸브실";
+    public const string Tie = "타이밸브실";
     public const string PressureReducing = "감압밸브실";
     public const string Air = "공기밸브실";
     public const string FlowMeter = "유량계실";
@@ -37,6 +38,7 @@ public static class ValveRoomStandardDimensionCatalog
     [
         .. SluiceTable(),
         .. MudTable(),
+        .. TieTable(),
         .. PressureReducingTable(),
         .. AirTable(),
         .. FlowMeterTable(),
@@ -107,6 +109,10 @@ public static class ValveRoomStandardDimensionCatalog
         t.Row(4, "2.5x4.5", 1200, 3000, 2500, 4500);
         return t.Entries;
     }
+
+    // 타이밸브실. 표준도 표 없음. 이토밸브실 표 복사, 길이·폭만 맞바꿈. 구분·계산단면·높이는 이토 그대로.
+    private static IEnumerable<ValveRoomStandardDimension> TieTable()
+        => MudTable().Select(x => x with { RoomKind = Tie, LengthMm = x.WidthMm, WidthMm = x.LengthMm });
 
     // 표 4.3 감압밸브실. 비고 없음.
     private static IEnumerable<ValveRoomStandardDimension> PressureReducingTable()

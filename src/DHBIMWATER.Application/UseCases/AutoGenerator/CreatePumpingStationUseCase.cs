@@ -89,6 +89,9 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
             if (StructureRegeneration.Prepare(_structureModelRepo, _dialogService, StructureRegeneration.PumpingStation) is not { } regeneration)
                 return;
 
+            // 실행 1번 = 결과창 1번. 패밀리 누락·개구부·보·뷰·계단 경고 전부 여기 모아 마지막에 한 창(1건 1줄)으로 보여줌.
+            var warnings = new List<string>();
+
             using (_tx)
             {
                 try
@@ -138,8 +141,13 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                     var slabLevels = _levelQueryRepo.GetLevelIds(slabDefs.Select(s => s.LevelName));
                     var slabMaterial = _elementTypeCmdRepo.FindOrCreateConcreteMaterial(dto.Materials.Slab);
                     var slabTypes = slabDefs.Select(s => s.Thickness).Distinct().ToDictionary(t => t, t => _elementTypeCmdRepo.FindOrCreateSlabType(new Core.Structures.FloorTypeSpec(t, $"일반 - {t}mm", dto.Materials.Slab), slabMaterial));
+                    // 상부슬래브 Id는 보 결합 대상으로 넘긴다(4. 보 생성). 0이면 Repo가 겹치는 Floor를 찾는다.
+                    var upperSlabId = 0;
                     foreach (var slabDef in slabDefs)
-                        _slabCmdRepo.CreateSlab(slabDef, slabLevels[slabDef.LevelName], slabTypes[slabDef.Thickness]);
+                    {
+                        var slabId = _slabCmdRepo.CreateSlab(slabDef, slabLevels[slabDef.LevelName], slabTypes[slabDef.Thickness]);
+                        if (slabDef.Part == "상부슬래브") upperSlabId = slabId;
+                    }
 
                     // 기초 다이렉트쉐이프 (F2=기초버림슬래브는 별도 재료 적용)
                     // CreateDirectShapes는 ElementCode 단위로 하나의 DirectShape로 합치므로,
@@ -170,14 +178,20 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                     #region 4. 보 생성
                     var beamDefs = PumpingStationGeometryCalculator.CalculateBeams(dto).ToList();
                     var beamLevels = _levelQueryRepo.GetLevelIds(beamDefs.Select(b => b.LevelName));
-                    var beamTypes = beamDefs.GroupBy(b => b.Part == "HAUNCH" ? "HAUNCH" : b.TypeName ?? $"{b.Width} x {b.Height}").ToDictionary(g => g.Key, g => g.Key == "HAUNCH" ? _elementTypeCmdRepo.FindHaunchBeamSymbol() : !string.IsNullOrEmpty(g.First().TypeName) ? _elementTypeCmdRepo.FindBeamSymbol(g.First().TypeName) : _elementTypeCmdRepo.FindOrCreateBeamType(new Core.Structures.BeamTypeSpec(g.First().Width, g.First().Height, g.Key, dto.Materials.Girder)));
+                    // 유형 키: TypeName 기본값이 ""(null 아님)라 `??`로는 "폭 x 높이"로 안 넘어감 → 키 "" → FindOrCreateBeamType이
+                    // Name.Contains("")로 문서 첫 콘크리트 보 유형(크기 무관)을 집음 → 보 폭 ≠ GB1, 오프닝 면과 (GB1−실제폭)/2 이격.
+                    // 빈 문자열도 "폭 x 높이"로 바꿈.
+                    string BeamTypeKey(Core.Structures.BeamDefinition b) =>
+                        b.Part == "HAUNCH" ? "HAUNCH" : string.IsNullOrEmpty(b.TypeName) ? $"{b.Width} x {b.Height}" : b.TypeName;
+                    var beamTypes = beamDefs.GroupBy(BeamTypeKey).ToDictionary(g => g.Key, g => g.Key == "HAUNCH" ? _elementTypeCmdRepo.FindHaunchBeamSymbol() : !string.IsNullOrEmpty(g.First().TypeName) ? _elementTypeCmdRepo.FindBeamSymbol(g.First().TypeName) : _elementTypeCmdRepo.FindOrCreateBeamType(new Core.Structures.BeamTypeSpec(g.First().Width, g.First().Height, g.Key, dto.Materials.Girder)));
                     // 보·헌치 유형의 구조 재료를 거더 강도로 바꾼다. FindOrCreateBeamType은 spec.Concrete를 쓰지 않는다(docs/249 § D).
                     var girderMaterialId = beamTypes.Count > 0 ? _elementTypeCmdRepo.FindOrCreateConcreteMaterial(dto.Materials.Girder) : 0;
                     if (girderMaterialId != 0)
                         foreach (var beamTypeId in beamTypes.Values.Where(id => id != 0).Distinct())
                             _elementTypeCmdRepo.ApplyStructuralMaterial(beamTypeId, girderMaterialId);
                     foreach (var beamDef in beamDefs)
-                        _beamCmdRepo.CreateBeam(beamDef, beamLevels[beamDef.LevelName], beamTypes[beamDef.Part == "HAUNCH" ? "HAUNCH" : beamDef.TypeName ?? $"{beamDef.Width} x {beamDef.Height}"]);
+                        _beamCmdRepo.CreateBeam(beamDef, beamLevels[beamDef.LevelName], beamTypes[BeamTypeKey(beamDef)],
+                            beamDef.Part == "GIRDER" ? upperSlabId : 0);
                     #endregion
                     #region 5. 오프닝 배치
                     // 슬래브 오프닝 (사각형)
@@ -197,11 +211,13 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                     var genericDefs = PumpingStationGeometryCalculator.CalculateGenericModels(dto).ToList();
                     var genericLevels = _levelQueryRepo.GetLevelIds(genericDefs.Select(g => g.LevelName));
                     var genericSymbols = genericDefs.Select(g => g.SymbolName).Distinct().ToDictionary(name => name, _elementTypeCmdRepo.FindGenericModelSymbol);
-                    foreach (var def in genericDefs)
+                    // 로드 안 된 패밀리는 결과창에 1개 1줄로 알리고 배치 건너뜀. 인스턴스마다 경고 뜨던 것 방지.
+                    warnings.AddRange(genericSymbols.Where(kv => kv.Value == 0).Select(kv => $"패밀리 없음(배치 안 함): {kv.Key}"));
+                    foreach (var def in genericDefs.Where(g => genericSymbols[g.SymbolName] != 0))
                         _genericModelCmdRepo.PlaceInstance(def, genericLevels[def.LevelName], genericSymbols[def.SymbolName]);
                     #endregion
                     #region 7. 결합
-                    // 보 작성 메서드 내부에서 상부 슬래브와 결합 (임시 조치)
+                    // 보(GIRDER)-상부슬래브 결합은 4. 보 생성의 CreateBeam 안에서 한다.
                     #endregion
                     #region 8. 뷰 작성                    
                     var existingSectionViewNames = _levelQueryRepo.GetExistingSectionNames();
@@ -216,7 +232,7 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                         }
                         catch (Exception ex)
                         {
-                            _dialogService.Warn("Error", $"Failed to create section view '{viewDef.Name}': {ex.Message}");
+                            warnings.Add($"단면뷰 생성 실패 — {viewDef.Name}: {ex.Message.Replace("\r", " ").Replace("\n", " ")}");
                         }
                     }
                     // Level 3D 범위 최대화
@@ -231,7 +247,10 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                     regeneration.MarkCreated();
                     // 트랜잭션 커밋
                     _tx.Commit();
-                    _dialogService.Info("Success", "펌프장 작성 완료");
+                    // Repo 경고(일반 모델·개구부·보 결합)는 결과창에 붙인다 — 조용히 넘기지 않는다.
+                    warnings.AddRange(_genericModelCmdRepo.TakeWarnings());
+                    warnings.AddRange(_openingCmdRepo.TakeWarnings());
+                    warnings.AddRange(_beamCmdRepo.TakeWarnings());
                 }
                 catch (Exception ex)
                 {
@@ -244,6 +263,8 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
             #region 11. 계단 생성 (메인 트랜잭션 밖)
             // StairsEditScope는 Revit API 제약상 "열린 Transaction 내부"에서 Start/Commit할 수 없고
             // 내부적으로 자체 Transaction을 열고 닫는다. 따라서 위 _tx 커밋(using 블록 종료) 이후에 호출해야 한다.
+            // 계단별 경고는 Repo가 모음 → 결과창에 1건 1줄.
+            string? stairFailure = null;
             try
             {
                 foreach (var stairDef in PumpingStationGeometryCalculator.CalculateStairs(dto))
@@ -251,8 +272,10 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
             }
             catch (Exception ex)
             {
-                _dialogService.Warn("Warning", $"계단 생성 실패: {ex.Message}");
+                stairFailure = $"계단 생성 실패: {ex.Message.Replace("\r", " ").Replace("\n", " ")}";
             }
+            warnings.AddRange(_stairCommandRepo.TakeWarnings());
+            if (stairFailure != null) warnings.Add(stairFailure);
             #endregion
 
             // 계단은 메인 Transaction 밖이라 별도로 표시. 안 하면 재생성 때 계단이 남음(docs/320 § C)
@@ -267,9 +290,16 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                 catch (Exception ex)
                 {
                     _tx.Rollback();
-                    _dialogService.Warn("Warning", $"계단 구조물 표시 실패: {ex.Message}");
+                    warnings.Add($"계단 구조물 표시 실패: {ex.Message.Replace("\r", " ").Replace("\n", " ")}");
                 }
             }
+
+            // 결과창 1번. 경고 없으면 완료 안내, 있으면 완료 + 경고 목록(1건 1줄).
+            if (warnings.Count == 0)
+                _dialogService.Info("펌프장 작성 완료", "펌프장 작성 완료");
+            else
+                _dialogService.Warn("펌프장 작성 완료",
+                    $"펌프장 작성 완료 — 경고 {warnings.Count}건\n\n" + string.Join("\n", warnings));
         }
 
         // 공유 매개변작성

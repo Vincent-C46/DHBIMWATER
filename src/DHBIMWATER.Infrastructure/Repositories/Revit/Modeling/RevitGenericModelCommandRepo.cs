@@ -1,6 +1,5 @@
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Structure;
-using Autodesk.Revit.UI;
 using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Core.Structures;
 using UC = DHBIMWATER.Infrastructure.Converters.RevitUnitConverter;
@@ -10,12 +9,26 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
     internal class RevitGenericModelCommandRepo : IGenericModelCommandRepo
     {
         private readonly Func<Document?> _doc;
-        private readonly IDialogService _dialog;
+        // 인스턴스마다 경고창 띄우던 것 대신 모음. 호출부가 TakeWarnings로 가져가 경고창 1번에 목록으로 보여줌.
+        private readonly List<string> _warnings = [];
 
-        public RevitGenericModelCommandRepo(Func<Document?> doc, IDialogService dialog)
+        public RevitGenericModelCommandRepo(Func<Document?> doc)
         {
             _doc = doc;
-            _dialog = dialog;
+        }
+
+        public IReadOnlyList<string> TakeWarnings()
+        {
+            var warnings = _warnings.ToList();
+            _warnings.Clear();
+            return warnings;
+        }
+
+        /// <summary>경고 1건 = 1줄. 같은 문구(인스턴스마다 같은 패밀리 누락 등)는 한 번만.</summary>
+        private void AddWarning(string message)
+        {
+            var line = message.Replace("\r", " ").Replace("\n", " ");
+            if (!_warnings.Contains(line)) _warnings.Add(line);
         }
 
         public int PlaceInstance(GenericModelPlacementDefinition def, long levelId, int symbolId)
@@ -27,7 +40,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
             if (symbol == null)
             {
-                _dialog.Warn("Error", $"패밀리 타입을 찾을 수 없습니다: {def.SymbolName}");
+                AddWarning($"패밀리 없음(배치 안 함): {def.SymbolName}");
                 return 0;
             }
 
@@ -35,7 +48,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
             if (level == null)
             {
-                _dialog.Warn("Error", $"레벨을 찾을 수 없습니다: {def.LevelName}");
+                AddWarning($"레벨을 찾을 수 없습니다(배치 안 함): {def.LevelName}");
                 return 0;
             }
 
@@ -49,13 +62,17 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             FamilyInstance instance = doc.Create.NewFamilyInstance(
                 origin, symbol, level, def.IsNonStructural ? StructuralType.NonStructural : StructuralType.Footing);
 
-            if (instance == null) TaskDialog.Show("Error", "패밀리인스턴스가 배치되지않았습니다");
+            if (instance == null)
+            {
+                AddWarning($"패밀리 인스턴스가 배치되지 않았습니다: {def.SymbolName}");
+                return 0;
+            }
 
             if (instance != null && def.ElevationFromLevel.HasValue)
             {
                 var elevation = instance.get_Parameter(BuiltInParameter.INSTANCE_ELEVATION_PARAM);
                 if (elevation == null || elevation.IsReadOnly)
-                    _dialog.Warn("Error", $"레벨로부터 높이를 설정할 수 없습니다: {def.SymbolName}");
+                    AddWarning($"레벨로부터 높이를 설정할 수 없습니다: {def.SymbolName}");
                 else
                     elevation.Set(UC.MmToFt(def.ElevationFromLevel.Value));
             }

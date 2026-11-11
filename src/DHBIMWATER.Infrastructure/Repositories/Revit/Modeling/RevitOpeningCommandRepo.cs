@@ -11,12 +11,26 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
     public class RevitOpeningCommandRepo : IOpeningCommandRepo
     {
         private readonly Func<Document?> _doc;
-        private readonly IDialogService _dialogService;
+        // 개구부마다 경고창 띄우던 것 대신 모음. 호출부가 TakeWarnings로 가져가 경고창 1번에 목록으로 보여줌.
+        private readonly List<string> _warnings = [];
 
-        public RevitOpeningCommandRepo(Func<Document?> doc, IDialogService dialogService)
+        public RevitOpeningCommandRepo(Func<Document?> doc)
         {
             _doc = doc;
-            _dialogService = dialogService;
+        }
+
+        public IReadOnlyList<string> TakeWarnings()
+        {
+            var warnings = _warnings.ToList();
+            _warnings.Clear();
+            return warnings;
+        }
+
+        /// <summary>경고 1건 = 1줄. 같은 문구(인스턴스마다 같은 패밀리 누락 등)는 한 번만.</summary>
+        private void AddWarning(string message)
+        {
+            var line = message.Replace("\r", " ").Replace("\n", " ");
+            if (!_warnings.Contains(line)) _warnings.Add(line);
         }
         public int CreateSlabOpening(RectangularSlabOpeningDefinition openingDef)
         {
@@ -33,7 +47,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
             if (symbol == null)
             {
-                _dialogService.Info("Error", "Required family symbol '바닥 개구부_사각형' not found.");
+                AddWarning("패밀리 없음(개구부 생성 안 함): 바닥 개구부_사각형");
                 return 0;
             }
 
@@ -63,7 +77,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
                 var missing = host == null
                     ? $"호스트 슬래브(DH_ElementCode = '{openingDef.HostElementCode}')"
                     : $"레벨 '{openingDef.LevelName}'";
-                _dialogService.Warn("개구부 생성 실패", $"{missing} 을(를) 찾지 못해 '{openingDef.Name}' 을 만들지 않았습니다.");
+                AddWarning($"개구부 생성 실패: {missing} 을(를) 찾지 못해 '{openingDef.ElementCode}' 을 만들지 않았습니다.");
                 return 0;
             }
 
@@ -101,7 +115,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
             if (symbol == null)
             {
-                _dialogService.Info("Error", "Required family symbol '바닥 개구부_원형' not found.");
+                AddWarning("패밀리 없음(개구부 생성 안 함): 바닥 개구부_원형");
                 return;
             }
 
@@ -153,7 +167,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
             if (symbol == null)
             {
-                _dialogService.Info("Error", "Required family symbol '벽 개구부_사각형' not found.");
+                AddWarning("패밀리 없음(개구부 생성 안 함): 벽 개구부_사각형");
                 return;
             }
 
@@ -213,7 +227,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
             if (symbol == null)
             {
-                _dialogService.Info("Error", "Required family symbol '벽 개구부_원형' not found.");
+                AddWarning("패밀리 없음(개구부 생성 안 함): 벽 개구부_원형");
                 return;
             }
 
@@ -246,7 +260,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
                 var missing = host == null
                     ? $"호스트 벽체(DH_ElementCode = '{openingDef.HostElementCode}')"
                     : $"레벨 '{openingDef.LevelName}'";
-                _dialogService.Warn("개구부 생성 실패", $"{missing} 을(를) 찾지 못해 '{openingDef.Name}' 을 만들지 않았습니다.");
+                AddWarning($"개구부 생성 실패: {missing} 을(를) 찾지 못해 '{openingDef.ElementCode}' 을 만들지 않았습니다.");
                 return;
             }
 

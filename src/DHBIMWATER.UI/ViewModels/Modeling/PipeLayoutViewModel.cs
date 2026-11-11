@@ -604,6 +604,11 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     public Action<PipeNetworkDefinition>? CreateModelAction { get; set; }
     /// <summary>고른 부재를 Revit에서 선택·표시하도록 요청한다. 위임이 없으면 버튼이 비활성이다(docs/179 § E-2).</summary>
     public Action<IReadOnlyList<long>>? SelectInRevitAction { get; set; }
+    /// <summary>타이밸브실 최소 폭 실측(docs/323). 본관 DN·관종·강관 등급 → 벽 여유 c·최소 폭. 프로브 놓고 롤백 — API 컨텍스트 필요.
+    /// null이면 실측 안 함(비율 0.25/0.75 배치 그대로, 테스트·Sandbox).</summary>
+    public Func<double, PipeMaterial, SteelFittingClass, TieValveRoomLayout>? MeasureTieLayout { get; set; }
+    /// <summary>모델리스 창이라 실측을 ExternalEvent로 돌림(ValveRoomCommand와 같은 RevitActionHandler 경로). null이면 바로 실행.</summary>
+    public Action<Action>? RunInRevitContext { get; set; }
     /// <summary>Revit 뷰에서 외곽 벽체 피킹을 시작한다. 결과는 <see cref="ApplyOutline"/>으로 되돌아온다.</summary>
     public Action? PickOutlineAction { get; set; }
     /// <summary>Revit 뷰에서 기존 배관 피킹을 시작한다. 결과는 <see cref="ApplyPickedPiping"/>으로 되돌아온다(docs/158).</summary>
@@ -2026,8 +2031,46 @@ public sealed class PipeLayoutViewModel : ViewModelBase
     /// 스냅샷 한 장으로 그래프·원본 목록·포트를 함께 되돌릴 수 있게 한다.</summary>
     private void ApplyTemplate()
     {
+        // 타이밸브실 = 로드된 패밀리로 벽 여유 c 실측 후 그림(docs/323). 실측은 API 컨텍스트라 ExternalEvent 뒤에 적용
+        var isTieRoom = string.Equals(ValveRoomZone, ValveRoomPipingTemplateCatalog.TieValveRoom, StringComparison.Ordinal);
+        if (!isTieRoom || MeasureTieLayout is null) { ApplyTemplateCore(null, null); return; }
+        if (RunInRevitContext is { } run) run(MeasureTieAndApply);
+        else MeasureTieAndApply();
+    }
+
+    private void MeasureTieAndApply()
+    {
+        TieValveRoomLayout? layout = null;
+        string? error = null;
+        // Revit API 예외 형식이 여럿이라 전부 받음 — 실측 실패는 비율 배치 폴백일 뿐, 창 죽이면 안 됨
+        try { layout = MeasureTieLayout?.Invoke(_diameterMm, _pipeMaterial, _steelFittingClass); }
+        catch (Exception ex) { error = ex.Message; }
+        ApplyTemplateCore(layout, error ?? (layout is null ? "실측 경로 없음" : null));
+    }
+
+    /// <param name="tie">타이밸브실 실측 결과. null + <paramref name="tieError"/> null = 실측 안 함(타이 아님·경로 없음).</param>
+    private void ApplyTemplateCore(TieValveRoomLayout? tie, string? tieError)
+    {
         var template = ValveRoomPipingTemplateCatalog.Default(ValveRoomZone);
         if (template is null || _canvasOutline.IsEmpty) return;
+        // 타이밸브실: 실측 c로 위·아래 본관을 벽에서 띄움. 실패·c ≥ 폭/2면 비율 배치 폴백 + 상태 문구
+        var tieNote = string.Empty;
+        if (tie is not null)
+        {
+            var heightMm = _canvasOutline.HeightMm;
+            if (ValveRoomPipingTemplateCatalog.TieWithWallClearance(_canvasOutline, tie.WallClearanceMm) is { } tieTemplate)
+            {
+                template = tieTemplate;
+                tieNote = $" · 실측 벽 여유 {tie.WallClearanceMm:0} mm · 최소 폭 {tie.MinWidthMm:0} mm"
+                    + (heightMm + 0.5 < tie.MinWidthMm
+                        ? $" — 밸브실 내부 폭 {heightMm:0} mm가 최소 폭보다 작아 바이패스 세트가 빠질 수 있음"
+                        : string.Empty);
+            }
+            else
+                tieNote = $" · 실측 벽 여유 {tie.WallClearanceMm:0} mm가 내부 폭 {heightMm:0} mm의 절반 이상 — 비율(0.25/0.75) 배치로 그림(최소 폭 {tie.MinWidthMm:0} mm)";
+        }
+        else if (tieError is not null)
+            tieNote = $" · 최소 폭 실측 실패({tieError}) — 비율(0.25/0.75) 배치로 그림";
         // 공기밸브실은 기초 본관 관통 Void 자리·관경·높이를 따른다(2026-10-29). Void 못 찾으면 고정 프리셋(중앙 직관) 폴백.
         var isAirRoom = IsAirValveRoom;
         var pipeVoid = isAirRoom ? _canvasOutline.MainPipeVoid : null;
@@ -2119,7 +2162,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             + (unassignedValves > 0 ? $" · 맞는 밸브 유형(게이트·버터플라이)을 찾지 못해 밸브 {unassignedValves}개는 패밀리 미지정" : string.Empty)
             + (placedBypassSets > 0 && HandbookBypassDiameterMm(_diameterMm) is null
                 ? $" · 바이패스 세트는 {ValveBypassSpecTable.RangeText(_pipeMaterial, _steelFittingClass)} 본관에서만 생성됩니다(현재 DN{_diameterMm:0}) — 기본 관경을 바꾼 뒤 다시 적용하세요."
-                : string.Empty);
+                : string.Empty)
+            + tieNote;
     }
 
     /// <summary>양 끝점이 주어진 두 좌표와 같은 선(방향 무관). 없으면 null.</summary>

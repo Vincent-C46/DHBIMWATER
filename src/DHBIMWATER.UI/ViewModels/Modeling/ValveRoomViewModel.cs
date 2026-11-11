@@ -533,7 +533,7 @@ public class ValveRoomViewModel : ViewModelBase
 
     private void ApplyPreset()
     {
-        // L·W·H = 제원표 기준관경 행(docs/311). 표 없으면(타이) 아래 하드코딩 값.
+        // L·W·H = 제원표 기준관경 행(docs/311). 표에 그 관경 없으면 아래 하드코딩 값.
         var diameter = ValveRoomPlacementRules.DefaultPipeDiameter(SelectedValveRoomType);
         var standard = _dimensionTable.Find(SelectedValveRoomType, diameter, IsSluice ? ValveRoomStandardDimensionCatalog.TypeB : null);
         // 엑셀 행 고른 뒤엔 그 행 관경 유지. ApplyValveRoomListRow가 행 번호 먼저 넣고 유형 바꿈.
@@ -541,7 +541,8 @@ public class ValveRoomViewModel : ViewModelBase
 
         if (IsMud)
         {
-            _innerWidth = 2500; _innerLength = 4000; _innerHeight = 2500;
+            // 타이 W 6000 = 제원표에 그 관경 없을 때만 쓰는 기본값(2026-11-11). 표 있으면 아래 ApplyStandardDimension이 덮음.
+            _innerWidth = IsTie ? 6000 : 2500; _innerLength = 4000; _innerHeight = 2500;
             _foundationToe = 300; _foundationThickness = 500;
             // 타이밸브실은 중간벽·중간슬래브를 쓰지 않는다(docs/144 § 1). 유형이 바뀔 때마다 이 프리셋이
             // 다시 도는 덕에 "이토에서 켠 중간슬래브"가 타이로 넘어가지 않는다.
@@ -770,8 +771,38 @@ public class ValveRoomViewModel : ViewModelBase
                     SelectedColumnTypeName == NotUsed ? string.Empty : SelectedColumnTypeName)
                 : null
         };
-        if (CreateModelAction != null) CreateModelAction(RequestedCreate);
+        // 타이밸브실: W는 제원표 값 그대로, 실측 최소 폭보다 작으면 경고만 하고 생성 계속(docs/323, 2026-11-11 사용자 결정 1번).
+        // 실측은 프로브 놓고 롤백하는 트랜잭션이라 API 컨텍스트 필요 — 경고 뒤 같은 컨텍스트에서 생성 요청
+        var request = RequestedCreate;
+        if (IsTie && MeasureTieLayout is not null)
+        {
+            if (RunInRevitContext is { } run) run(() => { WarnIfBelowTieMinWidth(request.InnerWidth); SubmitCreate(request); });
+            else { WarnIfBelowTieMinWidth(request.InnerWidth); SubmitCreate(request); }
+            return;
+        }
+        SubmitCreate(request);
+    }
+
+    private void SubmitCreate(ValveRoomRequestDto request)
+    {
+        if (CreateModelAction != null) CreateModelAction(request);
         else CloseAction?.Invoke();
+    }
+
+    /// <summary>타이밸브실 최소 폭 실측(docs/323). 기준관경(DN) → 최소 폭. null이면 실측 안 함(테스트·Sandbox).</summary>
+    public Func<double, TieValveRoomLayout>? MeasureTieLayout { get; set; }
+
+    /// <summary>내부 폭이 실측 최소 폭보다 작으면 경고 대화상자만. 실측 실패면 조용히 넘어감 — 생성 막는 조건 아님.</summary>
+    private void WarnIfBelowTieMinWidth(double innerWidthMm)
+    {
+        TieValveRoomLayout layout;
+        // Revit API 예외 형식이 여럿이라 전부 받음. 실측 실패는 생성 막을 이유 아님
+        try { layout = MeasureTieLayout!(PlacementPipeDiameter); }
+        catch (Exception) { return; }
+        if (innerWidthMm + 0.5 >= layout.MinWidthMm) return;
+        _dialogService.Warn("타이밸브실 폭 확인",
+            $"내부 폭 {innerWidthMm:N0} mm가 DN{PlacementPipeDiameter:0} 실측 최소 폭 {layout.MinWidthMm:N0} mm보다 작습니다.\n"
+            + "바이패스 세트가 빠질 수 있습니다. 생성은 계속합니다.");
     }
     /// <param name="applyDefaults">기둥·보·헌치·Void 패밀리의 기본값을 자동 선택할지. 재로드(<see cref="ReloadTypeNames"/>)는
     /// 사용자가 이미 고른 값이 우선이라 false로 부르고, 복원 규칙을 직접 돌린다(docs/154 § B-1, docs/156 § C-3).</param>
@@ -1022,10 +1053,34 @@ public class ValveRoomViewModel : ViewModelBase
             return;
         }
 
-        // 제원표 L·W. 없으면(타이·표 밖 관경) 지금 값으로 계산하고 경고만 남긴다(docs/304 가정 3).
+        // 타이 W = 실측 최소 폭(2026-11-11 사용자 결정 2번). 실측은 프로브 놓고 롤백 → API 컨텍스트 필요.
+        // W가 배치 중심 계산에 들어가므로 실측 먼저, 나머지는 같은 컨텍스트에서.
+        if (IsTie && MeasureTieLayout is not null)
+        {
+            if (RunInRevitContext is { } run) run(() => AutoPlaceWithDimensions(MeasureTieMinWidth()));
+            else AutoPlaceWithDimensions(MeasureTieMinWidth());
+            return;
+        }
+        AutoPlaceWithDimensions(null);
+    }
+
+    /// <summary>타이 실측 결과. 성공 = MinWidthMm, 실패 = FailureReason(생성 막는 조건 아님).</summary>
+    private sealed record TieMinWidthResult(double? MinWidthMm, string? FailureReason);
+
+    private TieMinWidthResult MeasureTieMinWidth()
+    {
+        // Revit API 예외 형식이 여럿이라 전부 받음. 핸드북 밖 관경·패밀리 없음 등
+        try { return new TieMinWidthResult(MeasureTieLayout!(PlacementPipeDiameter).MinWidthMm, null); }
+        catch (Exception ex) { return new TieMinWidthResult(null, ex.Message); }
+    }
+
+    private void AutoPlaceWithDimensions(TieMinWidthResult? tie)
+    {
+        // 제원표 L·W. 없으면(표 밖 관경) 지금 값으로 계산하고 경고만 남긴다(docs/304 가정 3).
+        // 타이 W는 실측 최소 폭 우선, 실측 실패면 제원표 W.
         var standard = _dimensionTable.Find(SelectedValveRoomType, PlacementPipeDiameter, IsSluice ? SelectedSluiceVariant : null);
         var innerLength = standard?.LengthMm ?? InnerLength;
-        var innerWidth = standard?.WidthMm ?? InnerWidth;
+        var innerWidth = tie?.MinWidthMm ?? standard?.WidthMm ?? InnerWidth;
         var usesIntermediateSlab = IsMud && HasIntermediateSlab;
         // 공기밸브실 Hp는 칸 값 말고 행 관경 공식. 성공 뒤 MainPipeDiameter 연동이 같은 값으로 칸을 맞춘다(docs/311 § C).
         var airDepth = ValveRoomPlacementRules.AirValvePipeCenterDepthMm(PlacementPipeDiameter);
@@ -1091,8 +1146,12 @@ public class ValveRoomViewModel : ViewModelBase
                       $"도북각 {placement.TrueNorthToProjectNorthClockwiseDegrees:0.###}° 적용";
         if (IsSluice && standard is not null && standard.Variant != SelectedSluiceVariant)
             message += $"\n※ {SelectedSluiceVariant}에 DN{PlacementPipeDiameter:0}이 없어 {standard.Variant}을 적용했습니다.";
+        if (tie?.MinWidthMm is { } tieWidth)
+            message += $"\n※ 타이밸브실 W = DN{PlacementPipeDiameter:0} 실측 최소 폭 {tieWidth:N0} mm (제원표 W 대신)";
+        else if (tie?.FailureReason is { } reason)
+            message += $"\n※ 타이밸브실 최소 폭 실측 실패 — W는 제원표·현재 값 {innerWidth:N0} mm 사용. 바이패스 세트가 빠질 수 있습니다.\n   사유: {reason}";
         if (resolution.Warnings.Count > 0) message += "\n\n" + string.Join("\n", resolution.Warnings);
-        if (standard is null) _dialogService.Warn("위치 자동지정", message);
+        if (standard is null || tie?.FailureReason is not null) _dialogService.Warn("위치 자동지정", message);
         else _dialogService.Info("위치 자동지정", message);
     }
 

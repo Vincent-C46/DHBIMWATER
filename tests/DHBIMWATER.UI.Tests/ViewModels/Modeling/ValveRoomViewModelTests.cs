@@ -3,6 +3,9 @@ using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.Interfaces.Gis;
 using DHBIMWATER.Application.UseCases.AutoGenerator;
 using DHBIMWATER.Core.Gis;
+using DHBIMWATER.Core.Structures;
+using DHBIMWATER.Core.Piping;
+using DHBIMWATER.Application.DTOs.Revit.ValveRoom;
 using DHBIMWATER.UI.ViewModels.Modeling;
 using Xunit;
 
@@ -463,18 +466,106 @@ public class ValveRoomViewModelTests
     }
 
     [Fact]
-    public void 타이밸브실은_제원표가_없어_LW를_유지하고_경고한다()
+    public void 타이밸브실은_이토_제원표를_LW_바꿔_적용한다()
     {
         var dialog = new StubDialogService();
         var vm = CreatePlacementViewModel(dialog, rowIndex: 2);
 
         vm.AutoPlaceCommand.Execute(null);
 
+        // 이토 DN300 = L1500·W1500·H1900 → 타이는 L·W 맞바꿈(정사각이라 값 같음).
         Assert.Equal("타이밸브실", vm.SelectedValveRoomType);
-        Assert.Equal(4000d, vm.InnerLength);
-        Assert.Equal(2500d, vm.InnerWidth);
+        Assert.Equal(1500d, vm.InnerLength);
+        Assert.Equal(1500d, vm.InnerWidth);
         Assert.Equal(9.25d, vm.FoundationTopEl, 6);
-        Assert.Contains(dialog.Warnings, x => x.Contains("제원표에 타이밸브실 DN300 없음"));
+        Assert.DoesNotContain(dialog.Warnings, x => x.Contains("제원표에 타이밸브실"));
+    }
+
+    // 2026-11-11 사용자 결정 2번: 실측되면 W = 실측 최소 폭(제원표 W 대신)
+    [Fact]
+    public void 타이밸브실_위치자동지정은_실측_최소폭을_W로_쓴다()
+    {
+        var dialog = new StubDialogService();
+        var vm = CreatePlacementViewModel(dialog, rowIndex: 2);
+        double? measuredDn = null;
+        vm.MeasureTieLayout = dn => { measuredDn = dn; return new TieValveRoomLayout(0, 0, 4700); };
+
+        vm.AutoPlaceCommand.Execute(null);
+
+        Assert.Equal(300d, measuredDn);
+        Assert.Equal(1500d, vm.InnerLength);   // L은 제원표 그대로
+        Assert.Equal(4700d, vm.InnerWidth);
+        Assert.Contains(dialog.Infos, x => x.Contains("실측 최소 폭 4,700"));
+    }
+
+    [Fact]
+    public void 타이밸브실_위치자동지정_실측_실패면_제원표_W와_경고()
+    {
+        var dialog = new StubDialogService();
+        var vm = CreatePlacementViewModel(dialog, rowIndex: 2);
+        vm.MeasureTieLayout = _ => throw new InvalidOperationException("핸드북 밸브부관 규격에 없는 본관");
+
+        vm.AutoPlaceCommand.Execute(null);
+
+        Assert.Equal(1500d, vm.InnerWidth);
+        Assert.Contains(dialog.Warnings, x => x.Contains("실측 실패") && x.Contains("핸드북 밸브부관 규격에 없는 본관"));
+    }
+
+    // docs/323 결정 1번: W는 제원표 그대로, 실측 최소 폭보다 작으면 경고만 하고 생성 계속
+    [Theory]
+    [InlineData(9000, true)]
+    [InlineData(1000, false)]
+    public void 타이밸브실_폭이_실측_최소폭보다_작으면_경고만_하고_생성한다(double minWidthMm, bool expectWarning)
+    {
+        var dialog = new StubDialogService();
+        var vm = new ValveRoomViewModel(dialog, new StubElementTypeQueryRepo(), new StubProjectInformationQueryRepo());
+        vm.SelectedValveRoomType = "타이밸브실";
+        vm.HasDrainPit = false;
+        vm.HasUpperHaunch = false;
+        vm.HasLowerHaunch = false;
+        var width = vm.InnerWidth;
+        double? measuredDn = null;
+        vm.MeasureTieLayout = dn => { measuredDn = dn; return new DHBIMWATER.Core.Piping.TieValveRoomLayout(0, 0, minWidthMm); };
+        DHBIMWATER.Application.DTOs.Revit.ValveRoom.ValveRoomRequestDto? requested = null;
+        vm.CreateModelAction = r => requested = r;
+
+        vm.CreateCommand.Execute(null);
+
+        Assert.NotNull(requested);
+        Assert.Equal(width, requested!.InnerWidth);   // 제원표 W 안 덮음
+        Assert.Equal(vm.PlacementPipeDiameter, measuredDn);
+        Assert.Equal(expectWarning, dialog.Warnings.Any(x => x.Contains("실측 최소 폭")));
+    }
+
+    [Fact]
+    public void 타이밸브실_실측_실패해도_생성한다()
+    {
+        var dialog = new StubDialogService();
+        var vm = new ValveRoomViewModel(dialog, new StubElementTypeQueryRepo(), new StubProjectInformationQueryRepo());
+        vm.SelectedValveRoomType = "타이밸브실";
+        vm.HasDrainPit = false;
+        vm.HasUpperHaunch = false;
+        vm.HasLowerHaunch = false;
+        vm.MeasureTieLayout = _ => throw new InvalidOperationException("패밀리 없음");
+        var requested = false;
+        vm.CreateModelAction = _ => requested = true;
+
+        vm.CreateCommand.Execute(null);
+
+        Assert.True(requested);
+        Assert.Empty(dialog.Warnings);
+    }
+
+    [Fact]
+    public void 타이밸브실_제원표는_이토_표의_길이와_폭을_맞바꾼다()
+    {
+        // 이토 DN700 = L2500·W2000·H3200 → 타이 L2000·W2500·H3200.
+        var tie = ValveRoomStandardDimensionCatalog.Find(ValveRoomStandardDimensionCatalog.Tie, 700);
+
+        Assert.NotNull(tie);
+        Assert.Equal(2000d, tie!.LengthMm);
+        Assert.Equal(2500d, tie.WidthMm);
+        Assert.Equal(3200d, tie.HeightMm);
     }
 
     [Fact]
@@ -638,14 +729,17 @@ public class ValveRoomViewModelTests
     }
 
     [Fact]
-    public void 타이는_제원표가_없어_기존_프리셋을_쓴다()
+    public void 타이_기준관경이_제원표_밖이면_W6000_기본값을_쓴다()
     {
         var vm = CreateViewModel(new StubElementTypeQueryRepo());
 
         vm.SelectedValveRoomType = "타이밸브실";
 
+        // 타이 기준관경 DN1650 > 표 최대 DN1200 → 표 행 없음 → 하드코딩 기본값(W 6000).
+        Assert.Null(ValveRoomStandardDimensionCatalog.Find(
+            ValveRoomStandardDimensionCatalog.Tie, ValveRoomPlacementRules.DefaultPipeDiameter("타이밸브실")));
         Assert.Equal(4000d, vm.InnerLength);
-        Assert.Equal(2500d, vm.InnerWidth);
+        Assert.Equal(6000d, vm.InnerWidth);
         Assert.Equal(2500d, vm.InnerHeight);
     }
 

@@ -12,5 +12,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Mock
             mockDialogService.Info("GenericModel Placement", $"{def.SymbolName} ({def.ElementCode}) 배치완료");
             return 0;
         }
+
+        public IReadOnlyList<string> TakeWarnings() => [];
     }
 }

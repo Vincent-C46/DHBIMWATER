@@ -158,6 +158,10 @@ public sealed class CreateDischargeBasinUseCase : ICreateDischargeBasinUseCase
                 var openingNote = openingFailures > 0
                     ? $"\r\n\r\n※ 상부 개구부 {openingDefs.Count}개소 중 {openingFailures}개소를 만들지 못했습니다."
                     : string.Empty;
+                // 개구부 Repo는 경고창 대신 경고를 모은다 → 완료창에 1건 1줄로 붙임.
+                var openingWarnings = _openingCommand.TakeWarnings();
+                if (openingWarnings.Count > 0)
+                    openingNote += "\r\n\r\n" + string.Join("\r\n", openingWarnings);
                 var placement = DischargeBasinPlacement.For(input, geometry);
                 _dialog.Info("모델 생성",
                     $"토출조 모델 생성을 완료했습니다.\r\n\r\n" +

@@ -12,19 +12,33 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
     {
         #region Fields
         private readonly Func<Document?> _doc;  // Revit Document에 접근하기 위한 람다식
-        private readonly IDialogService _dialog;
+        // 계단마다 경고창 띄우던 것 대신 모음. 호출부가 TakeWarnings로 가져가 경고창 1번에 목록으로 보여줌.
+        private readonly List<string> _warnings = [];
         private static int _createSequence;
         #endregion
 
         #region Constructor
-        public RevitStairCommandRepo(Func<Document?> doc, IDialogService dialog)
+        public RevitStairCommandRepo(Func<Document?> doc)
         {
             _doc = doc;
-            _dialog = dialog;
         }
         #endregion
 
         #region Methods
+        public IReadOnlyList<string> TakeWarnings()
+        {
+            var warnings = _warnings.ToList();
+            _warnings.Clear();
+            return warnings;
+        }
+
+        /// <summary>경고 1건 = 1줄. 같은 문구(계단마다 같은 유형 누락 등)는 한 번만.</summary>
+        private void AddWarning(string message)
+        {
+            var line = message.Replace("\r", " ").Replace("\n", " ");
+            if (!_warnings.Contains(line)) _warnings.Add(line);
+        }
+
         public int CreateStair(StairsDefinition stairsDefinition)
         {
             Document? doc = _doc();
@@ -32,13 +46,13 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
             if (doc == null)
             {
-                _dialog.Warn("Error", "Active document is not available.");
+                AddWarning("활성 문서가 없습니다.");
                 return 0;
             }
 
             if (stairsDefinition.Runs.Count == 0)
             {
-                _dialog.Warn("Error", "계단 Run이 1개 이상 필요합니다.");
+                AddWarning($"계단 Run이 없습니다 — {stairsDefinition.ElementCode}");
                 return 0;
             }
 
@@ -53,7 +67,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
             if (baseLevel == null || topLevel == null)
             {
-                _dialog.Warn("Error", "계단 하부/상부 레벨을 찾을 수 없습니다.");
+                AddWarning($"계단 하부/상부 레벨을 찾을 수 없습니다: {stairsDefinition.BaseLevelName} / {stairsDefinition.TopLevelName}");
                 return 0;
             }
 
@@ -70,7 +84,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
                 if (stairsType == null)
                 {
-                    _dialog.Warn("Error", $"계단 유형을 찾을 수 없습니다: {stairsDefinition.TypeName}");
+                    AddWarning($"계단 유형을 찾을 수 없습니다: {stairsDefinition.TypeName}");
                     return 0;
                 }
             }
@@ -116,7 +130,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
                             }
                             catch (Exception ex)
                             {
-                                _dialog.Warn("Warning", $"계단 타입/디딤판 사전 설정 실패: {ex.Message}");
+                                AddWarning($"계단 타입/디딤판 사전 설정 실패 — {stairsDefinition.ElementCode}: {ex.Message}");
                             }
                         }
                         doc.Regenerate();
@@ -159,7 +173,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
                             }
                             catch (Exception ex)
                             {
-                                _dialog.Warn("Warning", $"단수/디딤판 깊이 설정 실패: {ex.Message}");
+                                AddWarning($"단수/디딤판 깊이 설정 실패 — {stairsDefinition.ElementCode}: {ex.Message}");
                             }
                         }
                         doc.Regenerate();
@@ -174,7 +188,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             }
             catch (Exception ex)
             {
-                _dialog.Warn("Error", $"계단 생성 실패\nElementCode: {stairsDefinition.ElementCode}\nException: {ex.Message}");
+                AddWarning($"계단 생성 실패 — {stairsDefinition.ElementCode}: {ex.Message}");
                 return 0;
             }
 
@@ -203,7 +217,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
                     }
                     catch (Exception ex)
                     {
-                        _dialog.Warn("Warning", $"계단 유형 변경 실패: {ex.Message}");
+                        AddWarning($"계단 유형 변경 실패 — {stairsDefinition.ElementCode}: {ex.Message}");
                     }
                 }
 
@@ -227,7 +241,7 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
                 }
                 catch (Exception ex)
                 {
-                    _dialog.Warn("Warning", $"단수/높이 재확정 실패: {ex.Message}");
+                    AddWarning($"단수/높이 재확정 실패 — {stairsDefinition.ElementCode}: {ex.Message}");
                 }
 
                 stairs.LookupParameter("DH_ElementCode")?.Set(stairsDefinition.ElementCode);

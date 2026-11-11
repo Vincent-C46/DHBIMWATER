@@ -3233,6 +3233,57 @@ public sealed class PipeLayoutViewModelTests
         Assert.All(vm.BypassSetItems, x => Assert.Contains("단관 300mm", x.BypassSummary));
     }
 
+    // docs/323: 실측 벽 여유 c 있으면 위·아래 본관(포트)을 벽에서 c. 실측은 RunInRevitContext 뒤에 적용
+    [Fact]
+    public void ApplyTemplate_TieRoom_MeasuredClearance_PlacesPortsAtClearance()
+    {
+        var vm = CreateDrawingViewModel(["DH_게이트 밸브 : 300A", "DH_버터플라이 밸브 : 300A"]);
+        vm.ApplyOutline(CreateOutline(4000, 3000));
+        vm.ValveRoomZone = "타이밸브실";
+        Action? queued = null;
+        vm.RunInRevitContext = action => queued = action;
+        vm.MeasureTieLayout = (_, _, _) => new TieValveRoomLayout(1600, 600, 2800);
+
+        vm.ApplyTemplateCommand.Execute(null);
+        Assert.Empty(vm.Edges);   // ExternalEvent 돌기 전엔 안 그림
+        Assert.NotNull(queued);
+        queued!();
+
+        Assert.Equal(5, vm.Edges.Count);
+        Assert.Equal(new double[] { 600, 600, 2400, 2400 }, vm.Ports.Select(x => x.OffsetMm).Order().Select(x => Math.Round(x, 3)));
+        Assert.Contains("실측 벽 여유 600 mm", vm.Status);
+        Assert.DoesNotContain("최소 폭보다 작아", vm.Status);
+    }
+
+    [Fact]
+    public void ApplyTemplate_TieRoom_WidthBelowMinimum_WarnsButDraws()
+    {
+        var vm = CreateDrawingViewModel(["DH_게이트 밸브 : 300A", "DH_버터플라이 밸브 : 300A"]);
+        vm.ApplyOutline(CreateOutline(4000, 3000));
+        vm.ValveRoomZone = "타이밸브실";
+        vm.MeasureTieLayout = (_, _, _) => new TieValveRoomLayout(2000, 700, 3400);
+
+        vm.ApplyTemplateCommand.Execute(null);
+
+        Assert.Equal(5, vm.Edges.Count);
+        Assert.Contains("최소 폭보다 작아", vm.Status);
+    }
+
+    [Fact]
+    public void ApplyTemplate_TieRoom_MeasureFails_FallsBackToRatio()
+    {
+        var vm = CreateDrawingViewModel(["DH_게이트 밸브 : 300A", "DH_버터플라이 밸브 : 300A"]);
+        vm.ApplyOutline(CreateOutline(4000, 3000));
+        vm.ValveRoomZone = "타이밸브실";
+        vm.MeasureTieLayout = (_, _, _) => throw new InvalidOperationException("패밀리 없음");
+
+        vm.ApplyTemplateCommand.Execute(null);
+
+        Assert.Equal(5, vm.Edges.Count);
+        Assert.Equal(new double[] { 750, 750, 2250, 2250 }, vm.Ports.Select(x => x.OffsetMm).Order().Select(x => Math.Round(x, 3)));
+        Assert.Contains("최소 폭 실측 실패(패밀리 없음)", vm.Status);
+    }
+
     // docs/322: 2개 세트는 타이밸브실만 — 제수밸브실 세트는 종전대로 밸브 1개
     [Fact]
     public void ApplyTemplate_SluiceRoom_BypassSetKeepsSingleValve()
