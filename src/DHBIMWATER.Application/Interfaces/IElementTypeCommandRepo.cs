@@ -7,7 +7,13 @@ namespace DHBIMWATER.Application.Interfaces
         int FindOrCreateConcreteMaterial(ConcreteSpec concrete);
         int FindOrCreateSlabType(FloorTypeSpec spec, int materialId);
         int FindOrCreateWallType(WallTypeSpec spec, int materialId);
+        /// <summary>콘크리트 보 유형. 이름 정확히 일치로 찾고, 없으면 콘크리트 사각형 보 복제 후 b·h 수정.
+        /// 패밀리 이름에 "헌치"/"haunch" 든 것은 찾기·복제 원본 둘 다 제외(docs/325 § C).</summary>
         int FindOrCreateBeamType(BeamTypeSpec spec);
+        /// <summary>콘크리트 기둥 유형. 이름 정확히 일치로 찾고, 없으면 콘크리트 사각형 기둥 복제 후 b·h 수정. 원본 없으면 0(docs/325 § C).</summary>
+        int FindOrCreateColumnType(ColumnTypeSpec spec);
+        /// <summary>헌치 유형. 패밀리 이름에 "헌치"/"haunch" 든 구조 프레임 중 이름 정확히 일치로 찾고, 없으면 복제 후 크기 수정. 원본 없으면 0(docs/325 § C).</summary>
+        int FindOrCreateHaunchType(BeamTypeSpec spec);
         int FindBeamSymbol(string typeName);
         /// <summary>"패밀리명 : 타입명"으로 구조 프레임 유형을 찾는다. 구분자가 없으면 타입명 단독으로 보고
         /// <see cref="FindBeamSymbol"/>과 같게 동작한다(하위호환). 찾지 못하면 0(docs/156 § E-1).</summary>

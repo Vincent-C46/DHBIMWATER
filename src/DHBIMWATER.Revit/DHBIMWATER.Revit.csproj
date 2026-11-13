@@ -43,6 +43,11 @@
 		</None>
 	</ItemGroup>
 
+	<!-- 리본 아이콘. UI 어셈블리 말고 여기 내장 → Revit 시작 때 UI 어셈블리(도해 PNG 포함) 안 풂 -->
+	<ItemGroup>
+		<EmbeddedResource Include="Resources\RibbonIcons\*.png" LogicalName="RibbonIcons.%(Filename)%(Extension)" />
+	</ItemGroup>
+
 	<ItemGroup>
 	  <Folder Include="Commands\Modeling\" />
 	</ItemGroup>

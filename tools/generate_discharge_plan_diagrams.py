@@ -518,7 +518,7 @@ using System.Collections.Generic;
 namespace DHBIMWATER.UI.ViewModels.Modeling
 {{
     /// <summary>도해별 매개변수 글자 영역. 도해 좌표 경로(docs/320).</summary>
-    internal static class DischargeBasinDiagramLabels
+    internal static partial class DischargeBasinDiagramLabels
     {{
         private static readonly Dictionary<string, Dictionary<string, string>> Sheets = new()
         {{

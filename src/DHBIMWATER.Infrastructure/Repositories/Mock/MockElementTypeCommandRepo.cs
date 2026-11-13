@@ -9,6 +9,8 @@ namespace DHBIMWATER.Infrastructure.Repositories.Mock
         public int FindOrCreateSlabType(FloorTypeSpec spec, int materialId) => 1;
         public int FindOrCreateWallType(WallTypeSpec spec, int materialId) => 1;
         public int FindOrCreateBeamType(BeamTypeSpec spec) => 1;
+        public int FindOrCreateColumnType(ColumnTypeSpec spec) => 1;
+        public int FindOrCreateHaunchType(BeamTypeSpec spec) => 1;
         public int FindBeamSymbol(string typeName) => 1;
         public int FindStructuralFramingSymbolByFamilyType(string familyTypeName) => 1;
         public int FindHaunchBeamSymbol() => 1;

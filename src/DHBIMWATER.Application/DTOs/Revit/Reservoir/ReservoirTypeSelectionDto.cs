@@ -27,8 +27,17 @@ namespace DHBIMWATER.Application.DTOs.Revit.Reservoir
         double WviThk,   // 밸브실 내벽
         double LcThk,    // 버림콘크리트 두께
 
-        // 기둥 / 보 유형 이름 (Revit 패밀리 타입명)
-        string ColumnTypeName,
-        string BeamTypeName
+        // 기둥 / 보 / 헌치 단면(mm). 유형 선택 대신 치수로 유형 찾고 없으면 복제 생성(docs/325 § B)
+        double ColumnB,  // 기둥 X 폭
+        double ColumnH,  // 기둥 Y 깊이
+        double BeamW,    // 보 폭
+        double BeamH,    // 보 높이
+        double HaunchB,  // 헌치 b
+        double HaunchH,  // 헌치 h
+
+        // 헌치 켜기. 상부 = H1+H4, 중간 = H3, 하부 = H2
+        bool HasUpperHaunch,
+        bool HasMiddleHaunch,
+        bool HasLowerHaunch
     );
 }

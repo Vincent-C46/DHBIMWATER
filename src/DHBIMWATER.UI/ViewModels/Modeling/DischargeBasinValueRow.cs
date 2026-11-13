@@ -114,6 +114,14 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
             OnPropertyChanged(nameof(Value));
         }
 
+        /// <summary>저장본 복원용. 덮어쓴 값으로 표시만 함 — UserEdited 안 냄(재계산·힌트는 호출부가).</summary>
+        public void RestoreEdited(double value)
+        {
+            _value = value;
+            OnPropertyChanged(nameof(Value));
+            IsEdited = true;
+        }
+
         /// <summary>덮어쓰기 표시만 해제한다. 값 복원은 재계산이 담당한다.</summary>
         public void ClearEdit() => IsEdited = false;
     }

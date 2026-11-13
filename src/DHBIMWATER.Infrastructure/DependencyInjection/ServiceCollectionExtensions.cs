@@ -82,6 +82,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IBendSettingsRepo, RevitBendSettingsRepo>();
         services.AddTransient<IPipeLayoutFamilySettingsRepo, RevitPipeLayoutFamilySettingsRepo>();
         services.AddTransient<IConcreteSettingsRepo, RevitConcreteSettingsRepo>();
+        services.AddTransient<IPumpingStationInputRepo, RevitPumpingStationInputRepo>();
+        services.AddTransient<IReservoirInputRepo, RevitReservoirInputRepo>();   // docs/325
         services.AddTransient<IValveRoomDimensionCatalogRepo, RevitValveRoomDimensionCatalogRepo>();
         services.AddTransient<ITieValveRoomProbeRepo, RevitTieValveRoomProbeRepo>();   // docs/323
         services.AddTransient<IAdaptiveBendPlacementRepo, RevitAdaptiveBendPlacementRepo>();
@@ -165,6 +167,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IBendSettingsRepo, MockBendSettingsRepo>();
         services.AddTransient<IPipeLayoutFamilySettingsRepo, MockPipeLayoutFamilySettingsRepo>();
         services.AddTransient<IConcreteSettingsRepo, MockConcreteSettingsRepo>();
+        services.AddTransient<IPumpingStationInputRepo, MockPumpingStationInputRepo>();
+        services.AddTransient<IReservoirInputRepo, MockReservoirInputRepo>();   // docs/325
         services.AddTransient<IValveRoomDimensionCatalogRepo, MockValveRoomDimensionCatalogRepo>();
         services.AddTransient<ITieValveRoomProbeRepo, MockTieValveRoomProbeRepo>();   // docs/323
         services.AddTransient<IAdaptiveBendPlacementRepo, MockAdaptiveBendPlacementRepo>();

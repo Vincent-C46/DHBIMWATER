@@ -94,17 +94,48 @@
                                             </StackPanel>
                                             <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                                                 <TextBlock Text="1-6." Style="{StaticResource LabelTextBlockStyle}" Width="30" VerticalAlignment="Center"/>
-                                                <TextBlock Text="기둥 유형" Style="{StaticResource LabelTextBlockStyle}" Width="150" VerticalAlignment="Center"/>
-                                                <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Width="130" Height="25" Margin="10,0" VerticalAlignment="Center"
-                                                          ItemsSource="{Binding ColumnTypeNames}"
-                                                          SelectedItem="{Binding ColumnTypeName, Mode=TwoWay}"/>
+                                                <!-- 유형 콤보 대신 치수 입력 → "B x H" 유형 찾고 없으면 복제(docs/325 § B) -->
+                                                <TextBlock Text="기둥 B × H" Style="{StaticResource LabelTextBlockStyle}" Width="150" VerticalAlignment="Center"/>
+                                                <TextBox Style="{StaticResource ReservoirTextBoxStyle}" Width="45" Height="25" Margin="10,0,0,0"
+                                                         Text="{Binding ColumnB, UpdateSourceTrigger=LostFocus, Mode=TwoWay}" VerticalAlignment="Center"/>
+                                                <TextBlock Text="×" Style="{StaticResource LabelTextBlockStyle}" Margin="4,0" VerticalAlignment="Center"/>
+                                                <TextBox Style="{StaticResource ReservoirTextBoxStyle}" Width="45" Height="25" Margin="0,0,10,0"
+                                                         Text="{Binding ColumnH, UpdateSourceTrigger=LostFocus, Mode=TwoWay}" VerticalAlignment="Center"/>
+                                                <TextBlock Text="mm" Style="{StaticResource LabelTextBlockStyle}" VerticalAlignment="Center"/>
                                             </StackPanel>
                                             <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                                                 <TextBlock Text="1-7." Style="{StaticResource LabelTextBlockStyle}" Width="30" VerticalAlignment="Center"/>
-                                                <TextBlock Text="보 유형" Style="{StaticResource LabelTextBlockStyle}" Width="150" VerticalAlignment="Center"/>
-                                                <ComboBox Style="{StaticResource PrimaryComboBoxStyle}" Width="130" Height="25" Margin="10,0" VerticalAlignment="Center"
-                                                          ItemsSource="{Binding BeamTypeNames}"
-                                                          SelectedItem="{Binding BeamTypeName, Mode=TwoWay}"/>
+                                                <TextBlock Text="보 W × H" Style="{StaticResource LabelTextBlockStyle}" Width="150" VerticalAlignment="Center"/>
+                                                <TextBox Style="{StaticResource ReservoirTextBoxStyle}" Width="45" Height="25" Margin="10,0,0,0"
+                                                         Text="{Binding BeamW, UpdateSourceTrigger=LostFocus, Mode=TwoWay}" VerticalAlignment="Center"/>
+                                                <TextBlock Text="×" Style="{StaticResource LabelTextBlockStyle}" Margin="4,0" VerticalAlignment="Center"/>
+                                                <TextBox Style="{StaticResource ReservoirTextBoxStyle}" Width="45" Height="25" Margin="0,0,10,0"
+                                                         Text="{Binding BeamH, UpdateSourceTrigger=LostFocus, Mode=TwoWay}" VerticalAlignment="Center"/>
+                                                <TextBlock Text="mm" Style="{StaticResource LabelTextBlockStyle}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                                                <TextBlock Text="1-8." Style="{StaticResource LabelTextBlockStyle}" Width="30" VerticalAlignment="Center"/>
+                                                <TextBlock Text="헌치 b × h" Style="{StaticResource LabelTextBlockStyle}" Width="150" VerticalAlignment="Center"/>
+                                                <TextBox Style="{StaticResource ReservoirTextBoxStyle}" Width="45" Height="25" Margin="10,0,0,0"
+                                                         Text="{Binding HaunchB, UpdateSourceTrigger=LostFocus, Mode=TwoWay}" VerticalAlignment="Center"/>
+                                                <TextBlock Text="×" Style="{StaticResource LabelTextBlockStyle}" Margin="4,0" VerticalAlignment="Center"/>
+                                                <TextBox Style="{StaticResource ReservoirTextBoxStyle}" Width="45" Height="25" Margin="0,0,10,0"
+                                                         Text="{Binding HaunchH, UpdateSourceTrigger=LostFocus, Mode=TwoWay}" VerticalAlignment="Center"/>
+                                                <TextBlock Text="mm" Style="{StaticResource LabelTextBlockStyle}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                                                <TextBlock Text="1-9." Style="{StaticResource LabelTextBlockStyle}" Width="30" VerticalAlignment="Center"/>
+                                                <!-- 상부 = 수조 상부 H1 + 배관실·전기실 상부 H4, 중간 = 배관실 중간슬래브 하단 H3, 하부 = 수조 기초 H2 -->
+                                                <TextBlock Text="헌치 생성" Style="{StaticResource LabelTextBlockStyle}" Width="150" VerticalAlignment="Center"/>
+                                                <CheckBox IsChecked="{Binding HasUpperHaunch, Mode=TwoWay}" Margin="10,0,0,0" VerticalAlignment="Center">
+                                                    <TextBlock Text="상부" Style="{StaticResource LabelTextBlockStyle}"/>
+                                                </CheckBox>
+                                                <CheckBox IsChecked="{Binding HasMiddleHaunch, Mode=TwoWay}" Margin="10,0,0,0" VerticalAlignment="Center">
+                                                    <TextBlock Text="중간" Style="{StaticResource LabelTextBlockStyle}"/>
+                                                </CheckBox>
+                                                <CheckBox IsChecked="{Binding HasLowerHaunch, Mode=TwoWay}" Margin="10,0,0,0" VerticalAlignment="Center">
+                                                    <TextBlock Text="하부" Style="{StaticResource LabelTextBlockStyle}"/>
+                                                </CheckBox>
                                             </StackPanel>
 
                                             <!--배관실-->

@@ -18,8 +18,11 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         #region Fields
         private readonly IDialogService _dialogService;
         private readonly CreateReservoirUseCase _createReservoirUseCase;
-        private readonly IElementTypeQueryRepo _typeQueryRepo;
         private readonly IFileDialogService _fileDialogService;
+        private readonly IReservoirInputRepo? _inputRepo;
+        private readonly SaveReservoirInputUseCase? _saveInput;
+        // 마지막 저장·복원 시점 입력값(JSON). 창 닫을 때 바뀐 게 있을 때만 저장
+        private string? _savedInputJson;
 
         // 설계조건
         private double _q   = 5000;
@@ -69,8 +72,16 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         private double _wveThk = 300;
         private double _wviThk = 300;
         private double _lcThk  = 100;
-        private string _columnTypeName = string.Empty;
-        private string _beamTypeName   = string.Empty;
+        // 기둥·보·헌치 단면 (mm). 유형 선택 대신 치수로 유형 찾고 없으면 복제(docs/325 § B). 보·헌치 기본값은 펌프장과 같음
+        private double _columnB = 600;
+        private double _columnH = 600;
+        private double _beamW   = 500;
+        private double _beamH   = 700;
+        private double _haunchB = 500;
+        private double _haunchH = 500;
+        private bool _hasUpperHaunch  = true;   // H1 + H4
+        private bool _hasMiddleHaunch = true;   // H3
+        private bool _hasLowerHaunch  = true;   // H2
         #endregion
 
         #region Properties
@@ -276,48 +287,42 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         public double WviThk { get => _wviThk; set { if (_wviThk != value) { _wviThk = value; OnPropertyChanged(nameof(WviThk)); } } }
         public double LcThk  { get => _lcThk;  set { if (_lcThk  != value) { _lcThk  = value; OnPropertyChanged(nameof(LcThk));  } } }
 
-        public IReadOnlyList<string> ColumnTypeNames { get; private set; } = new List<string>();
-        public IReadOnlyList<string> BeamTypeNames   { get; private set; } = new List<string>();
-
-        public string ColumnTypeName
-        {
-            get => _columnTypeName;
-            set { if (_columnTypeName != value) { _columnTypeName = value; OnPropertyChanged(nameof(ColumnTypeName)); } }
-        }
-        public string BeamTypeName
-        {
-            get => _beamTypeName;
-            set { if (_beamTypeName != value) { _beamTypeName = value; OnPropertyChanged(nameof(BeamTypeName)); } }
-        }
+        // 기둥·보·헌치 단면 (mm)
+        public double ColumnB { get => _columnB; set { if (_columnB != value) { _columnB = value; OnPropertyChanged(nameof(ColumnB)); } } }
+        public double ColumnH { get => _columnH; set { if (_columnH != value) { _columnH = value; OnPropertyChanged(nameof(ColumnH)); } } }
+        public double BeamW   { get => _beamW;   set { if (_beamW   != value) { _beamW   = value; OnPropertyChanged(nameof(BeamW));   } } }
+        public double BeamH   { get => _beamH;   set { if (_beamH   != value) { _beamH   = value; OnPropertyChanged(nameof(BeamH));   } } }
+        public double HaunchB { get => _haunchB; set { if (_haunchB != value) { _haunchB = value; OnPropertyChanged(nameof(HaunchB)); } } }
+        public double HaunchH { get => _haunchH; set { if (_haunchH != value) { _haunchH = value; OnPropertyChanged(nameof(HaunchH)); } } }
+        /// <summary>상부 헌치(수조 상부 H1 + 배관실·전기실 상부 H4)</summary>
+        public bool HasUpperHaunch  { get => _hasUpperHaunch;  set { if (_hasUpperHaunch  != value) { _hasUpperHaunch  = value; OnPropertyChanged(nameof(HasUpperHaunch));  } } }
+        /// <summary>중간 헌치(배관실 중간슬래브 하단 H3)</summary>
+        public bool HasMiddleHaunch { get => _hasMiddleHaunch; set { if (_hasMiddleHaunch != value) { _hasMiddleHaunch = value; OnPropertyChanged(nameof(HasMiddleHaunch)); } } }
+        /// <summary>하부 헌치(수조 기초 H2)</summary>
+        public bool HasLowerHaunch  { get => _hasLowerHaunch;  set { if (_hasLowerHaunch  != value) { _hasLowerHaunch  = value; OnPropertyChanged(nameof(HasLowerHaunch));  } } }
         #endregion
 
         /// <summary>[콘크리트 강도] 버튼(docs/249 § E). 배수지 생성 UseCase가 문서 설정을 직접 읽는다.</summary>
         public ConcreteSettingsLauncher ConcreteLauncher { get; }
 
         #region Constructor
-        public WaterTankViewModel(CreateReservoirUseCase useCase, IDialogService dialogService, IElementTypeQueryRepo typeQueryRepo, IFileDialogService fileDialogService,
-            IConcreteSettingsRepo? concreteSettingsRepo = null, SaveConcreteSettingsUseCase? saveConcreteSettings = null)
+        public WaterTankViewModel(CreateReservoirUseCase useCase, IDialogService dialogService, IFileDialogService fileDialogService,
+            IConcreteSettingsRepo? concreteSettingsRepo = null, SaveConcreteSettingsUseCase? saveConcreteSettings = null,
+            IReservoirInputRepo? inputRepo = null, SaveReservoirInputUseCase? saveInput = null)
         {
             _createReservoirUseCase = useCase;
             _dialogService          = dialogService;
-            _typeQueryRepo          = typeQueryRepo;
             _fileDialogService      = fileDialogService;
+            _inputRepo              = inputRepo;
+            _saveInput              = saveInput;
             ConcreteLauncher        = new ConcreteSettingsLauncher(concreteSettingsRepo, saveConcreteSettings, dialogService);
 
-            LoadTypeNames();
             UpdateCRT();
             CreateWTankCommand = new RelayCommand(CreateWaterTank);
             ExportSettingCommand = new RelayCommand(ExportSetting);
             ImportSettingCommand = new RelayCommand(ImportSetting);
         }
 
-        private void LoadTypeNames()
-        {
-            ColumnTypeNames  = _typeQueryRepo.GetColumnTypeNames().ToList();
-            BeamTypeNames    = _typeQueryRepo.GetBeamTypeNames().ToList();
-            _columnTypeName  = ColumnTypeNames.FirstOrDefault() ?? string.Empty;
-            _beamTypeName    = BeamTypeNames.FirstOrDefault()   ?? string.Empty;
-        }
         #endregion
 
         #region Methods
@@ -329,10 +334,28 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
 
         private void CreateWaterTank(object? obj)
         {
+            // 0 이하 단면은 유형 복제에서 Revit 예외 → 미리 막음(docs/325 § B-6)
+            var badSizes = new (string Name, double Value)[]
+                {
+                    ("기둥 B", ColumnB), ("기둥 H", ColumnH), ("보 W", BeamW), ("보 H", BeamH), ("헌치 b", HaunchB), ("헌치 h", HaunchH),
+                }
+                .Where(x => x.Value <= 0).Select(x => x.Name).ToList();
+            if (badSizes.Count > 0)
+            {
+                _dialogService.Warn("입력 확인", $"0보다 큰 값을 입력하세요: {string.Join(", ", badSizes)}");
+                return;
+            }
+
             var requestDto = BuildCreationRequestDto();
             // 모델리스 창: 생성은 API 컨텍스트에서 실행. 생성 후 창 유지(docs/320 § B)
-            if (RunInRevitContext is { } run) run(() => _createReservoirUseCase.Execute(requestDto));
-            else _createReservoirUseCase.Execute(requestDto);
+            // 생성에 쓴 값 문서에 남김 → 같은 프로젝트에서 창 다시 열면 복원(docs/325 § E)
+            void CreateAndSave()
+            {
+                _createReservoirUseCase.Execute(requestDto);
+                SaveInputs();
+            }
+            if (RunInRevitContext is { } run) run(CreateAndSave);
+            else CreateAndSave();
         }
         private ReservoirCreationRequestDto BuildCreationRequestDto()
         {
@@ -349,7 +372,8 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
             var thicknessDto = new ReservoirTypeThicknessDto(
                 StuThk, StbThk, SvuThk, SvmThk, SvbThk,
                 WteThk, WtiThk, WhThk, WveThk, WviThk, LcThk,
-                ColumnTypeName, BeamTypeName);
+                ColumnB, ColumnH, BeamW, BeamH, HaunchB, HaunchH,
+                HasUpperHaunch, HasMiddleHaunch, HasLowerHaunch);
 
             return new ReservoirCreationRequestDto(designConditionDto, tankDto, valveDto, thicknessDto);
         }
@@ -385,6 +409,23 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                 }
 
                 var errors = new List<string>();
+                ApplySettingValues(values, errors);
+
+                if (errors.Count > 0)
+                    _dialogService.Warn("가져오기", string.Join(Environment.NewLine, errors));
+                else
+                    _dialogService.Info("가져오기", "CSV 파일을 가져왔습니다.");
+            }
+            catch (Exception ex)
+            {
+                _dialogService.Warn("가져오기", $"CSV 파일을 읽을 수 없습니다: {ex.Message}");
+            }
+        }
+
+        /// <summary>코드→값 표를 화면 값에 넣음. CSV 가져오기와 문서 저장본 복원이 같이 씀(docs/325 § E).
+        /// 없는 코드는 errors에 "누락"으로 남기고 현재 값 유지.</summary>
+        private void ApplySettingValues(Dictionary<string, string> values, List<string> errors)
+        {
                 SetDouble(values, "Q", v => Q = v, errors);
                 SetDouble(values, "RT", v => RT = v, errors);
                 // N=2만 지원. 다른 값은 무시하고 알림(docs/289 § A).
@@ -427,26 +468,77 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                 SetDouble(values, "WveThk", v => WveThk = v, errors);
                 SetDouble(values, "WviThk", v => WviThk = v, errors);
                 SetDouble(values, "LcThk", v => LcThk = v, errors);
+                SetDouble(values, "ColumnB", v => ColumnB = v, errors);
+                SetDouble(values, "ColumnH", v => ColumnH = v, errors);
+                SetDouble(values, "BeamW", v => BeamW = v, errors);
+                SetDouble(values, "BeamH", v => BeamH = v, errors);
+                SetDouble(values, "HaunchB", v => HaunchB = v, errors);
+                SetDouble(values, "HaunchH", v => HaunchH = v, errors);
+                SetBool(values, "HasUpperHaunch", v => HasUpperHaunch = v, errors);
+                SetBool(values, "HasMiddleHaunch", v => HasMiddleHaunch = v, errors);
+                SetBool(values, "HasLowerHaunch", v => HasLowerHaunch = v, errors);
+        }
 
-                if (values.TryGetValue("ColumnType", out var columnType)) ColumnTypeName = columnType;
-                else errors.Add("ColumnType 누락");
-                if (values.TryGetValue("BeamType", out var beamType)) BeamTypeName = beamType;
-                else errors.Add("BeamType 누락");
+        #region 입력값 저장·복원 (문서 ExtensibleStorage, docs/325 § E)
+        /// <summary>
+        /// 창 열 때 문서 저장본 복원. Revit API 컨텍스트(명령 실행 중)에서 호출.
+        /// 저장 형식 = CSV 행과 같은 코드→값 표(JSON) — 칸 추가는 BuildSettingRows·ApplySettingValues 두 곳만 고치면 CSV·문서 저장 둘 다 반영.
+        /// 옛 저장본에 없는 칸은 기본값 유지. 저장본 없거나 깨졌으면 false.
+        /// </summary>
+        public bool RestoreSavedInputs()
+        {
+            if (_inputRepo == null) return false;
+            string? json;
+            try { json = _inputRepo.Load(); }
+            catch (Exception ex)
+            {
+                DHBIMWATER.Infrastructure.Logging.LogManager.Logger.Error($"배수지 입력값 읽기 실패: {ex.Message}");
+                return false;
+            }
+            if (string.IsNullOrWhiteSpace(json)) return false;
 
-                if (errors.Count > 0)
-                    _dialogService.Warn("가져오기", string.Join(Environment.NewLine, errors));
-                else
-                    _dialogService.Info("가져오기", "CSV 파일을 가져왔습니다.");
+            Dictionary<string, string>? values;
+            try { values = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json); }
+            catch (System.Text.Json.JsonException) { return false; }
+            if (values == null) return false;
+
+            // 누락 칸(옛 저장본)은 조용히 넘김 — 기본값 유지
+            ApplySettingValues(new Dictionary<string, string>(values, StringComparer.OrdinalIgnoreCase), new List<string>());
+            UpdateCRT();
+            _savedInputJson = CaptureInputJson();
+            return true;
+        }
+
+        /// <summary>현재 입력값 저장. API 컨텍스트에서 호출. 실패는 기록만(생성 결과에 영향 없음).</summary>
+        public void SaveInputs()
+        {
+            if (_saveInput == null) return;
+            var json = CaptureInputJson();
+            try
+            {
+                _saveInput.Execute(json);
+                _savedInputJson = json;
             }
             catch (Exception ex)
             {
-                _dialogService.Warn("가져오기", $"CSV 파일을 읽을 수 없습니다: {ex.Message}");
+                DHBIMWATER.Infrastructure.Logging.LogManager.Logger.Error($"배수지 입력값 저장 실패: {ex.Message}");
             }
         }
+
+        /// <summary>창 닫을 때용. 마지막 저장·복원 뒤 바뀐 값 있을 때만 저장(안 바뀌면 문서 안 건드림).</summary>
+        public void SaveInputsIfChanged()
+        {
+            if (CaptureInputJson() != _savedInputJson) SaveInputs();
+        }
+
+        private string CaptureInputJson()
+            => System.Text.Json.JsonSerializer.Serialize(BuildSettingRows().ToDictionary(r => r.Code, r => r.Value));
+        #endregion
 
         private IEnumerable<(string Code, string Description, string Value, string Unit, string Note)> BuildSettingRows()
         {
             static string D(double value) => value.ToString("G17", CultureInfo.InvariantCulture);
+            static string B(bool value) => value ? "true" : "false";
             return new List<(string, string, string, string, string)>
             {
                 ("Q", "계획 1일 최대급수량", D(Q), "㎥", string.Empty),
@@ -489,8 +581,15 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                 ("WveThk", "밸브실 외벽 두께", D(WveThk), "mm", string.Empty),
                 ("WviThk", "밸브실 내벽 두께", D(WviThk), "mm", string.Empty),
                 ("LcThk", "버림콘크리트 두께", D(LcThk), "mm", string.Empty),
-                ("ColumnType", "기둥 유형명", ColumnTypeName, "", "문자열"),
-                ("BeamType", "보 유형명", BeamTypeName, "", "문자열"),
+                ("ColumnB", "기둥 B(X 폭)", D(ColumnB), "mm", string.Empty),
+                ("ColumnH", "기둥 H(Y 깊이)", D(ColumnH), "mm", string.Empty),
+                ("BeamW", "보 W(폭)", D(BeamW), "mm", string.Empty),
+                ("BeamH", "보 H(높이)", D(BeamH), "mm", string.Empty),
+                ("HaunchB", "헌치 b", D(HaunchB), "mm", string.Empty),
+                ("HaunchH", "헌치 h", D(HaunchH), "mm", string.Empty),
+                ("HasUpperHaunch", "상부 헌치(H1·H4)", B(HasUpperHaunch), "", "true/false"),
+                ("HasMiddleHaunch", "중간 헌치(H3)", B(HasMiddleHaunch), "", "true/false"),
+                ("HasLowerHaunch", "하부 헌치(H2)", B(HasLowerHaunch), "", "true/false"),
             };
         }
         private static void SetDouble(Dictionary<string, string> values, string code, Action<double> setValue, List<string> errors)
@@ -502,6 +601,21 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
             }
             if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ||
                 double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out value))
+            {
+                setValue(value);
+                return;
+            }
+            errors.Add($"{code} 값 파싱 실패: {text}");
+        }
+
+        private static void SetBool(Dictionary<string, string> values, string code, Action<bool> setValue, List<string> errors)
+        {
+            if (!values.TryGetValue(code, out var text))
+            {
+                errors.Add($"{code} 누락");
+                return;
+            }
+            if (bool.TryParse(text, out var value))
             {
                 setValue(value);
                 return;

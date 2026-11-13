@@ -1,4 +1,4 @@
-using Autodesk.Revit.DB;
+﻿using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using DHBIMWATER.Shared.Errors;
 using System.Windows;
@@ -31,6 +31,17 @@ internal sealed class ModelessRevitRunner
 
     /// <summary>설정창 읽기·저장용. 실패는 실행 본문이 처리.</summary>
     public void Run(Action action) => Raise(action, null);
+
+    /// <summary>창 연 문서가 열려 있고 활성일 때만 실행, 아니면 조용히 건너뜀(창 닫을 때 저장 등 오류창 띄우면 안 되는 일용).</summary>
+    public void RunOnOwner(Action action) => Raise(() =>
+    {
+        try
+        {
+            DocumentGuard.EnsureOwner(_owner, _app);
+        }
+        catch (DhbimwaterException) { return; }
+        action();
+    }, null);
 
     /// <summary>모델 생성용. 대기 중 재요청 무시 — 핸들러가 큐라서 연타가 2회 생성됨. 창 연 문서에서만 실행.</summary>
     public void RunCreate(Action action)

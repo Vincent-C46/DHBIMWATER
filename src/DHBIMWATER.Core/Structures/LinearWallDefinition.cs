@@ -21,6 +21,12 @@ namespace DHBIMWATER.Core.Structures
         public double TopOffset { get; set; }
         public bool IsFlipped { get; set; } = false;
         public bool IsExterior { get; set; } = false;
+        // 끝 결합 허용. 기본 false = Repo가 양 끝 결합 끊음(기존 동작). 사선 코너처럼 길이 맞춤으로 못 메우는 끝만 켬
+        public bool JoinAtStart { get; set; } = false;
+        public bool JoinAtEnd { get; set; } = false;
+        // 위치선으로 고정할 면. Center = 벽 중심선(기존 동작). Left/Right = 커브 진행 방향 기준 그쪽 마감면 고정 →
+        // Revit에서 두께 바꿔도 그 면은 안 움직이고 반대쪽으로만 늘어남(docs/325 § F)
+        public WallHoldFace HoldFace { get; set; } = WallHoldFace.Center;
 
         public string Category { get; set; } = "벽";
         public string ElementCode { get; set; } = string.Empty;
@@ -32,4 +38,10 @@ namespace DHBIMWATER.Core.Structures
             get { return new Line3D(StartPoint, EndPoint); }
         }
     }
+}
+
+namespace DHBIMWATER.Core.Structures
+{
+    /// <summary>벽 위치선으로 고정할 면. 커브 진행 방향 기준 왼쪽·오른쪽 마감면.</summary>
+    public enum WallHoldFace { Center, Left, Right }
 }

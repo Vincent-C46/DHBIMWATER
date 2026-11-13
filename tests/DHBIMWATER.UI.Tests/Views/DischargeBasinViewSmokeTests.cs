@@ -57,7 +57,7 @@ public class DischargeBasinViewSmokeTests
         Assert.Null(error);
     }
 
-    /// <summary>TB2 포커스 시 강조 Path가 평면 도해 위에 그려지는지 확인(docs/320).
+    /// <summary>TB2 포커스 시 강조 확대 상자가 평면 도해 위에 그려지는지 확인(docs/320).
     /// DHBIM_RENDER_DIR 지정 시 캡처 PNG 저장.</summary>
     [Theory]
     [InlineData(DischargeBasinViewModel.PositionRight, "discharge-tb2-right.png")]
@@ -83,8 +83,12 @@ public class DischargeBasinViewSmokeTests
             view.Dispatcher.Invoke(() => { }, DispatcherPriority.Loaded);
             view.UpdateLayout();
 
-            var path = Descendants(view).OfType<System.Windows.Shapes.Path>().First(p => p.Data is not null && p.Fill is SolidColorBrush { Color: { R: 0xC6, G: 0xFF } });
-            Assert.True(path.ActualWidth > 0);
+            // 강조 = 확대 상자(빨간 테두리). 창 없이 그려 IsVisible 못 씀 → Data 있는 확대 컨트롤로 찾음
+            var magnifier = Descendants(view).OfType<DHBIMWATER.UI.Controls.DiagramLabelMagnifier>()
+                .First(m => m.Data is not null && m.Children.Count > 0);
+            var box = magnifier.Children.OfType<Border>().First();
+            Assert.True(box.ActualWidth > 0);
+            Assert.Equal(Colors.Red, ((SolidColorBrush)box.BorderBrush).Color);
 
             if (Environment.GetEnvironmentVariable("DHBIM_RENDER_DIR") is { Length: > 0 } dir)
             {

@@ -23,6 +23,11 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         private readonly IUsageLogger _usageLogger;
         private readonly IExcelReader _excelReader;
         private readonly IFileDialogService _fileDialogService;
+        // 입력값 문서 저장(ExtensibleStorage). 없으면(테스트 등) 저장·복원 안 함
+        private readonly IPumpingStationInputRepo? _inputRepo;
+        private readonly SavePumpingStationInputUseCase? _saveInput;
+        // 마지막 저장·복원 JSON. 창 닫을 때 바뀐 것만 저장
+        private string? _savedInputJson;
         private string _excelFilePath = string.Empty;
         private string _selectedPumpManufacturer = string.Empty;
         private IReadOnlyDictionary<string, List<string[]>>? _allSheets;
@@ -119,6 +124,7 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                     _selectedPumpingStationType = value;
                     OnPropertyChanged(nameof(SelectedPumpingStationType));
                     OnPropertyChanged(nameof(ProfileImagePath));
+                    OnPropertyChanged(nameof(ProfileHighlightGeometry));
                     OnPropertyChanged(nameof(T5Visibility));
                     OnPropertyChanged(nameof(T6Visibility));
                     OnPropertyChanged(nameof(B4Visibility));
@@ -128,6 +134,8 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                     OnPropertyChanged(nameof(EntranceTypes));
                     UpdateTypeDependents();
                     OnPropertyChanged(nameof(PlanImagePath));
+                    OnPropertyChanged(nameof(PlanHighlightGeometry));
+                    OnPropertyChanged(nameof(PlanDiagramHeight));
                     if (value != "Type1" && _selectedEntranceType != "측면부")
                     {
                         SelectedEntranceType = "측면부";
@@ -153,6 +161,8 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                     _selectedEntranceType = value;
                     OnPropertyChanged(nameof(SelectedEntranceType));
                     OnPropertyChanged(nameof(PlanImagePath));
+                    OnPropertyChanged(nameof(PlanHighlightGeometry));
+                    OnPropertyChanged(nameof(PlanDiagramHeight));
                     OnPropertyChanged(nameof(T5Visibility));
                     OnPropertyChanged(nameof(B9Visibility));
                     OnPropertyChanged(nameof(L5Visibility));
@@ -987,14 +997,19 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
 
         #region Constructor
         public PumpingStationViewModel(CreatePumpingStationUseCase useCase, IDialogService dialogService, IElementTypeQueryRepo elementTypeQueryRepo, IUsageLogger usageLogger, IExcelReader excelReader, IFileDialogService fileDialogService, DischargeBasinViewModel dischargeBasinViewModel,
-            IConcreteSettingsRepo? concreteSettingsRepo = null, SaveConcreteSettingsUseCase? saveConcreteSettings = null)
+            IConcreteSettingsRepo? concreteSettingsRepo = null, SaveConcreteSettingsUseCase? saveConcreteSettings = null,
+            IPumpingStationInputRepo? inputRepo = null, SavePumpingStationInputUseCase? saveInput = null)
         {
             _createPumpingStationUseCase = useCase;
+            _inputRepo = inputRepo;
+            _saveInput = saveInput;
             _dialogService = dialogService;
             _usageLogger = usageLogger;
             _excelReader = excelReader;
             _fileDialogService = fileDialogService;
             DischargeBasin = dischargeBasinViewModel;
+            // 토출조 생성 뒤에도 같은 저장본(펌프장+토출조) 저장
+            DischargeBasin.AfterCreated = SaveInputs;
             ConcreteLauncher = new ConcreteSettingsLauncher(concreteSettingsRepo, saveConcreteSettings, dialogService);
             // 토출조 배치 기준 — 펌프장 최우측 벽 외면 X, 1번 펌프 중심 Y.
             // 종단제원(B1~B7·T3·T4)은 setter 가 많아 밀어 넣지 않고 필요할 때 당겨 가게 한다.
@@ -1104,9 +1119,124 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
 
             _ = _usageLogger.LogAsync();
             _createPumpingStationUseCase.Execute(creationRequestDto);
+            // 생성에 쓴 값 문서에 남김 → 같은 프로젝트에서 창 다시 열면 복원
+            SaveInputs();
             // 작성 후 창을 닫지 않는다 — 토출조 생성 버튼과 동일하게 창을 유지한다(사용자 요청, 2026-09-15).
             // 창은 Owner=Revit 메인창인 모델리스라 닫지 않아도 Revit 위에 그대로 남는다. 닫기는 TitleBar의 닫기 버튼.
         }
+        #region 입력값 저장·복원 (문서 ExtensibleStorage)
+        private static readonly System.Text.Json.JsonSerializerOptions InputJsonOptions = new()
+        {
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        };
+
+        /// <summary>
+        /// 창 열 때 문서 저장본 복원. Revit API 컨텍스트(명령 실행 중)에서 호출.
+        /// setter 연쇄 계산이 저장값 덮지 않게 필드에 직접 넣고 전체 갱신 알림.
+        /// 저장본 없거나 깨졌으면 기본값 그대로. 성공하면 true.
+        /// </summary>
+        public bool RestoreSavedInputs()
+        {
+            if (_inputRepo == null) return false;
+            string? json;
+            try { json = _inputRepo.Load(); }
+            catch (Exception ex)
+            {
+                DHBIMWATER.Infrastructure.Logging.LogManager.Logger.Error($"펌프장 입력값 읽기 실패: {ex.Message}");
+                return false;
+            }
+            if (string.IsNullOrWhiteSpace(json)) return false;
+
+            PumpingStationInputSnapshot? s;
+            try { s = System.Text.Json.JsonSerializer.Deserialize<PumpingStationInputSnapshot>(json, InputJsonOptions); }
+            catch (System.Text.Json.JsonException) { return false; }
+            if (s == null) return false;
+
+            ApplySnapshot(s);
+            _savedInputJson = CaptureInputJson();
+            return true;
+        }
+
+        /// <summary>현재 입력값 저장. API 컨텍스트에서 호출. 실패는 기록만(생성 결과에 영향 없음).</summary>
+        public void SaveInputs()
+        {
+            if (_saveInput == null) return;
+            var json = CaptureInputJson();
+            try
+            {
+                _saveInput.Execute(json);
+                _savedInputJson = json;
+            }
+            catch (Exception ex)
+            {
+                DHBIMWATER.Infrastructure.Logging.LogManager.Logger.Error($"펌프장 입력값 저장 실패: {ex.Message}");
+            }
+        }
+
+        /// <summary>창 닫을 때용. 마지막 저장·복원 뒤 바뀐 값 있을 때만 저장(안 바뀌면 문서 안 건드림).</summary>
+        public void SaveInputsIfChanged()
+        {
+            if (CaptureInputJson() != _savedInputJson) SaveInputs();
+        }
+
+        internal string CaptureInputJson()
+            => System.Text.Json.JsonSerializer.Serialize(CaptureSnapshot(), InputJsonOptions);
+
+        private PumpingStationInputSnapshot CaptureSnapshot() => new()
+        {
+            PumpingStationType = _selectedPumpingStationType, EntranceType = _selectedEntranceType,
+            D = _d, HD = _hd, N = _n, LWL = _lwl, HWL = _hwl, HasCheckValve = _hasCheckValve,
+            SupportBlockWidth = _supportBlockWidth, SupportBlockHeight = _supportBlockHeight,
+            IsRectangularOpening = _isRectangularOpening,
+            ValveBaseWidth = _selectedValveBase.ValveBaseWidth, ValveBaseLength = _selectedValveBase.ValveBaseLength,
+            ValveBaseHeight = _selectedValveBase.ValveBaseHeight, ValveBasePlacement = _selectedValveBase.ValveBasePlacement,
+            B1 = _b1, B2 = _b2, B3 = _b3, B4 = _b4, B5 = _b5, B6 = _b6, B7 = _b7, B7Base = _b7Base,
+            H1 = _h1, H3 = _h3, H4 = _h4, H5 = _h5, H6 = _h6, H7 = _h7, Theta = _selectedTheta,
+            L1 = _l1, L2 = _l2, L3 = _l3, L4 = _l4, OB1 = _ob1, OH1 = _oh1,
+            NS = _ns, HS = _hs, NS1 = _ns1, HS1 = _hs1,
+            B8 = _b8, B9 = _b9, B10 = _b10, L5 = _l5,
+            T1 = _t1, T2 = _t2, T3 = _t3, T4 = _t4, T5 = _t5, T5Prime = _t5Prime, T6 = _t6,
+            GB1 = _gb1, GH1 = _gh1, HB1 = _hb1, HH1 = _hh1,
+            DischargeBasin = DischargeBasin?.CaptureInputSnapshot(),
+        };
+
+        // 저장본에 없는 칸(null)은 현재 값 유지
+        private void ApplySnapshot(PumpingStationInputSnapshot s)
+        {
+            _selectedPumpingStationType = s.PumpingStationType ?? _selectedPumpingStationType;
+            _selectedEntranceType = s.EntranceType ?? _selectedEntranceType;
+            _d = s.D ?? _d; _hd = s.HD ?? _hd; _n = s.N ?? _n; _lwl = s.LWL ?? _lwl; _hwl = s.HWL ?? _hwl;
+            _hasCheckValve = s.HasCheckValve ?? _hasCheckValve;
+            _supportBlockWidth = s.SupportBlockWidth ?? _supportBlockWidth;
+            _supportBlockHeight = s.SupportBlockHeight ?? _supportBlockHeight;
+            _isRectangularOpening = s.IsRectangularOpening ?? _isRectangularOpening;
+            _selectedValveBase = new PumpValveDimensionDto(
+                s.ValveBaseWidth ?? _selectedValveBase.ValveBaseWidth, s.ValveBaseLength ?? _selectedValveBase.ValveBaseLength,
+                s.ValveBaseHeight ?? _selectedValveBase.ValveBaseHeight, s.ValveBasePlacement ?? _selectedValveBase.ValveBasePlacement);
+            _b1 = s.B1 ?? _b1; _b2 = s.B2 ?? _b2; _b3 = s.B3 ?? _b3; _b4 = s.B4 ?? _b4; _b5 = s.B5 ?? _b5;
+            _b6 = s.B6 ?? _b6; _b7 = s.B7 ?? _b7; _b7Base = s.B7Base ?? _b7Base;
+            _h1 = s.H1 ?? _h1; _h3 = s.H3 ?? _h3; _h4 = s.H4 ?? _h4; _h5 = s.H5 ?? _h5; _h6 = s.H6 ?? _h6; _h7 = s.H7 ?? _h7;
+            _selectedTheta = s.Theta ?? _selectedTheta;
+            _l1 = s.L1 ?? _l1; _l2 = s.L2 ?? _l2; _l3 = s.L3 ?? _l3; _l4 = s.L4 ?? _l4;
+            _ob1 = s.OB1 ?? _ob1; _oh1 = s.OH1 ?? _oh1;
+            _ns = s.NS ?? _ns; _hs = s.HS ?? _hs; _ns1 = s.NS1 ?? _ns1; _hs1 = s.HS1 ?? _hs1;
+            _b8 = s.B8 ?? _b8; _b9 = s.B9 ?? _b9; _b10 = s.B10 ?? _b10; _l5 = s.L5 ?? _l5;
+            _t1 = s.T1 ?? _t1; _t2 = s.T2 ?? _t2; _t3 = s.T3 ?? _t3; _t4 = s.T4 ?? _t4; _t5 = s.T5 ?? _t5;
+            _t5Prime = s.T5Prime ?? _t5Prime; _t6 = s.T6 ?? _t6;
+            _gb1 = s.GB1 ?? _gb1; _gh1 = s.GH1 ?? _gh1; _hb1 = s.HB1 ?? _hb1; _hh1 = s.HH1 ?? _hh1;
+            // 유형 따라 바뀌는 평면 기본 도해(UpdateTypeDependents와 같은 규칙). 값 재계산은 안 함
+            _planDefaultImagePath = _selectedPumpingStationType == "Type1"
+                ? "pack://application:,,,/DHBIMWATER.UI;component/Resources/PumpStationImages/TYPE-1_평면제원-측면진입.png"
+                : "pack://application:,,,/DHBIMWATER.UI;component/Resources/PumpStationImages/TYPE-2&3_평면제원.png";
+
+            // 빈 이름 = 모든 바인딩 갱신(유형별 도해·강조·표시 여부 포함)
+            OnPropertyChanged(string.Empty);
+            PushToDischargeBasin();
+            // 토출조 = 펌프장 연동값 들어간 뒤 적용(재계산이 새 D·N 기준)
+            if (s.DischargeBasin is { } basin) DischargeBasin?.ApplyInputSnapshot(basin);
+        }
+        #endregion
+
         // 프로퍼티 업데이트
         // 생성시 초기화 메서드
         private void InitializeDerivedValues()
@@ -1326,8 +1456,54 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         public void SetHint(string key)
         {
             _currentHintKey = key;
+            FocusedParameter = key;
             RefreshHint();
         }
+
+        #region 도해 매개변수 강조 (토출조와 같은 방식, 종단·평면 제원)
+        private string? _focusedParameter;
+
+        /// <summary>포커스된 입력칸 매개변수. 도해 강조 경로 계산 기준.</summary>
+        public string? FocusedParameter
+        {
+            get => _focusedParameter;
+            private set
+            {
+                if (_focusedParameter == value) return;
+                _focusedParameter = value;
+                OnPropertyChanged(nameof(FocusedParameter));
+                OnPropertyChanged(nameof(ProfileHighlightGeometry));
+                OnPropertyChanged(nameof(PlanHighlightGeometry));
+            }
+        }
+
+        private string ProfileSheet => $"종단-{SelectedPumpingStationType}";
+
+        // PlanImagePath와 같은 분기. 좌안·우안 외는 측면부 그림
+        private string PlanSheet => SelectedEntranceType is "좌안부" or "우안부" ? $"평면-{SelectedEntranceType}" : "평면-측면부";
+
+        /// <summary>평면제원 도해 PNG 높이(px). 폭은 모두 2480. 측면부만 1404, 좌·우안 2027</summary>
+        public double PlanDiagramHeight => PlanSheet == "평면-측면부" ? 1404 : 2027;
+
+        /// <summary>평면제원 도해 강조 경로(PNG 픽셀 좌표). 없으면 null.</summary>
+        public string? PlanHighlightGeometry
+            => FocusedParameter is { } p ? PumpingStationDiagramLabels.Find(PlanSheet, p) : null;
+
+        /// <summary>평면제원 도해 클릭 점(PNG 픽셀)의 매개변수.</summary>
+        public string? FindPlanParameterAt(System.Windows.Point point)
+            => PumpingStationDiagramLabels.FindAt(PlanSheet, point);
+
+        /// <summary>종단제원 도해 강조 경로(PNG 픽셀 좌표). 없으면 null → 강조 없음.</summary>
+        public string? ProfileHighlightGeometry
+            => FocusedParameter is { } p ? PumpingStationDiagramLabels.Find(ProfileSheet, p) : null;
+
+        /// <summary>종단제원 도해 클릭 점(PNG 픽셀)의 매개변수. View가 그 Tag 입력칸에 포커스 줌.</summary>
+        public string? FindProfileParameterAt(System.Windows.Point point)
+            => PumpingStationDiagramLabels.FindAt(ProfileSheet, point);
+
+        /// <summary>입력칸 포커스 해제 시 View가 호출.</summary>
+        public void ClearFocusedParameter() => FocusedParameter = null;
+        #endregion
 
         private void RefreshHint()
         {

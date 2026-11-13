@@ -130,20 +130,22 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
             var doc = _doc();
             if (doc == null) return 0;
 
+            // 콘크리트 보만. 헌치 패밀리도 콘크리트 프레임이라 찾기·복제 원본 둘 다에서 뺌 — 안 빼면 보가 헌치 단면으로 생김(docs/325 § C)
             var allBeamTypes = new FilteredElementCollector(doc)
                 .OfCategory(BuiltInCategory.OST_StructuralFraming)
                 .OfClass(typeof(FamilySymbol))
                 .WhereElementIsElementType()
                 .Cast<FamilySymbol>()
-                .Where(fs => fs.Family.StructuralMaterialType == StructuralMaterialType.Concrete)
+                .Where(fs => fs.Family.StructuralMaterialType == StructuralMaterialType.Concrete && !IsHaunchFamilyOrType(fs))
                 .ToList();
 
-            // Find
-            var existing = allBeamTypes.FirstOrDefault(b => b.Name.Contains(spec.Name));
+            // Find. 이름 정확히 일치 — 부분일치면 "600 x 800"이 "1600 x 800"을 잡음.
+            // 같은 유형 이름이 여러 패밀리에 있을 수 있어 사각형 보 패밀리 것 우선
+            var existing = allBeamTypes.Where(b => b.Name == spec.Name).OrderByDescending(IsRectangularFamily).FirstOrDefault();
             if (existing != null) return (int)existing.Id.Value;
 
-            //Create
-            var baseType = allBeamTypes.FirstOrDefault(fs => fs.LookupParameter("b") != null && fs.LookupParameter("h") != null);
+            //Create. 콘크리트 사각형 보(b·h 유형 매개변수) 복제 후 b·h 수정. 패밀리 이름에 "사각형"/"Rectangular" 든 것 우선
+            var baseType = PickSizedBase(allBeamTypes, BeamWidthParam, BeamHeightParam);
 
             if (baseType == null) {
                 TaskDialog.Show("Error", "적절한 복제 대상 Beam type이 없습니다.");
@@ -160,6 +162,95 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
                 doc.Regenerate();
             }
 
+            return (int)newType.Id.Value;
+        }
+
+        /// <summary>기둥 유형 찾기·만들기(docs/325 § C). 이름 정확히 일치로 찾고, 없으면 콘크리트 사각형 기둥(b·h) 복제 후 b·h 수정.
+        /// 원본 없으면 0 — UseCase가 생성 중단.</summary>
+        public int FindOrCreateColumnType(ColumnTypeSpec spec)
+        {
+            var doc = _doc();
+            if (doc == null) return 0;
+
+            var candidates = new FilteredElementCollector(doc)
+                .OfCategory(BuiltInCategory.OST_StructuralColumns)
+                .OfClass(typeof(FamilySymbol))
+                .WhereElementIsElementType()
+                .Cast<FamilySymbol>()
+                .Where(fs => fs.Family.StructuralMaterialType == StructuralMaterialType.Concrete)
+                .ToList();
+
+            var existing = candidates.FirstOrDefault(fs => fs.Name == spec.Name);
+            if (existing != null) return (int)existing.Id.Value;
+
+            var baseType = PickSizedBase(candidates, ColumnWidthParam, ColumnDepthParam);
+            return baseType == null ? 0 : DuplicateSized(doc, baseType, spec.Name, ColumnWidthParam, spec.B, ColumnDepthParam, spec.H);
+        }
+
+        /// <summary>헌치 유형 찾기·만들기(docs/325 § C). 후보 = 패밀리 이름에 "헌치"/"haunch"(대소문자 무시) 든 구조 프레임.
+        /// 이름 정확히 일치로 찾고, 없으면 크기 매개변수 있는 첫 헌치 유형 복제 후 크기 수정. 원본 없으면 0.</summary>
+        public int FindOrCreateHaunchType(BeamTypeSpec spec)
+        {
+            var doc = _doc();
+            if (doc == null) return 0;
+
+            var candidates = new FilteredElementCollector(doc)
+                .OfCategory(BuiltInCategory.OST_StructuralFraming)
+                .OfClass(typeof(FamilySymbol))
+                .WhereElementIsElementType()
+                .Cast<FamilySymbol>()
+                .Where(IsHaunchFamily)
+                .ToList();
+
+            var existing = candidates.FirstOrDefault(fs => fs.Name == spec.Name);
+            if (existing != null) return (int)existing.Id.Value;
+
+            var baseType = candidates.FirstOrDefault(fs => fs.LookupParameter(HaunchWidthParam) != null && fs.LookupParameter(HaunchHeightParam) != null);
+            return baseType == null ? 0 : DuplicateSized(doc, baseType, spec.Name, HaunchWidthParam, spec.Width, HaunchHeightParam, spec.Height);
+        }
+
+        // 크기 매개변수 이름(유형 매개변수). 헌치는 패밀리 실제 이름 확인 필요 — 지금은 보와 같은 b·h 가정(docs/325 § C-2)
+        private const string BeamWidthParam = "b";
+        private const string BeamHeightParam = "h";
+        private const string ColumnWidthParam = "b";
+        private const string ColumnDepthParam = "h";
+        private const string HaunchWidthParam = "b";
+        private const string HaunchHeightParam = "h";
+
+        /// <summary>패밀리 이름에 "헌치" 또는 "haunch"(대소문자 무시) 포함. 헌치 복제 후보 고를 때 씀.
+        /// FamilyName과 Family.Name 둘 다 봄(같은 값이지만 한쪽이 비는 경우 대비).</summary>
+        private static bool IsHaunchFamily(FamilySymbol fs)
+            => HasHaunchWord(fs.FamilyName) || HasHaunchWord(fs.Family?.Name);
+
+        /// <summary>보 찾기·복제 원본에서 뺄 대상. 패밀리 이름 또는 유형 이름에 "헌치"/"haunch" —
+        /// 예전 코드가 헌치 패밀리에 "500 x 700" 같은 보 이름 유형을 만들었을 수 있어 패밀리 이름이 기준, 유형 이름은 추가 안전망.</summary>
+        private static bool IsHaunchFamilyOrType(FamilySymbol fs)
+            => IsHaunchFamily(fs) || HasHaunchWord(fs.Name);
+
+        private static bool HasHaunchWord(string? name)
+            => !string.IsNullOrEmpty(name) && (name!.Contains("헌치") || name.IndexOf("haunch", StringComparison.OrdinalIgnoreCase) >= 0);
+
+        private static bool IsRectangularFamily(FamilySymbol fs)
+            => fs.FamilyName.Contains("사각형") || fs.FamilyName.IndexOf("rectangular", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        /// <summary>크기 매개변수 둘 다 있는 복제 원본. 패밀리 이름에 "사각형"/"Rectangular" 든 것 우선, 없으면 첫 후보.</summary>
+        private static FamilySymbol? PickSizedBase(System.Collections.Generic.IEnumerable<FamilySymbol> candidates, string widthParam, string heightParam)
+        {
+            var sized = candidates.Where(fs => fs.LookupParameter(widthParam) != null && fs.LookupParameter(heightParam) != null).ToList();
+            return sized.FirstOrDefault(IsRectangularFamily) ?? sized.FirstOrDefault();
+        }
+
+        /// <summary>유형 복제 후 두 크기 매개변수(mm) 씀. 같은 이름은 찾기 단계에서 걸러져 Duplicate 이름 충돌 없음.</summary>
+        private static int DuplicateSized(Document doc, FamilySymbol baseType, string name, string widthParam, double width, string heightParam, double height)
+        {
+            if (baseType.Duplicate(name) is not FamilySymbol newType) return 0;
+            newType.LookupParameter(widthParam)?.Set(UC.MmToFt(width));
+            newType.LookupParameter(heightParam)?.Set(UC.MmToFt(height));
+            if (!newType.IsActive)
+            {
+                newType.Activate();
+                doc.Regenerate();
+            }
             return (int)newType.Id.Value;
         }
 

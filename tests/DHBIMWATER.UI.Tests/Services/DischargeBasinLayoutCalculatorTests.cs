@@ -230,10 +230,69 @@ public class DischargeBasinLayoutCalculatorTests
         Assert.Equal(placement.OriginY + 19500 + half + half, yMax, Precision);   // TLT + t
 
         // 이웃한 TB2 단부 벽은 그만큼 물러나 겹침도 틈도 없다.
+        // 양 끝 모두 같은 Y = 단부 벽. 사선 코너 벽이 꼭짓점(같은 Y)에서 끝나므로 한쪽 끝만으론 못 고른다(2026-11-12).
         var outletEnd = Assert.Single(walls.Where(w =>
-            Math.Abs(w.StartPoint.Y - (placement.OriginY + 19500 + half)) < 1e-6 ||
+            Math.Abs(w.StartPoint.Y - (placement.OriginY + 19500 + half)) < 1e-6 &&
             Math.Abs(w.EndPoint.Y - (placement.OriginY + 19500 + half)) < 1e-6));
         Assert.Equal(placement.OriginX, Math.Min(outletEnd.StartPoint.X, outletEnd.EndPoint.X), Precision);
+    }
+
+    /// <summary>
+    /// 사선 코너는 길이 맞춤으로 못 메운다 → 두 벽이 같은 꼭짓점에서 끝나고 그 끝만 결합 허용.
+    /// 직각 코너 끝은 결합 끊은 채(기존 동작).
+    /// </summary>
+    [Fact]
+    public void Center_ObliqueCorners_MeetAtVertexWithJoinAllowed()
+    {
+        var (input, g) = Case(DischargeOutletPosition.Center);
+
+        var walls = DischargeBasinLayoutCalculator.CalculateWalls(input, g);
+        var n = walls.Count;
+
+        var obliqueCount = 0;
+        for (var i = 0; i < n; i++)
+        {
+            var prev = walls[(i - 1 + n) % n];
+            var cur = walls[i];
+            Assert.Equal(prev.JoinAtEnd, cur.JoinAtStart);
+            if (!cur.JoinAtStart) continue;
+
+            obliqueCount++;
+            Assert.Equal(prev.EndPoint.X, cur.StartPoint.X, Precision);
+            Assert.Equal(prev.EndPoint.Y, cur.StartPoint.Y, Precision);
+        }
+        Assert.True(obliqueCount > 0);
+    }
+
+    /// <summary>우측 4변: 펌프측 벽 양 끝은 직각이라 결합 끊은 채, 사선 코너 끝만 결합 허용.</summary>
+    [Theory]
+    [InlineData(DischargeOutletPosition.Right)]
+    [InlineData(DischargeOutletPosition.Left)]
+    [InlineData(DischargeOutletPosition.Center)]
+    public void ObliqueCorners_MeetAtVertexWithJoinAllowed_AllCases(DischargeOutletPosition side)
+    {
+        var (input, g) = Case(side);
+        var placement = DischargeBasinPlacement.For(input, g);
+        var half = g.TT1 / 2;
+
+        var walls = DischargeBasinLayoutCalculator.CalculateWalls(input, g);
+        var n = walls.Count;
+
+        for (var i = 0; i < n; i++)
+        {
+            var prev = walls[(i - 1 + n) % n];
+            Assert.Equal(prev.JoinAtEnd, walls[i].JoinAtStart);
+            if (!walls[i].JoinAtStart) continue;
+            Assert.Equal(prev.EndPoint.X, walls[i].StartPoint.X, Precision);
+            Assert.Equal(prev.EndPoint.Y, walls[i].StartPoint.Y, Precision);
+        }
+
+        if (side == DischargeOutletPosition.Center) return;
+        // 펌프측 벽(직각 코너 2개)은 결합 끊은 채
+        var pumpSide = Assert.Single(walls.Where(w =>
+            Math.Abs(w.StartPoint.X - w.EndPoint.X) < 1e-6 &&
+            Math.Abs(Math.Abs(w.StartPoint.X - placement.OriginX) - half) < 1e-6));
+        Assert.False(pumpSide.JoinAtStart || pumpSide.JoinAtEnd);
     }
 
     // ── 상부 개구부 ───────────────────────────────────────────────

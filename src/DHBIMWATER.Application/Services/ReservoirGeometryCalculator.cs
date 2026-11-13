@@ -1,6 +1,7 @@
 using DHBIMWATER.Application.DTOs.Revit.Reservoir;
 using DHBIMWATER.Core.Geometry;
 using DHBIMWATER.Core.Structures;
+using System.Globalization;
 
 namespace DHBIMWATER.Application.Services
 {
@@ -316,22 +317,23 @@ namespace DHBIMWATER.Application.Services
             // 밸브실 상부슬래브 하단까지 구속
             LinearWallDefinition ValveTop(LinearWallDefinition wall) => wall with { TopLevelName = TankUpperLevelName, TopOffset = -th.SvuThk };
 
+            // 외벽은 실내 면 고정(HoldFace) — Revit에서 두께 바꾸면 바깥으로만 늘게(docs/325 § F). 내벽·경계벽·Hopper·전기실 벽은 중심선
             walls.Add(TankTop(Wall("W1", wteThk, TankFoundLevelName, tankWallH,
-                new Point3D(-wteThk / 2, 0, 0), new Point3D(-wteThk / 2, l, 0), "수조부", "외벽_좌측")));
+                new Point3D(-wteThk / 2, 0, 0), new Point3D(-wteThk / 2, l, 0), "수조부", "외벽_좌측")) with { HoldFace = WallHoldFace.Right });
 
             double w2X = totalIW + wteThk / 2;
             walls.Add(TankTop(Wall("W2", wteThk, TankFoundLevelName, tankWallH,
-                new Point3D(w2X, 0, 0), new Point3D(w2X, l, 0), "수조부", "외벽_우측")));
+                new Point3D(w2X, 0, 0), new Point3D(w2X, l, 0), "수조부", "외벽_우측")) with { HoldFace = WallHoldFace.Left });
 
             walls.Add(TankTop(Wall("W3", wteThk, TankFoundLevelName, tankWallH,
-                new Point3D(-wteThk, l + wteThk / 2, 0), new Point3D(totalIW + wteThk, l + wteThk / 2, 0), "수조부", "외벽_후면")));
+                new Point3D(-wteThk, l + wteThk / 2, 0), new Point3D(totalIW + wteThk, l + wteThk / 2, 0), "수조부", "외벽_후면")) with { HoldFace = WallHoldFace.Right });
 
             double w4_1EndX = vCenterX - lv / 2 - wveThk;
             double w4_2StaX = vCenterX + lv / 2 + wveThk;
             walls.Add(TankTop(Wall("W4", wteThk, TankFoundLevelName, tankWallH,
-                new Point3D(-wteThk, -wteThk / 2, 0), new Point3D(w4_1EndX, -wteThk / 2, 0), "수조부", "외벽_전면")));
+                new Point3D(-wteThk, -wteThk / 2, 0), new Point3D(w4_1EndX, -wteThk / 2, 0), "수조부", "외벽_전면")) with { HoldFace = WallHoldFace.Left });
             walls.Add(TankTop(Wall("W4", wteThk, TankFoundLevelName, tankWallH,
-                new Point3D(w4_2StaX, -wteThk / 2, 0), new Point3D(totalIW + wteThk, -wteThk / 2, 0), "수조부", "외벽_전면")));
+                new Point3D(w4_2StaX, -wteThk / 2, 0), new Point3D(totalIW + wteThk, -wteThk / 2, 0), "수조부", "외벽_전면")) with { HoldFace = WallHoldFace.Left });
 
             double w5_1EndX = w - wh;
             double w5_2EndX = w + wh + wtiThk;
@@ -382,13 +384,13 @@ namespace DHBIMWATER.Application.Services
             double w79TopY = -wteThk;
             double w79BotY = -(wteThk + wv);
             walls.Add(ValveTop(Wall("W7", wveThk, ValveFoundLevelName, valveFullH,
-                new Point3D(w7X, w79TopY, 0), new Point3D(w7X, w79BotY, 0), "배관실", "외벽_좌측")));
+                new Point3D(w7X, w79TopY, 0), new Point3D(w7X, w79BotY, 0), "배관실", "외벽_좌측")) with { HoldFace = WallHoldFace.Left });
             double w8X = vCenterX + lv / 2 + wveThk / 2;
             walls.Add(ValveTop(Wall("W8", wveThk, ValveFoundLevelName, valveFullH,
-                new Point3D(w8X, w79TopY, 0), new Point3D(w8X, w79BotY, 0), "배관실", "외벽_우측")));
+                new Point3D(w8X, w79TopY, 0), new Point3D(w8X, w79BotY, 0), "배관실", "외벽_우측")) with { HoldFace = WallHoldFace.Right });
             walls.Add(ValveTop(Wall("W9", wveThk, ValveFoundLevelName, valveFullH,
                 new Point3D(w7X - wveThk / 2, w79BotY - wveThk / 2, 0),
-                new Point3D(w8X + wveThk / 2, w79BotY - wveThk / 2, 0), "배관실", "외벽_전면")));
+                new Point3D(w8X + wveThk / 2, w79BotY - wveThk / 2, 0), "배관실", "외벽_전면")) with { HoldFace = WallHoldFace.Left });
 
             double w10X = w8X - wveThk / 2 - we - wviThk / 2;
             walls.Add(ValveTop(Wall("W10", wviThk, ValveMidLevelName, elecWallH,
@@ -430,7 +432,8 @@ namespace DHBIMWATER.Application.Services
                         columns.Add(new ColumnDefinition
                         {
                             Position = new Point3D(MapX(ci, w, wtiThk, m3 + c * colOff), m2 + r * rowOff, 0),
-                            TypeName = th.ColumnTypeName,
+                            // 치수로 유형 찾고 없으면 복제(docs/325 § C)
+                            TypeName = ColumnTypeName(th),
                             BaseLevelName = TankFoundLevelName,
                             TopLevelName = TankUpperLevelName,
                             BaseOffset = 0,
@@ -479,7 +482,6 @@ namespace DHBIMWATER.Application.Services
 
             // 1번째 지 로컬 좌표(x 0..w)로 만들고 지마다 MapX로 옮김. 홀수 지는 미러(레거시 MirrorElements 결과)
             var local = new List<BeamDefinition>();
-            string beamType = th.BeamTypeName;
             var pts = ColumnGrid(m3, m2, rowOff, colOff, rowNum, colNum, beamZ);
 
             // G1: 기둥 면에서 시작·끝 (RH:1091-1170)
@@ -487,37 +489,37 @@ namespace DHBIMWATER.Application.Services
             {
                 var p = pts[i];
                 if ((i + 1) % colNum != 0)
-                    local.Add(Beam("G1", beamType, TankUpperLevelName,
+                    local.Add(Beam("G1", th, TankUpperLevelName,
                         new Point3D(p.X + colB / 2, p.Y, beamZ),
                         new Point3D(pts[i + 1].X - colB / 2, pts[i + 1].Y, beamZ), "수조부", "보"));
 
                 if (i + colNum < pts.Count)
-                    local.Add(Beam("G1", beamType, TankUpperLevelName,
+                    local.Add(Beam("G1", th, TankUpperLevelName,
                         new Point3D(p.X, p.Y + colH / 2, beamZ),
                         new Point3D(pts[i + colNum].X, pts[i + colNum].Y - colH / 2, beamZ), "수조부", "보"));
 
                 if (i >= colNum * (rowNum - 1))
-                    local.Add(Beam("G1", beamType, TankUpperLevelName,
+                    local.Add(Beam("G1", th, TankUpperLevelName,
                         new Point3D(p.X, p.Y + colH / 2, beamZ),
                         new Point3D(p.X, p.Y + m1, beamZ), "수조부", "보"));
 
                 if (i < colNum)
-                    local.Add(Beam("G1", beamType, TankUpperLevelName,
+                    local.Add(Beam("G1", th, TankUpperLevelName,
                         new Point3D(p.X, p.Y - colH / 2, beamZ),
                         new Point3D(p.X, p.Y - m2, beamZ), "수조부", "보"));
 
                 if (i % colNum == 0)
-                    local.Add(Beam("G1", beamType, TankUpperLevelName,
+                    local.Add(Beam("G1", th, TankUpperLevelName,
                         new Point3D(p.X - colB / 2, p.Y, beamZ),
                         new Point3D(p.X - m3, p.Y, beamZ), "수조부", "보"));
 
                 if (i % colNum == colNum - 1)
-                    local.Add(Beam("G1", beamType, TankUpperLevelName,
+                    local.Add(Beam("G1", th, TankUpperLevelName,
                         new Point3D(p.X + colB / 2, p.Y, beamZ),
                         new Point3D(p.X + m4, p.Y, beamZ), "수조부", "보"));
             }
 
-            // H2: 기초 헌치
+            // H2: 기초 헌치. 반시계(진행 왼쪽 = 실내), 회전 0(docs/325 § A)
             var fndPts = new List<Point3D>
             {
                 new Point3D(w,      lh, tfE),
@@ -526,13 +528,18 @@ namespace DHBIMWATER.Application.Services
                 new Point3D(0,      0,  tfE),
                 new Point3D(w - wh, 0,  tfE),
             };
-            for (int i = 0; i < fndPts.Count - 1; i++)
-                local.Add(Haunch("H2", TankFoundLevelName, fndPts[i], fndPts[i + 1], "수조부"));
+            if (th.HasLowerHaunch)
+                for (int i = 0; i < fndPts.Count - 1; i++)
+                    local.Add(Haunch(th, "H2", TankFoundLevelName, fndPts[i], fndPts[i + 1], "수조부", LowerHaunchRotationDeg));
 
-            // H1: 상부 헌치. 닫힌 루프 + 보 폭 공제(RH:1229-1490). 높이·방향은 기존 신규 방식(슬래브 하단, 상단 맞춤) — Revit 확인
-            var upperPts = BuildUpperHaunchPoints(0, w, l, m1, m2, m3, m4, rowOff, colOff, rowNum, colNum, beamZ - stuThk);
-            foreach (var (start, end) in TrimUpperHaunchSegments(upperPts, rowNum, colNum, hb))
-                local.Add(Haunch("H1", TankUpperLevelName, start, end, "수조부"));
+            // H1: 상부 헌치. 닫힌 루프 + 보 폭 공제(RH:1229-1490). 슬래브 하단에 매달림 → 회전 90(밸브실 VR-H1과 같음)
+            // 공제 분기는 시계 점열 기준이라 그대로 끊고, 끊은 결과를 뒤집어 반시계(진행 왼쪽 = 실내)로 만듦(docs/325 § A)
+            if (th.HasUpperHaunch)
+            {
+                var upperPts = BuildUpperHaunchPoints(0, w, l, m1, m2, m3, m4, rowOff, colOff, rowNum, colNum, beamZ - stuThk);
+                foreach (var (start, end) in TrimUpperHaunchSegments(upperPts, rowNum, colNum, hb).Reverse())
+                    local.Add(Haunch(th, "H1", TankUpperLevelName, end, start, "수조부", UpperHaunchRotationDeg));
+            }
 
             var beams = new List<BeamDefinition>();
             for (int ci = 0; ci < n; ci++)
@@ -542,12 +549,17 @@ namespace DHBIMWATER.Application.Services
             // H3/H4: 밸브실·전기실 헌치. 밸브실은 1개라 미러 대상 아님(레거시도 첫 밸브실만, RH:1493-1550, 2681-2720)
             double vmStartX = w + wtiThk / 2 - v.Lv / 2;
             double vmStartY = -(th.WteThk + v.Wv);
-            AddHaunchLoop(beams, "H3", ValveMidLevelName,
-                Square(vmStartX, vmStartY, v.Lv, v.Wv, vmE - th.SvmThk));
-            AddHaunchLoop(beams, "H4", TankUpperLevelName,
-                Square(vmStartX, vmStartY, v.Lv - v.We - th.WviThk, v.Wv, tuE - th.SvuThk));
-            AddHaunchLoop(beams, "H4", TankUpperLevelName,
-                Square(vmStartX + v.Lv - v.We, vmStartY, v.We, v.Wv, tuE - th.SvuThk));
+            // 둘 다 슬래브 하단에 매달림 → 회전 90(docs/325 § A)
+            if (th.HasMiddleHaunch)
+                AddHaunchLoop(beams, th, "H3", ValveMidLevelName,
+                    Square(vmStartX, vmStartY, v.Lv, v.Wv, vmE - th.SvmThk));
+            if (th.HasUpperHaunch)
+            {
+                AddHaunchLoop(beams, th, "H4", TankUpperLevelName,
+                    Square(vmStartX, vmStartY, v.Lv - v.We - th.WviThk, v.Wv, tuE - th.SvuThk));
+                AddHaunchLoop(beams, th, "H4", TankUpperLevelName,
+                    Square(vmStartX + v.Lv - v.We, vmStartY, v.We, v.Wv, tuE - th.SvuThk));
+            }
 
             return beams;
         }
@@ -803,12 +815,15 @@ namespace DHBIMWATER.Application.Services
             };
 
         private static BeamDefinition Beam(
-            string code, string typeName, string levelName,
+            string code, ReservoirTypeThicknessDto th, string levelName,
             Point3D start, Point3D end, string zone, string part)
             => new BeamDefinition
             {
                 ElementCode = code,
-                TypeName = typeName,
+                // 보 W·H 입력 → 유형 "W x H" 찾고 없으면 복제(docs/325 § C)
+                TypeName = BeamTypeName(th),
+                Width = th.BeamW,
+                Height = th.BeamH,
                 LevelName = levelName,
                 StartPoint = start,
                 EndPoint = end,
@@ -817,35 +832,53 @@ namespace DHBIMWATER.Application.Services
                 ZJustification = 0,
             };
 
-        /// <summary>헌치 정의. 커브 z = 슬래브 하단, Z맞춤 상단(0), 회전 없음.
-        /// 레거시(원점 + 슬래브 두께 + 180°)가 아니라 기존 신규 방식이 맞다고 사용자 확인(2026-10-13, docs/289 § C-3).</summary>
-        private static BeamDefinition Haunch(string code, string levelName, Point3D start, Point3D end, string zone)
+        /// <summary>기초 상면 헌치 단면 회전(도). 밸브실 VR-H2와 같음.</summary>
+        public const double LowerHaunchRotationDeg = 0;
+        /// <summary>슬래브 하면에 매달리는 헌치 단면 회전(도). 밸브실 VR-H1·VR-H3과 같음(docs/160).</summary>
+        public const double UpperHaunchRotationDeg = 90;
+
+        /// <summary>기둥 유형 이름 = "B x H"(mm). 이 이름으로 찾고 없으면 복제(docs/325 § C).</summary>
+        public static string ColumnTypeName(ReservoirTypeThicknessDto th) => SizeName(th.ColumnB, th.ColumnH);
+        /// <summary>보 유형 이름 = "W x H"(mm). 펌프장 보와 같은 규칙.</summary>
+        public static string BeamTypeName(ReservoirTypeThicknessDto th) => SizeName(th.BeamW, th.BeamH);
+        /// <summary>헌치 유형 이름 = "헌치 b x h"(mm). 보 유형과 이름 안 겹치게 앞에 "헌치".</summary>
+        public static string HaunchTypeName(ReservoirTypeThicknessDto th) => "헌치 " + SizeName(th.HaunchB, th.HaunchH);
+        private static string SizeName(double a, double b)
+            => $"{Math.Round(a).ToString(CultureInfo.InvariantCulture)} x {Math.Round(b).ToString(CultureInfo.InvariantCulture)}";
+
+        /// <summary>헌치 정의. 커브 z = 슬래브 하단(상부·중간) 또는 기초 상면(하부).
+        /// 밸브실 헌치와 같은 규칙 — 진행 왼쪽 = 실내, Z맞춤 원점(기본 2), 상부·중간 90° / 하부 0°(docs/325 § A).
+        /// 이전 방식(상단 맞춤·회전 없음·시계 점열, docs/289 § C-3)은 단면이 벽 쪽으로 붙어 폐기.</summary>
+        private static BeamDefinition Haunch(ReservoirTypeThicknessDto th, string code, string levelName, Point3D start, Point3D end, string zone, double rotationDeg)
             => new BeamDefinition
             {
                 ElementCode = code,
+                TypeName = HaunchTypeName(th),
+                Width = th.HaunchB,
+                Height = th.HaunchH,
                 LevelName = levelName,
                 StartPoint = start,
                 EndPoint = end,
                 Zone = zone,
                 Part = "HAUNCH",
-                ZJustification = 0,
+                CrossSectionRotationDeg = rotationDeg,
             };
 
-        /// <summary>레거시 CreateSquare 후 Reverse와 같은 점 순서(시계방향).</summary>
+        /// <summary>반시계 점 순서(좌하 → 우하 → 우상 → 좌상). 진행 왼쪽이 사각형 안쪽(docs/325 § A).</summary>
         private static List<Point3D> Square(double x, double y, double width, double length, double z)
             => new List<Point3D>
             {
-                new Point3D(x,         y + length, z),
-                new Point3D(x + width, y + length, z),
-                new Point3D(x + width, y,          z),
                 new Point3D(x,         y,          z),
+                new Point3D(x + width, y,          z),
+                new Point3D(x + width, y + length, z),
+                new Point3D(x,         y + length, z),
             };
 
-        /// <summary>밸브실 헌치 닫힌 루프. pts z는 슬래브 하단.</summary>
-        private static void AddHaunchLoop(List<BeamDefinition> beams, string code, string levelName, List<Point3D> pts)
+        /// <summary>밸브실 헌치 닫힌 루프. pts z는 슬래브 하단 → 회전 90.</summary>
+        private static void AddHaunchLoop(List<BeamDefinition> beams, ReservoirTypeThicknessDto th, string code, string levelName, List<Point3D> pts)
         {
             for (int i = 0; i < pts.Count; i++)
-                beams.Add(Haunch(code, levelName, pts[i], pts[(i + 1) % pts.Count], "배관실"));
+                beams.Add(Haunch(th, code, levelName, pts[i], pts[(i + 1) % pts.Count], "배관실", UpperHaunchRotationDeg));
         }
 
         /// <summary>지 인덱스별 X 좌표. 짝수 지 = 평행이동, 홀수 지 = 직전 내벽 중심면 기준 미러.

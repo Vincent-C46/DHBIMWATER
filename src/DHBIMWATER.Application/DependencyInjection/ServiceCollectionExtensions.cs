@@ -20,6 +20,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<DHBIMWATER.Application.UseCases.Families.ApplyFamilyTypeImagesUseCase>();   // docs/309
         services.AddTransient<SavePipeLayoutFamilySettingsUseCase>();
         services.AddTransient<SaveConcreteSettingsUseCase>();
+        services.AddTransient<SavePumpingStationInputUseCase>();
+        services.AddTransient<SaveReservoirInputUseCase>();   // docs/325
         services.AddTransient<SaveValveRoomDimensionCatalogUseCase>();
         services.AddTransient<MeasureTieValveRoomUseCase>();   // docs/323
         services.AddTransient<CreateValveRoomUseCase>();

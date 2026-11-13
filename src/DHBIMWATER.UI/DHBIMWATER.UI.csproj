@@ -242,7 +242,10 @@
 
 	<ItemGroup>
 		<PackageReference Include="Fluent.Ribbon" Version="11.0.1" />
-		<PackageReference Include="MahApps.Metro.IconPacks" Version="6.2.1" />
+		<!-- 아이콘팩 전체(약 45개) 대신 쓰는 3팩만. 애드인 DLL 크기·Revit 시작 시간 줄임 -->
+		<PackageReference Include="MahApps.Metro.IconPacks.Material" Version="6.2.1" />
+		<PackageReference Include="MahApps.Metro.IconPacks.PixelartIcons" Version="6.2.1" />
+		<PackageReference Include="MahApps.Metro.IconPacks.BootstrapIcons" Version="6.2.1" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
 	</ItemGroup>
 

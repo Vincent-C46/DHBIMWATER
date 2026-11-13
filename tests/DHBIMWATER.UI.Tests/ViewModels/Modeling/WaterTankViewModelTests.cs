@@ -62,11 +62,56 @@ public class WaterTankViewModelTests
         Assert.Equal(300, dto.ValveDto.WpThk);
     }
 
+    // docs/325 § E: 저장 → 새 창에서 복원하면 같은 값
+    [Fact]
+    public void SavedInputs_RestoreIntoNewWindow()
+    {
+        var repo = new MemoryReservoirInputRepo();
+        var save = new DHBIMWATER.Application.UseCases.AutoGenerator.SaveReservoirInputUseCase(new StubTransaction(), repo);
+        var vm = new WaterTankViewModel(null!, new StubDialogService(), new StubFileDialogService(), inputRepo: repo, saveInput: save)
+        {
+            W = 18.5,
+            ColumnB = 700,
+            BeamH = 800,
+            HaunchB = 250,
+            HasMiddleHaunch = false,
+        };
+        vm.SaveInputs();
+
+        var restored = new WaterTankViewModel(null!, new StubDialogService(), new StubFileDialogService(), inputRepo: repo, saveInput: save);
+        Assert.True(restored.RestoreSavedInputs());
+        Assert.Equal(18.5, restored.W);
+        Assert.Equal(700, restored.ColumnB);
+        Assert.Equal(800, restored.BeamH);
+        Assert.Equal(250, restored.HaunchB);
+        Assert.False(restored.HasMiddleHaunch);
+        Assert.True(restored.HasUpperHaunch);
+
+        var dto = BuildCreationRequestDto(restored);
+        Assert.Equal(700, dto.ThicknessDto.ColumnB);
+        Assert.False(dto.ThicknessDto.HasMiddleHaunch);
+    }
+
+    private sealed class MemoryReservoirInputRepo : IReservoirInputRepo
+    {
+        private string? _json;
+        public string? Load() => _json;
+        public void Save(string json) => _json = json;
+    }
+
+    private sealed class StubTransaction : ITransactionContext
+    {
+        public void Begin(string name, bool suppressWarnings = false) { }
+        public void Commit() { }
+        public void Rollback() { }
+        public IReadOnlyList<string> SuppressedWarnings => Array.Empty<string>();
+        public void Dispose() { }
+    }
+
     private static WaterTankViewModel CreateViewModel()
         => new(
             useCase: null!,
             dialogService: new StubDialogService(),
-            typeQueryRepo: new StubElementTypeQueryRepo(),
             fileDialogService: new StubFileDialogService());
 
     private static ReservoirCreationRequestDto BuildCreationRequestDto(WaterTankViewModel vm)
@@ -77,36 +122,6 @@ public class WaterTankViewModelTests
 
         Assert.NotNull(method);
         return Assert.IsType<ReservoirCreationRequestDto>(method!.Invoke(vm, null));
-    }
-
-    private sealed class StubElementTypeQueryRepo : IElementTypeQueryRepo
-    {
-        public IEnumerable<string> GetSlabTypeNames() => Array.Empty<string>();
-        public IEnumerable<string> GetWallTypeNames() => Array.Empty<string>();
-        public IEnumerable<string> GetColumnTypeNames() => new[] { "Column" };
-        public IEnumerable<string> GetColumnFamilyTypeNames() => new[] { "Column" };
-        public IEnumerable<string> GetBeamTypeNames() => new[] { "Beam" };
-        public IEnumerable<string> GetConcreteColumnTypeNames() => new[] { "Column" };
-        public IEnumerable<string> GetConcreteBeamTypeNames() => new[] { "Beam" };
-        public IEnumerable<string> GetStructuralFramingFamilyTypeNames() => new[] { "Beam 패밀리 : Beam" };
-        public IEnumerable<string> GetAdaptiveComponentTypeNames() => Array.Empty<string>();
-        public int? GetFamilyTypeCategoryId(string familyTypeName) => null;
-        public IEnumerable<string> GetAdaptiveInstanceParameterNames(string familyTypeName) => Array.Empty<string>();
-        public int GetAdaptiveBendPointCount(string familyTypeName) => -1;
-        public IEnumerable<string> GetPipeAccessoryTypeNames() => Array.Empty<string>();
-        public IEnumerable<string> GetPipeFittingTypeNames() => Array.Empty<string>();
-        public IEnumerable<string> GetPipeAccessoryInstanceParameterNames(string familyTypeName) => Array.Empty<string>();
-        public IEnumerable<string> GetGenericModelTypeNames() => Array.Empty<string>();
-        public IEnumerable<string> GetBeamInstanceParameterNames(string beamTypeName) => Array.Empty<string>();
-        public double GetStructuralFramingSectionWidthMm(string familyTypeName) => 400;
-        public (double WidthX, double DepthY) GetStructuralColumnSectionSizeMm(string familyTypeName) => (400, 400);
-        public IEnumerable<string> GetPipingSystemTypeNames() => Array.Empty<string>();
-        public IEnumerable<string> GetPipeTypeNames() => Array.Empty<string>();
-        public IEnumerable<string> GetLevelNames() => Array.Empty<string>();
-        public IEnumerable<string> GetFoundationTypeNames() => Array.Empty<string>();
-        public IEnumerable<string> GetPipeAccessoryNumericInstanceParameterNames(string familyTypeName) => GetPipeAccessoryInstanceParameterNames(familyTypeName);
-        public IReadOnlyList<DHBIMWATER.Application.DTOs.Revit.PipeAccessoryTypeParameterDto> GetPipeAccessoryTypeLengthParameters(string familyTypeName) => [];
-        public void InvalidateFamilyCaches() { }
     }
 
     private sealed class StubDialogService : IDialogService

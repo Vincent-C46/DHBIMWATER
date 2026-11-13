@@ -28,6 +28,10 @@ namespace DHBIMWATER.Revit.Commands
             viewModel.RunInRevitContext = runner.RunCreate;
             viewModel.DischargeBasin.RunInRevitContext = runner.RunCreate;
             viewModel.ConcreteLauncher.RunInRevitContext = runner.Run;
+            // 같은 프로젝트에 저장된 입력값 복원(명령 실행 중 = API 컨텍스트)
+            viewModel.RestoreSavedInputs();
+            // 닫을 때 바뀐 값 저장. 창 연 문서가 활성일 때만(다른 문서에 잘못 쓰지 않게)
+            view.Closing += (_, _) => runner.RunOnOwner(viewModel.SaveInputsIfChanged);
 
             new WindowInteropHelper(view).Owner = commandData.Application.MainWindowHandle;
             _openView = view;

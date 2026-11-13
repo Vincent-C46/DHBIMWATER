@@ -386,6 +386,15 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         /// <summary>입력칸 포커스 해제 시 View가 호출.</summary>
         public void ClearFocusedParameter() => FocusedParameter = null;
 
+        /// <summary>도해 클릭 점(1800폭 단위)의 매개변수. sheetKind = View 도해 Grid Tag("Plan"/"Profile"/"Opening").</summary>
+        public string? FindParameterAt(string sheetKind, System.Windows.Point point)
+            => DischargeBasinDiagramLabels.FindAt(sheetKind switch
+            {
+                "Plan" => PlanSheet,
+                "Profile" => ProfileSheet,
+                _ => OpeningSheet,
+            }, point);
+
         /// <summary>도해 영역 펼침 상태. 세 탭이 공유.</summary>
         public bool IsDiagramExpanded { get => _isDiagramExpanded; set => SetProperty(ref _isDiagramExpanded, value); }
 
@@ -482,8 +491,56 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
             }
 
             // 모델리스 창: 생성만 API 컨텍스트에서 실행. 입력 검사·계산은 순수 코드(docs/320 § B)
-            if (RunInRevitContext is { } run) run(() => _createUseCase?.Execute(input, geometry));
-            else _createUseCase?.Execute(input, geometry);
+            // 생성 뒤 입력값 저장도 같은 컨텍스트 안(저장 = 트랜잭션)
+            void CreateCore()
+            {
+                _createUseCase?.Execute(input, geometry);
+                AfterCreated?.Invoke();
+            }
+            if (RunInRevitContext is { } run) run(CreateCore);
+            else CreateCore();
+        }
+
+        /// <summary>생성 성공 직후 호출(API 컨텍스트). 펌프장 창이 입력값 저장을 연결.</summary>
+        public Action? AfterCreated { get; set; }
+        #endregion
+
+        #region 입력값 저장·복원
+        /// <summary>현재 입력값(유형·직접 입력·덮어쓴 권고안). 펌프장 저장본에 함께 담김.</summary>
+        internal DischargeBasinInputSnapshot CaptureInputSnapshot() => new()
+        {
+            Position = _selectedPosition, Step = _selectedStep, Conduit = _selectedConduit,
+            TA = _ta, Separation = _separation, ON = _on, OB = _ob, OH = _oh, OD = _od,
+            // 정렬 = 같은 값이면 같은 JSON(바뀜 비교용)
+            Overrides = _overrides.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                .ToDictionary(pair => pair.Key, pair => pair.Value),
+        };
+
+        /// <summary>저장본 적용. setter 연쇄 재계산 피해 필드에 넣고 한 번만 재계산. 없는 칸(null)은 현재 값 유지.</summary>
+        internal void ApplyInputSnapshot(DischargeBasinInputSnapshot s)
+        {
+            _selectedPosition = s.Position ?? _selectedPosition;
+            _selectedStep = s.Step ?? _selectedStep;
+            _selectedConduit = s.Conduit ?? _selectedConduit;
+            _ta = s.TA ?? _ta; _separation = s.Separation ?? _separation;
+            _on = s.ON ?? _on; _ob = s.OB ?? _ob; _oh = s.OH ?? _oh; _od = s.OD ?? _od;
+
+            if (s.Overrides != null)
+            {
+                foreach (var row in _rowsByKey.Values) row.ClearEdit();
+                _overrides.Clear();
+                // 지금 없는 행 키(옛 저장본)는 버림 — 계산기에 모르는 키 안 넘김
+                foreach (var (key, value) in s.Overrides)
+                {
+                    if (!_rowsByKey.TryGetValue(key, out var row)) continue;
+                    _overrides[key] = value;
+                    row.RestoreEdited(value);
+                }
+            }
+
+            // 빈 이름 = 모든 바인딩 갱신(도해·강조·IsCulvert 등)
+            OnPropertyChanged(string.Empty);
+            Recalculate();
         }
         #endregion
 

@@ -48,6 +48,8 @@ packages/
 *.rvt.bak
 *.rfa.bak
 *.rte.bak
+# 프로젝트 템플릿 원본 (100MB 넘음, git 밖 C:/BuildOutput/DHBIMWATER/Templates 에서 설치 파일에 묶음 - docs/324)
+*.rte
 
 # Windows
 Thumbs.db

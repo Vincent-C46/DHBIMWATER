@@ -175,7 +175,8 @@ namespace DHBIMWATER.Application.Services
         /// 외벽. 내공 외곽선을 TT1/2 만큼 바깥으로 밀어 중심선을 만들고, 그 다각형의 변마다 벽 1개를 둔다.
         /// <para>Revit 벽은 양 끝 조인을 끊어 두므로(RevitWallCommandRepo) 코너를 직접 메워야 한다.
         /// 밸브실과 같은 방식으로 <b>변을 번갈아</b> 한쪽은 코너까지 늘리고 이웃은 그만큼 줄여
-        /// 겹침도 틈도 없이 맞물리게 한다(직각 코너에서는 정확히, 경사 코너에서는 오차가 t² 수준).</para>
+        /// 겹침도 틈도 없이 맞물리게 한다(직각 코너만). 사선 코너는 두 벽을 중심선 꼭짓점에서 끝내고
+        /// <c>JoinAtStart/End</c>로 그 끝만 결합을 허용해 Revit이 코너를 정리하게 한다(2026-11-12).</para>
         /// </summary>
         public static IReadOnlyList<LinearWallDefinition> CalculateWalls(
             DischargeBasinInputDto input, DischargeBasinGeometryDto g)
@@ -186,11 +187,17 @@ namespace DHBIMWATER.Application.Services
             var n = centerline.Count;
 
             // 코너마다 필요한 마이터 보정량. 내각 α에서 (t/2)/tan(α/2).
+            // 사선 코너(직각 아님)는 길이 맞춤으로 쐐기 틈 못 메움(2026-11-11 사용자 보고) →
+            // 보정 0으로 두 벽 모두 중심선 꼭짓점에서 끝내고 그 끝만 결합 허용, Revit이 코너 정리.
+            // 직각 코너는 종전 번갈아 늘림/줄임 그대로.
             var miter = new double[n];
+            var oblique = new bool[n];
             for (var i = 0; i < n; i++)
             {
-                var half = InteriorAngle(centerline, i) / 2;
-                miter[i] = Math.Abs(Math.Tan(half)) < 1e-9 ? 0 : g.TT1 / 2 / Math.Tan(half);
+                var angle = InteriorAngle(centerline, i);
+                var half = angle / 2;
+                oblique[i] = Math.Abs(angle - Math.PI / 2) > 1e-3 && Math.Abs(angle - Math.PI) > 1e-3;
+                miter[i] = oblique[i] || Math.Abs(Math.Tan(half)) < 1e-9 ? 0 : g.TT1 / 2 / Math.Tan(half);
             }
 
             var walls = new List<LinearWallDefinition>(n);
@@ -216,6 +223,9 @@ namespace DHBIMWATER.Application.Services
                     Height = height,
                     BaseOffset = 0,
                     IsExterior = true,
+                    // 변 i는 코너 i에서 시작, 코너 i+1에서 끝남
+                    JoinAtStart = oblique[i],
+                    JoinAtEnd = oblique[endIndex],
                     ElementCode = WallCode,
                     Zone = ZoneName,
                     Part = "외벽",

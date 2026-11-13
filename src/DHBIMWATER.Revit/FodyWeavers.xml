@@ -1,3 +1,4 @@
 ﻿<Weavers xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="FodyWeavers.xsd">
-  <Costura ExcludeAssemblies="DidasUsage" />
+  <!-- PDB 병합 끔. 애드인 DLL 크기 줄임 -->
+  <Costura ExcludeAssemblies="DidasUsage" IncludeDebugSymbols="false" />
 </Weavers>

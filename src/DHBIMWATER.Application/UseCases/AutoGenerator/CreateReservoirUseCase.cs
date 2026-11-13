@@ -24,7 +24,6 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
         private readonly ISharedParameterRepository _sharedParameterRepo;
         private readonly ClassifyExteriorWallsUseCase _classifyWallsUseCase;
         private readonly IConcreteSettingsRepo _concreteSettingsRepo;
-        private readonly IElementTypeQueryRepo _elementTypeQueryRepo;
         private readonly IViewCommandRepo _viewCmdRepo;
         private readonly IStructureModelRepo _structureModelRepo;
         #endregion
@@ -43,7 +42,6 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
             ISharedParameterRepository sharedParameterRepo,
             ClassifyExteriorWallsUseCase classifyWallsUseCase,
             IConcreteSettingsRepo concreteSettingsRepo,
-            IElementTypeQueryRepo elementTypeQueryRepo,
             IViewCommandRepo viewCmdRepo,
             IStructureModelRepo structureModelRepo)
         {
@@ -60,7 +58,6 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
             _sharedParameterRepo = sharedParameterRepo;
             _classifyWallsUseCase = classifyWallsUseCase;
             _concreteSettingsRepo = concreteSettingsRepo;
-            _elementTypeQueryRepo = elementTypeQueryRepo;
             _viewCmdRepo = viewCmdRepo;
             _structureModelRepo = structureModelRepo;
         }
@@ -133,7 +130,11 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
                     #region 4. 기둥 생성
                     var columnDefs = ReservoirGeometryCalculator.CalculateColumns(dto).ToList();
                     var columnLevels = _levelQueryRepo.GetLevelIds(columnDefs.SelectMany(c => new[] { c.BaseLevelName, c.TopLevelName }));
-                    var columnTypes = columnDefs.Select(c => c.TypeName).Distinct().ToDictionary(name => name, _elementTypeCmdRepo.FindColumnSymbol);
+                    // 기둥 B·H 입력으로 유형 찾고 없으면 콘크리트 사각형 기둥 복제(docs/325 § C). 0이면 기둥이 조용히 빠지므로 중단
+                    var th = dto.ThicknessDto;
+                    var columnTypes = columnDefs.Select(c => c.TypeName).Distinct().ToDictionary(name => name,
+                        name => Require(_elementTypeCmdRepo.FindOrCreateColumnType(new Core.Structures.ColumnTypeSpec(th.ColumnB, th.ColumnH, name)),
+                            $"기둥 유형 '{name}'을 만들 수 없습니다. b·h 매개변수가 있는 콘크리트 사각형 기둥 패밀리를 로드하세요."));
                     foreach (var columnTypeId in columnTypes.Values.Distinct())
                         concrete.ApplyTo(columnTypeId, Core.Structures.ConcreteMember.Column);
                     foreach (var colDef in columnDefs)
@@ -142,18 +143,27 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
 
                     #region 5. 보 생성
                     // 보는 기둥 면에서, 헌치는 보 폭만큼 끊음 — 단면 크기 필요(docs/289 § C-1)
-                    var columnSize = _elementTypeQueryRepo.GetStructuralColumnSectionSizeMm(dto.ThicknessDto.ColumnTypeName);
-                    var beamWidth = _elementTypeQueryRepo.GetStructuralFramingSectionWidthMm(dto.ThicknessDto.BeamTypeName);
-                    var memberSizes = new ReservoirMemberSizes(columnSize.WidthX, columnSize.DepthY, beamWidth);
+                    // 단면 크기는 입력값 그대로(유형 실측 안 함, docs/325 § D)
+                    var memberSizes = new ReservoirMemberSizes(th.ColumnB, th.ColumnH, th.BeamW);
                     var beamDefs = ReservoirGeometryCalculator.CalculateBeams(dto, memberSizes).ToList();
                     var beamLevels = _levelQueryRepo.GetLevelIds(beamDefs.Select(b => b.LevelName));
-                    var beamTypes = beamDefs.GroupBy(b => b.Part == "HAUNCH" ? "HAUNCH" : b.TypeName ?? $"{b.Width} x {b.Height}").ToDictionary(g => g.Key, g => g.Key == "HAUNCH" ? _elementTypeCmdRepo.FindHaunchBeamSymbol() : !string.IsNullOrEmpty(g.First().TypeName) ? _elementTypeCmdRepo.FindBeamSymbol(g.First().TypeName) : _elementTypeCmdRepo.FindOrCreateBeamType(new Core.Structures.BeamTypeSpec(g.First().Width, g.First().Height, g.Key)));
+                    // 유형 키 = TypeName("W x H" / "헌치 b x h"). 보는 헌치 패밀리 뺀 콘크리트 사각형 보, 헌치는 헌치 패밀리에서 복제(docs/325 § C)
+                    var beamTypes = beamDefs.GroupBy(b => b.TypeName).ToDictionary(g => g.Key, g =>
+                    {
+                        var first = g.First();
+                        var spec = new Core.Structures.BeamTypeSpec(first.Width, first.Height, g.Key);
+                        return first.Part == "HAUNCH"
+                            ? Require(_elementTypeCmdRepo.FindOrCreateHaunchType(spec),
+                                $"헌치 유형 '{g.Key}'을 만들 수 없습니다. 패밀리 이름에 '헌치' 또는 'haunch'가 든 구조 프레임 패밀리(크기 매개변수 b·h)를 로드하거나 헌치 체크를 끄세요.")
+                            : Require(_elementTypeCmdRepo.FindOrCreateBeamType(spec),
+                                $"보 유형 '{g.Key}'을 만들 수 없습니다. 헌치가 아닌 콘크리트 사각형 보 패밀리(b·h)를 로드하세요.");
+                    });
                     foreach (var beamTypeId in beamTypes.Values.Distinct())
                         concrete.ApplyTo(beamTypeId, Core.Structures.ConcreteMember.Beam);
                     var haunchIdsByLevel = new Dictionary<string, List<int>>();
                     foreach (var beamDef in beamDefs)
                     {
-                        var beamId = _beamCmdRepo.CreateBeam(beamDef, beamLevels[beamDef.LevelName], beamTypes[beamDef.Part == "HAUNCH" ? "HAUNCH" : beamDef.TypeName ?? $"{beamDef.Width} x {beamDef.Height}"]);
+                        var beamId = _beamCmdRepo.CreateBeam(beamDef, beamLevels[beamDef.LevelName], beamTypes[beamDef.TypeName]);
                         if (beamDef.Part != "HAUNCH") continue;
                         if (!haunchIdsByLevel.TryGetValue(beamDef.LevelName, out var ids))
                             haunchIdsByLevel[beamDef.LevelName] = ids = new List<int>();
@@ -208,6 +218,10 @@ namespace DHBIMWATER.Application.UseCases.AutoGenerator
         #endregion
 
         #region Private Helpers
+        /// <summary>유형 ID 0이면 예외 → catch에서 롤백·알림. 0이 Create에 들어가 부재가 조용히 빠지던 것 방지(밸브실 docs/207 § B와 같은 원칙).</summary>
+        private static int Require(int typeId, string message)
+            => typeId != 0 ? typeId : throw new InvalidOperationException(message);
+
         private static List<SharedParameterDefinition> GetReservoirSharedParameterDefinitions()
         {
             var structuralCategories = new List<ParameterCategory>

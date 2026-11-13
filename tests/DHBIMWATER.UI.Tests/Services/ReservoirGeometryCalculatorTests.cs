@@ -132,14 +132,16 @@ public class ReservoirGeometryCalculatorTests
         // 25000/30000, M=4000, 최대 5000 → colNum 5, rowNum 6 → 점 2·6+2·5+4 = 26 → 구간 26
         var h1 = beams.Where(b => b.ElementCode == "H1").ToList();
         Assert.Equal(26 * 2, h1.Count);
-        // 헌치 높이·방향은 기존 신규 방식(슬래브 하단, 상단 맞춤, 회전 없음) — 사용자 확인 2026-10-13
+        // 헌치는 밸브실과 같은 규칙: Z맞춤 원점(2), 상부 90°(docs/325 § A)
         Assert.All(h1, b =>
         {
-            Assert.Equal(0, b.ZJustification);
-            Assert.Equal(0, b.CrossSectionRotationDeg);
+            Assert.Equal(2, b.ZJustification);
+            Assert.Equal(90, b.CrossSectionRotationDeg);
+            Assert.Equal("헌치 300 x 300", b.TypeName);
         });
-        // 첫 구간: 좌하단 구석 → 첫 보 앞(보 반폭 공제)
-        Assert.Equal(4000 - 200, h1[0].EndPoint.Y);
+        // 반시계로 뒤집음: 마지막 구간 = 첫 보 앞(보 반폭 공제) → 좌하단 구석
+        Assert.Equal(4000 - 200, h1[25].StartPoint.Y);
+        Assert.Equal(0, h1[25].EndPoint.Y);
 
         Assert.Equal(4, beams.Count(b => b.ElementCode == "H3"));
         Assert.Equal(8, beams.Count(b => b.ElementCode == "H4"));
@@ -147,6 +149,88 @@ public class ReservoirGeometryCalculatorTests
         // G1 가로보는 기둥 면에서 시작
         var g1 = beams.First(b => b.ElementCode == "G1");
         Assert.Equal(4000 + 250, g1.StartPoint.X);
+    }
+
+    // docs/325 § A: 진행 방향 왼쪽 = 실내. 상부·중간 90°, 하부 0°
+    [Fact]
+    public void CalculateBeams_HaunchesFaceInteriorLikeValveRoom()
+    {
+        var dto = CreateReservoirDto();
+        var beams = ReservoirGeometryCalculator.CalculateBeams(dto, new ReservoirMemberSizes(500, 600, 400));
+        double w = dto.TankDto.W, l = dto.TankDto.L, wti = dto.ThicknessDto.WtiThk;
+
+        // 수조 헌치: 지마다 [x0, x0+w] × [0, l] 사각형 안쪽을 왼쪽에 둠
+        foreach (var b in beams.Where(b => b.ElementCode is "H1" or "H2"))
+        {
+            var (mx, my) = ((b.StartPoint.X + b.EndPoint.X) / 2, (b.StartPoint.Y + b.EndPoint.Y) / 2);
+            double dx = b.EndPoint.X - b.StartPoint.X, dy = b.EndPoint.Y - b.StartPoint.Y;
+            double len = Math.Sqrt(dx * dx + dy * dy);
+            // 왼쪽 법선으로 10mm 들어간 점이 해당 지 안쪽이어야 함
+            double px = mx - dy / len * 10, py = my + dx / len * 10;
+            double x0 = px < w + wti / 2 ? 0 : w + wti;
+            Assert.True(px > x0 && px < x0 + w && py > 0 && py < l, $"{b.ElementCode} {b.StartPoint}→{b.EndPoint} 왼쪽이 실 밖");
+        }
+
+        // 배관실 헌치: 배관실(y < 0) 안쪽을 왼쪽에 둠
+        foreach (var b in beams.Where(b => b.ElementCode is "H3" or "H4"))
+        {
+            var (mx, my) = ((b.StartPoint.X + b.EndPoint.X) / 2, (b.StartPoint.Y + b.EndPoint.Y) / 2);
+            double dx = b.EndPoint.X - b.StartPoint.X, dy = b.EndPoint.Y - b.StartPoint.Y;
+            double len = Math.Sqrt(dx * dx + dy * dy);
+            double py = my + dx / len * 10;
+            double vTop = -dto.ThicknessDto.WteThk, vBot = vTop - dto.ValveDto.Wv;
+            Assert.True(py < vTop && py > vBot, $"{b.ElementCode} {b.StartPoint}→{b.EndPoint} 왼쪽이 실 밖");
+        }
+
+        Assert.All(beams.Where(b => b.ElementCode is "H1" or "H3" or "H4"), b => Assert.Equal(90, b.CrossSectionRotationDeg));
+        Assert.All(beams.Where(b => b.ElementCode == "H2"), b => Assert.Equal(0, b.CrossSectionRotationDeg));
+        Assert.All(beams.Where(b => b.Part == "HAUNCH"), b => Assert.Equal(2, b.ZJustification));
+    }
+
+    // docs/325 § B: 헌치 체크박스 — 상부 = H1+H4, 중간 = H3, 하부 = H2
+    [Theory]
+    [InlineData(false, true, true, new[] { "H1", "H4" })]
+    [InlineData(true, false, true, new[] { "H3" })]
+    [InlineData(true, true, false, new[] { "H2" })]
+    public void CalculateBeams_SkipsUncheckedHaunches(bool upper, bool middle, bool lower, string[] missing)
+    {
+        var dto = CreateReservoirDto(upper: upper, middle: middle, lower: lower);
+        var codes = ReservoirGeometryCalculator.CalculateBeams(dto, new ReservoirMemberSizes(500, 600, 400))
+            .Where(b => b.Part == "HAUNCH").Select(b => b.ElementCode).Distinct().ToList();
+
+        foreach (var code in new[] { "H1", "H2", "H3", "H4" })
+            Assert.Equal(!missing.Contains(code), codes.Contains(code));
+    }
+
+    // docs/325 § C: 보·기둥 유형 이름 = 입력 치수
+    [Fact]
+    public void BeamsAndColumns_UseSizeTypeNames()
+    {
+        var dto = CreateReservoirDto();
+        var g1 = ReservoirGeometryCalculator.CalculateBeams(dto, new ReservoirMemberSizes(500, 600, 400)).Where(b => b.ElementCode == "G1").ToList();
+        Assert.All(g1, b =>
+        {
+            Assert.Equal("400 x 700", b.TypeName);
+            Assert.Equal(400, b.Width);
+            Assert.Equal(700, b.Height);
+        });
+        Assert.All(ReservoirGeometryCalculator.CalculateColumns(dto), c => Assert.Equal("500 x 600", c.TypeName));
+    }
+
+    // docs/325 § F: 외벽만 실내 면 고정
+    [Fact]
+    public void CalculateLinearWalls_HoldsInteriorFaceOfExteriorWalls()
+    {
+        var walls = ReservoirGeometryCalculator.CalculateLinearWalls(CreateReservoirDto());
+
+        Assert.Equal(WallHoldFace.Right, walls.Single(w => w.ElementCode == "W1").HoldFace);
+        Assert.Equal(WallHoldFace.Left, walls.Single(w => w.ElementCode == "W2").HoldFace);
+        Assert.Equal(WallHoldFace.Right, walls.Single(w => w.ElementCode == "W3").HoldFace);
+        Assert.All(walls.Where(w => w.ElementCode == "W4"), w => Assert.Equal(WallHoldFace.Left, w.HoldFace));
+        Assert.Equal(WallHoldFace.Left, walls.Single(w => w.ElementCode == "W7").HoldFace);
+        Assert.Equal(WallHoldFace.Right, walls.Single(w => w.ElementCode == "W8").HoldFace);
+        Assert.Equal(WallHoldFace.Left, walls.Single(w => w.ElementCode == "W9").HoldFace);
+        Assert.All(walls.Where(w => w.ElementCode is "W5" or "W6" or "W10" or "B3"), w => Assert.Equal(WallHoldFace.Center, w.HoldFace));
     }
 
     // docs/289 § E-3, § F
@@ -164,7 +248,8 @@ public class ReservoirGeometryCalculatorTests
         Assert.All(sections, s => Assert.True(s.HalfWidth > 0 && s.ZMax > s.ZMin && s.FarClipDepth > 0));
     }
 
-    private static ReservoirCreationRequestDto CreateReservoirDto(double m3 = 4000, double m4 = 4000)
+    private static ReservoirCreationRequestDto CreateReservoirDto(double m3 = 4000, double m4 = 4000,
+        bool upper = true, bool middle = true, bool lower = true)
     {
         var design = new ReservoirDesignConditionDto(Q: 5000, RT: 12, N: 2, LWL: 0);
         var tank = new ReservoirTankDto(
@@ -206,8 +291,15 @@ public class ReservoirGeometryCalculatorTests
             WveThk: 300,
             WviThk: 300,
             LcThk: 100,
-            ColumnTypeName: "Column",
-            BeamTypeName: "Beam");
+            ColumnB: 500,
+            ColumnH: 600,
+            BeamW: 400,
+            BeamH: 700,
+            HaunchB: 300,
+            HaunchH: 300,
+            HasUpperHaunch: upper,
+            HasMiddleHaunch: middle,
+            HasLowerHaunch: lower);
 
         return new ReservoirCreationRequestDto(design, tank, valve, thickness);
     }
