@@ -11,6 +11,7 @@ public sealed class StructureRegeneration
     public const string PumpingStation = "펌프장";
     public const string DischargeBasin = "토출조";
     public const string Reservoir = "배수지";
+    public const string ValveRoom = "밸브실";
 
     private readonly IStructureModelRepo _repo;
     private readonly string _structure;

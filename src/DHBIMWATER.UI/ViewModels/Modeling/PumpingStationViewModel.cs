@@ -471,6 +471,9 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
             {
                 _b7Base = value;
                 ApplyB7Final();
+                // Type1은 계단 최소(NS1×300+1000)·100mm 올림 적용 → 입력값과 다를 수 있음.
+                // 최종값 안 바뀌어도 알림 — 안 하면 입력칸에 친 값 남아 바뀐 줄 앎(실제 모델은 옛 값)
+                OnPropertyChanged(nameof(B7));
             }
         }
         public double H1
@@ -957,6 +960,9 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         #region Commands
         public ICommand CreatePumpingStationCommand { get; }
         public ICommand ImportExcelCommand { get; }
+        /// <summary>입력값 CSV 내보내기·가져오기(배수지 창과 같은 형식). 토출조 값 포함.</summary>
+        public ICommand ExportSettingsCommand { get; }
+        public ICommand ImportSettingsCommand { get; }
         public Action? CloseAction { get; set; }
 
         /// <summary>모델리스 창의 생성 실행 위임. 명령이 ExternalEvent로 연결. null이면 직접 실행(docs/320 § B).</summary>
@@ -1020,6 +1026,8 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
 
             CreatePumpingStationCommand = new RelayCommand(CreatePumpingStation);
             ImportExcelCommand = new RelayCommand(ImportFromExcel);
+            ExportSettingsCommand = new RelayCommand(_ => ExportSettings());
+            ImportSettingsCommand = new RelayCommand(_ => ImportSettings());
 
             InitializeDerivedValues();
 
@@ -1177,6 +1185,42 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
         public void SaveInputsIfChanged()
         {
             if (CaptureInputJson() != _savedInputJson) SaveInputs();
+        }
+
+        private void ExportSettings()
+        {
+            var path = _fileDialogService.SaveFile("펌프장 설정 내보내기", "CSV 파일 (*.csv)|*.csv", "PumpingStationSettings.csv");
+            if (path == null) return;
+            try
+            {
+                // UTF-8 BOM — 엑셀이 한글 설명 안 깨지게
+                System.IO.File.WriteAllText(path, PumpingStationInputCsv.ToCsv(CaptureSnapshot()), System.Text.Encoding.UTF8);
+                _dialogService.Info("내보내기", "CSV 파일이 저장되었습니다.");
+            }
+            catch (Exception ex)
+            {
+                _dialogService.Warn("내보내기", $"CSV 파일을 저장할 수 없습니다: {ex.Message}");
+            }
+        }
+
+        /// <summary>CSV 값 그대로 화면에 넣음(문서 저장본 복원과 같은 경로 — 계산값도 파일 값 유지). 없는 행은 현재 값 유지.
+        /// 문서 저장은 생성·창 닫을 때 평소대로.</summary>
+        private void ImportSettings()
+        {
+            var path = _fileDialogService.OpenFile("펌프장 설정 가져오기", "CSV 파일 (*.csv)|*.csv");
+            if (path == null) return;
+            try
+            {
+                var errors = new List<string>();
+                var snapshot = PumpingStationInputCsv.FromCsv(System.IO.File.ReadAllLines(path, System.Text.Encoding.UTF8), errors);
+                ApplySnapshot(snapshot);
+                if (errors.Count > 0) _dialogService.Warn("가져오기", string.Join(Environment.NewLine, errors));
+                else _dialogService.Info("가져오기", "CSV 파일을 가져왔습니다.");
+            }
+            catch (Exception ex)
+            {
+                _dialogService.Warn("가져오기", $"CSV 파일을 읽을 수 없습니다: {ex.Message}");
+            }
         }
 
         internal string CaptureInputJson()
@@ -1531,6 +1575,8 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
                 "B7" when type == "Type2" || type == "Type3"
                                    => ("B7", "1. 단독밸브 설치시 : B7 = 600 + 밸브길이 + 600\r\n2. 역류방지밸브 추가 설치시 : B7 = 600 + 밸브길이 + 1000 + 역류방지밸브 길이 + 600\r\n  ※ 플랜지 설치 및 유지관리를 위한 작업 공간 600mm와 역류방지밸브 추가 설치시에는 두 밸브 사이에 1m의 관 설치가 필요"),
 
+                "B7" when type == "Type1"
+                    => ("B7", _paramHints["B7"].desc + $"\r\n\r\n※ 현재 최소값 B7L2 = NS1({_ns1}) × 300 + 1000 = {_ns1 * 300 + 1000:N0}mm. 이보다 작게 입력하면 최소값으로 바뀜. 최종값은 100mm 단위 올림."),
                 _ when _paramHints.TryGetValue(key, out var h) => h,
                 _ => (string.Empty, string.Empty)
             };
@@ -1562,6 +1608,7 @@ namespace DHBIMWATER.UI.ViewModels.Modeling
             ["H5"] = ("H5", "H2 + H3 + H4 − T1 로 자동 산정."),
             ["H6"] = ("H6", "밸브와 토출관 플랜지 접합 공간. 경제성 고려 600 적용."),
             ["H7"] = ("H7", "관보호공 미적용을 위한 최소 토피. 「도로설계요령(2020), 제2권 토공 및 배수, P726, 6.2.3 관형 암거의 설계」, \"토피가 1.0m 이하의 경우는 RC 2종 360° 콘크리트 기초도 비교 검토한다.\", 또한 밸브실 높이를 정치수화 하기 위한 치수 추가"),
+            ["NS"] = ("NS", "기초 경사부 계단 단수. 자동 계산(직접 입력 안 함).\r\nNS = ROUNDDOWN((H4 − H1) / HS, 0)\r\n  ● H4 : 펌프 흡입관 잠김 깊이,  H1 : 제진기 최소 운전 수위\r\n  ● HS : 계단 1단 높이(200mm)\r\n  ※ 나눠 떨어지지 않는 나머지 높이는 HS 설명대로 최하단 계단에 반영"),
             ["HS"] = ("HS", "200mm 고정. 나머지 발생시 최하단에서 나머지 반영한 높이 적용"),
 
             // 종단제원 — L

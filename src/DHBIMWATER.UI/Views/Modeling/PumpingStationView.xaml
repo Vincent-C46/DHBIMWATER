@@ -158,6 +158,13 @@
                                              Width="170" BorderBrush="Transparent"
                                              Foreground="Gray"/>
                                     </StackPanel>
+                                    <!-- 입력값 CSV(배수지 창과 같은 형식). 토출조 값 포함 -->
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                        <Button Style="{StaticResource PrimaryButtonStyle}" Content="설정 내보내기"
+                                                Command="{Binding ExportSettingsCommand}" Width="130"/>
+                                        <Button Style="{StaticResource PrimaryButtonStyle}" Content="설정 가져오기"
+                                                Command="{Binding ImportSettingsCommand}" Width="130" Margin="10,0,0,0"/>
+                                    </StackPanel>
 
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                                         <TextBlock Text="펌프 제작사" Style="{StaticResource LabelTextBlockStyle}" Width="130" VerticalAlignment="Center"/>
@@ -399,7 +406,7 @@
                                                     <TextBlock Text="HS:" Style="{StaticResource LabelTextBlockStyle}" Width="30" VerticalAlignment="Center"/>
                                                     <TextBlock Text="계단 높이" Style="{StaticResource LabelTextBlockStyle}" Width="150" VerticalAlignment="Center"/>
                                                     <TextBox Style="{StaticResource PrimaryTextBoxStyle}"
-                                                  Text="{Binding HS}"
+                                                  Tag="HS" Text="{Binding HS}"
                                                   Width="100" Margin="10,0" VerticalAlignment="Center" Height="25"/>
                                                     <TextBlock Text="mm" Style="{StaticResource LabelTextBlockStyle}" VerticalAlignment="Center" Width="30"/>
                                                 </StackPanel>
@@ -532,7 +539,7 @@
                                                         <TextBlock Text="NS:" Style="{StaticResource LabelTextBlockStyle}" Width="30" VerticalAlignment="Center"/>
                                                         <TextBlock Text="기초 경사부 계단 단수" Style="{StaticResource LabelTextBlockStyle}" Width="150" VerticalAlignment="Center"/>
                                                         <TextBox Style="{StaticResource PrimaryTextBoxStyle}"
-                                                  Text="{Binding NS}" IsReadOnly="True" Background="LightGray"
+                                                  Tag="NS" Text="{Binding NS}" IsReadOnly="True" Background="LightGray"
                                                   Width="100" Margin="10,0" VerticalAlignment="Center" Height="25"/>
                                                         <TextBlock Text="단" Style="{StaticResource LabelTextBlockStyle}" VerticalAlignment="Center" Width="30"/>
                                                     </StackPanel>

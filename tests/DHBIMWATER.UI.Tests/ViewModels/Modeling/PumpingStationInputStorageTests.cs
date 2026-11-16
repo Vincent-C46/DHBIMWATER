@@ -1,4 +1,4 @@
-using DHBIMWATER.Application.Interfaces;
+﻿using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Application.UseCases.AutoGenerator;
 using DHBIMWATER.UI.ViewModels.Modeling;
 using Xunit;
@@ -32,12 +32,68 @@ public class PumpingStationInputStorageTests
         public bool Confirm(string title, string message) => true;
     }
 
-    private static PumpingStationViewModel CreateVm(MemoryRepo repo)
+    private sealed class FixedPathDialog : IFileDialogService
+    {
+        public string Path = "";
+        public string? OpenFile(string title, string filter) => Path;
+        public string? SaveFile(string title, string filter, string defaultFileName = "") => Path;
+    }
+
+    private static PumpingStationViewModel CreateVm(MemoryRepo repo, IFileDialogService? files = null)
     {
         var dialog = new StubDialogService();
         var basin = new DischargeBasinViewModel(dialog, null!);
-        return new PumpingStationViewModel(null!, dialog, null!, null!, null!, null!, basin,
+        return new PumpingStationViewModel(null!, dialog, null!, null!, null!, files!, basin,
             inputRepo: repo, saveInput: new SavePumpingStationInputUseCase(new NoTransaction(), repo));
+    }
+
+    [Fact]
+    public void Csv_ExportThenImport_RestoresPumpAndBasin()
+    {
+        var files = new FixedPathDialog { Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"pump_{Guid.NewGuid():N}.csv") };
+        try
+        {
+            var first = CreateVm(new MemoryRepo(), files);
+            first.SelectedPumpingStationType = "Type2";
+            first.D = 1100;
+            first.B3 = 7321;
+            first.GB1 = 650;
+            first.GH1 = 900;
+            first.HasCheckValve = true;
+            first.DischargeBasin.TA = 11.25;
+            first.DischargeBasin.PlanRows.First(r => r.Key == "TB1").Value = 4200;
+            first.ExportSettingsCommand.Execute(null);
+
+            var second = CreateVm(new MemoryRepo(), files);
+            second.ImportSettingsCommand.Execute(null);
+
+            Assert.Equal("Type2", second.SelectedPumpingStationType);
+            Assert.Equal(1100, second.D);
+            Assert.Equal(7321, second.B3);
+            Assert.Equal(650, second.GB1);
+            Assert.Equal(900, second.GH1);
+            Assert.True(second.HasCheckValve);
+            Assert.Equal(first.B7, second.B7);
+            Assert.Equal(11.25, second.DischargeBasin.TA);
+            Assert.Equal(4200, second.DischargeBasin.PlanRows.First(r => r.Key == "TB1").Value);
+            Assert.Equal(1100, second.DischargeBasin.RefD);
+        }
+        finally { System.IO.File.Delete(files.Path); }
+    }
+
+    [Fact]
+    public void B7_BelowStairMinimum_NotifiesActualValue()
+    {
+        var vm = CreateVm(new MemoryRepo());
+        vm.SelectedPumpingStationType = "Type1";
+        var actual = vm.B7;
+        var notified = false;
+        vm.PropertyChanged += (_, e) => notified |= e.PropertyName == nameof(vm.B7);
+
+        vm.B7 = 100;   // 계단 최소보다 작음 → 최종값 그대로
+
+        Assert.Equal(actual, vm.B7);
+        Assert.True(notified);   // 입력칸이 실제 값으로 되돌아가야 함
     }
 
     [Fact]

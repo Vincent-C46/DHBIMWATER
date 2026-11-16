@@ -32,6 +32,7 @@ public sealed class CreateValveRoomUseCase
     private readonly IViewCommandRepo _viewCommand;
     private readonly IDialogService _dialog;
     private readonly IConcreteSettingsRepo _concreteSettings;
+    private readonly IStructureModelRepo? _structureModel;
 
     public CreateValveRoomUseCase(ITransactionContext transaction, ILevelQueryRepo levelQuery, ILevelCommandRepo levelCommand,
         IProjectLocationCommandRepo projectLocationCommand,
@@ -39,7 +40,7 @@ public sealed class CreateValveRoomUseCase
         IColumnCommandRepo columnCommand, IElementTypeCommandRepo elementTypeCommand, IElementTypeQueryRepo elementTypeQuery,
         ISharedParameterRepository sharedParameter, IElementParameterCommandRepo elementParameterCommand,
         IProjectInformationCommandRepo projectInformationCommand, IViewCommandRepo viewCommand, IDialogService dialog,
-        IConcreteSettingsRepo concreteSettings)
+        IConcreteSettingsRepo concreteSettings, IStructureModelRepo? structureModel = null)
     {
         _transaction = transaction; _levelQuery = levelQuery; _levelCommand = levelCommand; _projectLocationCommand = projectLocationCommand; _slabCommand = slabCommand; _foundationCommand = foundationCommand; _airValveVoidCommand = airValveVoidCommand; _drainPitVoidCommand = drainPitVoidCommand;
         _wallCommand = wallCommand; _beamCommand = beamCommand; _columnCommand = columnCommand; _elementTypeCommand = elementTypeCommand;
@@ -47,6 +48,7 @@ public sealed class CreateValveRoomUseCase
         _sharedParameter = sharedParameter; _elementParameterCommand = elementParameterCommand;
         _projectInformationCommand = projectInformationCommand; _viewCommand = viewCommand; _dialog = dialog;
         _concreteSettings = concreteSettings;
+        _structureModel = structureModel;
     }
 
     public void Execute(ValveRoomRequestDto request)
@@ -55,6 +57,14 @@ public sealed class CreateValveRoomUseCase
         // 보 폭은 상부 헌치를 보에 맞춰 끊는 데(docs/162 § D-8), 기둥 단면은 상부 보를 기둥 자리에서 끊는 데(docs/202 § E) 쓴다.
         var dto = ToGeometryDto(request, ResolveSluiceBeamWidth(request), ResolveSluiceColumnSection(request));
         ValveRoomGeometryCalculator.Validate(dto);
+        // 기존 밸브실 있으면 개수 확인 후 삭제·재생성(펌프장·배수지와 같은 방식, docs/320 § C). 취소면 문서 변경 없음.
+        // 밸브실은 프로젝트당 1개(내부원점·프로젝트 정보를 이 밸브실 기준으로 씀) — 유형 바꿔 다시 만들어도 같은 구조물로 봄
+        StructureRegeneration? regeneration = null;
+        if (_structureModel is not null)
+        {
+            regeneration = StructureRegeneration.Prepare(_structureModel, _dialog, StructureRegeneration.ValveRoom);
+            if (regeneration is null) return;
+        }
         using (_transaction)
         {
             try
@@ -67,6 +77,8 @@ public sealed class CreateValveRoomUseCase
                 // 이 호출이 없으면 각 Repo의 LookupParameter("DH_*")가 null을 돌려주고 ?.Set이 조용히 무시된다.
                 // 배수지를 먼저 만든 문서에서만 우연히 기록되던 결함이었다(docs/142 § 4-1).
                 _sharedParameter.EnsureParameters(GetValveRoomSharedParameterDefinitions());
+                // DH_Structure 바인딩 준비 뒤 삭제(삭제 후 스냅샷 = 이번 생성분 구분 기준)
+                regeneration?.DeleteExisting();
 
                 // 프로젝트 정보 3종(밸브실유형·관로구간·밸브실측점). 이미 있으면 EnsureParameters가 바인딩을 그대로 두므로
                 // 값만 덮어써진다. 부재 매개변수와 카테고리가 달라 정의 목록을 따로 넘긴다.
@@ -186,6 +198,8 @@ public sealed class CreateValveRoomUseCase
                 // 절단용 Void 패밀리(드레인 피트·공기밸브 관통)는 대상에서 제외한다(docs/142 § 4).
                 // 실물 드레인 피트 패밀리는 위 배치 시점에 createdIds에 넣는다(docs/153 § E-4).
                 _elementParameterCommand.SetTextParameter(createdIds, "DH_Zone", request.RoomType);
+                // 생성 전후 차이로 표시 — Void·피트·헌치 등 createdIds에 없는 애드인 부재도 다음 재생성 때 같이 지움
+                regeneration?.MarkCreated();
                 _transaction.Commit();
                 // 트랜잭션 도중 모달을 띄우던 경고(보 맞춤·결합, Void 절단)를 드레인 피트 경고와 함께 한 번에 보여준다(docs/238 § C).
                 var warnings = pitWarnings.Concat(viewWarnings).Concat(_beamCommand.TakeWarnings()).Concat(_airValveVoidCommand.TakeWarnings()).ToList();
@@ -321,6 +335,7 @@ public sealed class CreateValveRoomUseCase
             new() { Name = "DH_Category",    SpecType = ParameterSpecType.Text,  GroupType = ParameterGroupType.Data, BindingType = ParameterBindingType.Instance, Categories = categories },
             new() { Name = "DH_Zone",        SpecType = ParameterSpecType.Text,  GroupType = ParameterGroupType.Data, BindingType = ParameterBindingType.Instance, Categories = categories },
             new() { Name = "DH_Part",        SpecType = ParameterSpecType.Text,  GroupType = ParameterGroupType.Data, BindingType = ParameterBindingType.Instance, Categories = categories },
+            new() { Name = StructureRegeneration.ParameterName, SpecType = ParameterSpecType.Text, GroupType = ParameterGroupType.Data, BindingType = ParameterBindingType.Instance, Categories = categories, UserModifiable = false },
             new() { Name = "DH_IsExterior",  SpecType = ParameterSpecType.YesNo, GroupType = ParameterGroupType.Data, BindingType = ParameterBindingType.Instance, Categories = new List<ParameterCategory> { ParameterCategory.Walls } },
         };
     }

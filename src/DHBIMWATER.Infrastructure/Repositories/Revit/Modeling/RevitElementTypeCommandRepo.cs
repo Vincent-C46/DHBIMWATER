@@ -141,8 +141,15 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
 
             // Find. 이름 정확히 일치 — 부분일치면 "600 x 800"이 "1600 x 800"을 잡음.
             // 같은 유형 이름이 여러 패밀리에 있을 수 있어 사각형 보 패밀리 것 우선
-            var existing = allBeamTypes.Where(b => b.Name == spec.Name).OrderByDescending(IsRectangularFamily).FirstOrDefault();
-            if (existing != null) return (int)existing.Id.Value;
+            // 크기 매개변수(b·h) 있는 것만 — 이름만 같고 b·h 없는 유형(다른 패밀리)은 크기 못 맞춤 → 아래에서 새로 복제
+            var existing = allBeamTypes.Where(b => b.Name == spec.Name && HasSizeParams(b, BeamWidthParam, BeamHeightParam))
+                .OrderByDescending(IsRectangularFamily).FirstOrDefault();
+            if (existing != null)
+            {
+                // 이름은 "폭 x 높이"인데 실제 b·h가 다른 유형(예전 코드·수동 수정) → 이름대로 고침. 안 고치면 GB1·GH1 바꿔도 모델 크기 그대로
+                SyncSize(existing, BeamWidthParam, spec.Width, BeamHeightParam, spec.Height);
+                return (int)existing.Id.Value;
+            }
 
             //Create. 콘크리트 사각형 보(b·h 유형 매개변수) 복제 후 b·h 수정. 패밀리 이름에 "사각형"/"Rectangular" 든 것 우선
             var baseType = PickSizedBase(allBeamTypes, BeamWidthParam, BeamHeightParam);
@@ -238,6 +245,22 @@ namespace DHBIMWATER.Infrastructure.Repositories.Revit.Modeling
         {
             var sized = candidates.Where(fs => fs.LookupParameter(widthParam) != null && fs.LookupParameter(heightParam) != null).ToList();
             return sized.FirstOrDefault(IsRectangularFamily) ?? sized.FirstOrDefault();
+        }
+
+        private static bool HasSizeParams(FamilySymbol fs, string widthParam, string heightParam)
+            => fs.LookupParameter(widthParam) != null && fs.LookupParameter(heightParam) != null;
+
+        /// <summary>크기 매개변수가 지정값(mm)과 0.5mm 넘게 다르면 지정값으로 씀. 쓰기 막힌 매개변수는 건너뜀.</summary>
+        private static void SyncSize(FamilySymbol fs, string widthParam, double width, string heightParam, double height)
+        {
+            Sync(fs.LookupParameter(widthParam), width);
+            Sync(fs.LookupParameter(heightParam), height);
+
+            static void Sync(Parameter? parameter, double mm)
+            {
+                if (parameter is null || parameter.IsReadOnly || parameter.StorageType != StorageType.Double) return;
+                if (Math.Abs(UC.FtToMm(parameter.AsDouble()) - mm) > 0.5) parameter.Set(UC.MmToFt(mm));
+            }
         }
 
         /// <summary>유형 복제 후 두 크기 매개변수(mm) 씀. 같은 이름은 찾기 단계에서 걸러져 Duplicate 이름 충돌 없음.</summary>
