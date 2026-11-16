@@ -72,24 +72,27 @@ FunctionEnd
 ; 버전별 템플릿 복사 + Revit.ini 등록. 그 버전 Revit 없으면 건너뜀
 !macro INSTALL_TEMPLATES VER
     IfFileExists "C:\ProgramData\Autodesk\RVT ${VER}\*.*" 0 tpl_skip_${VER}
-        CreateDirectory "C:\ProgramData\Autodesk\RVT ${VER}\Templates\DH"
-        ; 이전 버전 파일 정리 — 옛 이름 항목이 깨진 경로로 안 남게
+        ; 옛 설치 위치(Templates\DH) 정리 — 목록 항목은 같은 이름이라 새 경로로 바뀜
         Delete "C:\ProgramData\Autodesk\RVT ${VER}\Templates\DH\*.rte"
-        CopyFiles /SILENT "$PLUGINSDIR\Templates\*.rte" "C:\ProgramData\Autodesk\RVT ${VER}\Templates\DH"
-        nsExec::ExecToLog '"${POWERSHELL}" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\${TEMPLATE_SCRIPT}" -Action Register -RevitVersion ${VER} -TemplateDir "C:\ProgramData\Autodesk\RVT ${VER}\Templates\DH"'
+        RMDir "C:\ProgramData\Autodesk\RVT ${VER}\Templates\DH"
+        CreateDirectory "C:\ProgramData\Autodesk\RVT ${VER}\Templates\Korean\DH"
+        ; 이전 버전 파일 정리 — 옛 이름 항목이 깨진 경로로 안 남게
+        Delete "C:\ProgramData\Autodesk\RVT ${VER}\Templates\Korean\DH\*.rte"
+        CopyFiles /SILENT "$PLUGINSDIR\Templates\*.rte" "C:\ProgramData\Autodesk\RVT ${VER}\Templates\Korean\DH"
+        nsExec::ExecToLog '"${POWERSHELL}" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\${TEMPLATE_SCRIPT}" -Action Register -RevitVersion ${VER} -TemplateDir "C:\ProgramData\Autodesk\RVT ${VER}\Templates\Korean\DH"'
         Pop $0
         StrCmp $0 "0" tpl_skip_${VER}
-        MessageBox MB_OK|MB_ICONEXCLAMATION "Revit ${VER} 템플릿 파일은 설치했지만 템플릿 목록 등록에 실패했습니다.$\r$\nRevit 옵션 > 파일 위치에서 직접 추가하세요:$\r$\nC:\ProgramData\Autodesk\RVT ${VER}\Templates\DH"
+        MessageBox MB_OK|MB_ICONEXCLAMATION "Revit ${VER} 템플릿 파일은 설치했지만 템플릿 목록 등록에 실패했습니다.$\r$\nRevit 옵션 > 파일 위치에서 직접 추가하세요:$\r$\nC:\ProgramData\Autodesk\RVT ${VER}\Templates\Korean\DH"
     tpl_skip_${VER}:
 !macroend
 
 ; 버전별 등록 해제 + 파일 삭제. DH 폴더 경로 항목만 뺌
 !macro UNINSTALL_TEMPLATES VER
-    IfFileExists "C:\ProgramData\Autodesk\RVT ${VER}\Templates\DH\*.*" 0 untpl_skip_${VER}
-        nsExec::ExecToLog '"${POWERSHELL}" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\${TEMPLATE_SCRIPT}" -Action Unregister -RevitVersion ${VER} -TemplateDir "C:\ProgramData\Autodesk\RVT ${VER}\Templates\DH"'
+    IfFileExists "C:\ProgramData\Autodesk\RVT ${VER}\Templates\Korean\DH\*.*" 0 untpl_skip_${VER}
+        nsExec::ExecToLog '"${POWERSHELL}" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\${TEMPLATE_SCRIPT}" -Action Unregister -RevitVersion ${VER} -TemplateDir "C:\ProgramData\Autodesk\RVT ${VER}\Templates\Korean\DH"'
         Pop $0
-        Delete "C:\ProgramData\Autodesk\RVT ${VER}\Templates\DH\*.rte"
-        RMDir "C:\ProgramData\Autodesk\RVT ${VER}\Templates\DH"
+        Delete "C:\ProgramData\Autodesk\RVT ${VER}\Templates\Korean\DH\*.rte"
+        RMDir "C:\ProgramData\Autodesk\RVT ${VER}\Templates\Korean\DH"
     untpl_skip_${VER}:
 !macroend
 

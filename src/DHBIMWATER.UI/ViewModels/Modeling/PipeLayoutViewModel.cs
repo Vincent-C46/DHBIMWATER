@@ -311,6 +311,9 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         // 기본 포트 = IN 좌 1 + OUT 우 1. 종전 화살표 2개 고정 동작과 같다(docs/172 § C-2).
         foreach (var port in PipePortDefaults.Standard()) AttachPort(new PipePortItem(port));
         UpdatePortRemovability();
+        // UI 개편 — 캔버스 선택 속성 카드 표시/문구는 선택 목록 변화만 따라간다
+        SelectedEdgeIds.CollectionChanged += (_, _) => NotifySelectionCardChanged();
+        SelectedFittingIds.CollectionChanged += (_, _) => NotifySelectionCardChanged();
         // 생성 대기 중(IsCreating)에는 그래프·외곽을 바꾸는 명령을 막는다(docs/235 § D).
         PickOutlineCommand = new RelayCommand(_ => PickOutline(), _ => PickOutlineAction is not null && !IsCreating);
         PickPipingCommand = new RelayCommand(_ => PickPiping(), _ => PickPipingAction is not null && !IsCreating);
@@ -351,6 +354,25 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         // 저장값은 이름 추정 위에 덮어쓴다 — 추정은 저장값이 없는 칸에만 남는다(docs/175 D6).
         if (_settingsRepo?.Load() is { } saved) ApplyFamilySettings(saved, fromStorage: true);
         FlushDeferredParameterRefresh();
+        ApplyStartupDefaults();
+    }
+
+    /// <summary>밸브실 유형 기본값. 외곽 벽 DH_Zone이 있으면 외곽 피킹이 덮는다.</summary>
+    private const string DefaultValveRoomZone = "제수밸브실";
+
+    /// <summary>창 열 때 빈 칸 기본값 보강(2026-11-16 사용자 지시 "기본값 다 넣어").
+    /// 저장값·외곽 자동값이 먼저고, 그래도 빈 칸만 채운다.
+    /// - 밸브실 유형: 빈 값이면 제수밸브실 → 추천 배치·격점번호 기본값이 바로 동작. 종전(docs/161 확정 2)엔 사용자가 직접 골라야 했음.
+    /// - 기준 레벨: 비었으면 EL 0(내부 원점)에 가장 가까운 레벨, 같으면 낮은 쪽. 외곽 피킹 시 벽 기준 레벨이 덮는다(ApplyAutomaticElevationLevel).</summary>
+    private void ApplyStartupDefaults()
+    {
+        if (string.IsNullOrWhiteSpace(_valveRoomZone)) ValveRoomZone = DefaultValveRoomZone;
+        if (_elevationLevel is null && Levels.Count > 0)
+        {
+            ElevationLevel = Levels.OrderBy(level => Math.Abs(level.ElevationMm)).ThenBy(level => level.ElevationMm).First();
+            // 저장 레벨이 문서에 없던 경우 — 종전엔 비워 두고 재선택 요구. 이제 기본 레벨로 대체하고 알림만.
+            if (_savedElevationLevelMissing) Status = $"저장된 기준 레벨 없음 — '{ElevationLevel.Name}'(으)로 대체";
+        }
     }
 
     public CanvasModelTransform Transform { get; } = new();
@@ -538,7 +560,9 @@ public sealed class PipeLayoutViewModel : ViewModelBase
                 Mode = PipeLayoutMode.Drawing;
                 if (_selectedFamilyTypeName is not null) SelectedFamilyTypeName = null;
                 if (_selectedJointFamilyTypeName is not null) SelectedJointFamilyTypeName = null;
-                Status = "본관 클릭 → 바이패스 세트 (커서 쪽 분기) · Esc 종료";
+                Status = string.IsNullOrWhiteSpace(BypassValveFamilyName)
+                    ? "바이패스 밸브 패밀리 선택 필요 — [부속] 탭 바이패스 칸 · Esc 종료"
+                    : "본관 클릭 → 바이패스 세트 (커서 쪽 분기) · Esc 종료";
             }
             else HideFittingPreview();
             OnPropertyChanged(nameof(IsPlacingBypassSet));
@@ -881,13 +905,45 @@ public sealed class PipeLayoutViewModel : ViewModelBase
                 ApplyDiameterToSelection(value);
                 return;
             }
-            if (SetProperty(ref _diameterMm, value))
-            {
-                RefreshDiameterMatch();
-                RefreshGraph();
-                NotifyValidationChanged();
-            }
+            SetDefaultDiameter(value);
         }
+    }
+
+    /// <summary>앞으로 그릴 선의 <b>기본 관경</b>만 읽고 쓴다 — 선택과 무관(UI 개편 동작 변경 A).
+    /// 선택 관경 편집은 캔버스 속성 카드의 <see cref="DiameterMm"/>이 맡는다.
+    /// <para>세터 예외는 XAML ValidatesOnExceptions용 — 지우지 말 것.</para></summary>
+    public double DefaultDiameterMm
+    {
+        get => _diameterMm;
+        set
+        {
+            if (!double.IsFinite(value) || value <= 0)
+                throw new ArgumentOutOfRangeException(nameof(value), $"[{ErrorCodes.PL_InvalidDiameter}] 관경은 0보다 큰 숫자여야 합니다.");
+            SetDefaultDiameter(value);
+        }
+    }
+
+    private void SetDefaultDiameter(double value)
+    {
+        if (!SetProperty(ref _diameterMm, value, nameof(DefaultDiameterMm))) return;
+        // 선택 없으면 DiameterMm도 같은 값 — 같이 알린다
+        if (SelectedEdgeIds.Count == 0) OnPropertyChanged(nameof(DiameterMm));
+        RefreshDiameterMatch();
+        RefreshGraph();
+        NotifyValidationChanged();
+    }
+
+    /// <summary>캔버스 선택 속성 카드 표시 여부(선 또는 부속 선택).</summary>
+    public bool HasCanvasSelection => HasSelection;
+    /// <summary>선 선택 있으면 카드에 관경 칸 보임.</summary>
+    public bool HasSelectedEdges => SelectedEdgeIds.Count > 0;
+    public string SelectionSummaryText => $"선택: 관 {SelectedEdgeIds.Count}개 · 부속 {SelectedFittingIds.Count}개";
+
+    private void NotifySelectionCardChanged()
+    {
+        OnPropertyChanged(nameof(HasCanvasSelection));
+        OnPropertyChanged(nameof(HasSelectedEdges));
+        OnPropertyChanged(nameof(SelectionSummaryText));
     }
 
     /// <summary>선택한 선들의 관경만 바꾼다. 기본 관경(<see cref="_diameterMm"/>)은 건드리지 않는다.</summary>
@@ -1180,6 +1236,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             if (!SetProperty(ref _selectedJointFamilyTypeName, value)) return;
             if (!string.IsNullOrWhiteSpace(value) && SelectedFamilyTypeName is not null) SelectedFamilyTypeName = null;
             if (!string.IsNullOrWhiteSpace(value)) IsPlacingBypassSet = false;
+            // 동작 변경 B — 밸브와 같음
+            if (!string.IsNullOrWhiteSpace(value) && !IsDrawMode) Mode = PipeLayoutMode.Drawing;
             RefreshFittingDiameterParameterNames();
             OnPropertyChanged(nameof(IsPlacingFitting));
             OnPropertyChanged(nameof(InteractionModeText));
@@ -1293,6 +1351,13 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             if (value != PipeLayoutMode.Selection) ClearSelection();
             _mode = value;
             if (value != PipeLayoutMode.Drawing && _isPlacingBypassSet) IsPlacingBypassSet = false;
+            // 동작 변경 B — 유형 목록이 항상 켜져 있으므로, 그리기 모드를 떠나면 유형 선택도 비운다.
+            // 안 비우면 같은 유형 다시 눌러도 SelectedItem 안 바뀌어 배치 진입 안 됨.
+            if (value != PipeLayoutMode.Drawing)
+            {
+                if (_selectedFamilyTypeName is not null) SelectedFamilyTypeName = null;
+                if (_selectedJointFamilyTypeName is not null) SelectedJointFamilyTypeName = null;
+            }
             RefreshGraph();
             OnPropertyChanged(nameof(Mode));
             OnPropertyChanged(nameof(IsSelectionMode));
@@ -1321,6 +1386,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
             // 밸브를 고르면 이음관 선택은 비운다 — 배치 대상은 하나다(docs/175 § C-3).
             if (!string.IsNullOrWhiteSpace(value) && _selectedJointFamilyTypeName is not null) SelectedJointFamilyTypeName = null;
             if (!string.IsNullOrWhiteSpace(value)) IsPlacingBypassSet = false;
+            // 동작 변경 B — 유형 고르면 바로 배치 도구(그리기 모드) 진입. 코드에서 넣는 값은 모두 null이라 사용자 선택만 해당
+            if (!string.IsNullOrWhiteSpace(value) && !IsDrawMode) Mode = PipeLayoutMode.Drawing;
             RefreshFittingDiameterParameterNames();
             OnPropertyChanged(nameof(IsPlacingFitting));
             OnPropertyChanged(nameof(InteractionModeText));
@@ -1328,7 +1395,8 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         }
     }
     /// <summary>true면 리스트에서 패밀리를 선택한 상태 — 캔버스 클릭이 선 그리기가 아니라 부속 배치로 동작한다.</summary>
-    public bool IsPlacingFitting => IsDrawMode && !string.IsNullOrWhiteSpace(PlacingFamilyTypeName);
+    /// 바이패스 세트 배치 켜짐이면 밸브 유형 유무와 상관없이 배치 상태 — 유형 비면 선 그리기로 빠지던 버그 막음. 패밀리 없으면 클릭 때 상태줄로 알림.
+    public bool IsPlacingFitting => IsDrawMode && (_isPlacingBypassSet || !string.IsNullOrWhiteSpace(PlacingFamilyTypeName));
     public bool IsFittingPreviewVisible { get => _isFittingPreviewVisible; private set => SetProperty(ref _isFittingPreviewVisible, value); }
     public double FittingPreviewX { get => _fittingPreviewX; private set => SetProperty(ref _fittingPreviewX, value); }
     public double FittingPreviewY { get => _fittingPreviewY; private set => SetProperty(ref _fittingPreviewY, value); }
@@ -1583,8 +1651,14 @@ public sealed class PipeLayoutViewModel : ViewModelBase
 
     private void PlacePreviewedFitting()
     {
+        if (_isPlacingBypassSet)
+        {
+            // 본관 밖 클릭 — 선 그리기로 안 넘기고 안내만
+            if (_fittingPreviewEdgeId is null) { Status = "바이패스 세트는 본관 선 위를 클릭해 놓습니다 · Esc 종료"; return; }
+            PlacePreviewedBypassSet();
+            return;
+        }
         if (_fittingPreviewEdgeId is null || PlacingFamilyTypeName is not { } placingFamily) return;
-        if (_isPlacingBypassSet) { PlacePreviewedBypassSet(); return; }
         var before = Snapshot();
         if (!TryEditNetwork(before, () => _network.AddInlineFitting(_fittingPreviewEdgeId.Value, PlacingTypeKey, placingFamily, _fittingPreviewT))) return;
         BeginEditing();
@@ -4740,7 +4814,7 @@ public sealed class PipeLayoutViewModel : ViewModelBase
         BeginEditing();
         RecordUndoIfChanged(before);
         RefreshGraph();
-        Status = "바이패스 세트 배치 · 본관 밸브는 [5. 밸브 · 이음관 배치]로 · 방향은 세트 목록에서";
+        Status = "바이패스 세트 배치 · 본관 밸브는 [부속] 탭 밸브로 · 방향은 배치된 부속 목록 ⋯ 메뉴에서";
     }
 
     private void ApplyBypassValves(InlineFittingItem? item)

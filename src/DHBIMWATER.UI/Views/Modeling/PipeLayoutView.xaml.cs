@@ -18,12 +18,7 @@ public partial class PipeLayoutView : Window
         viewModel.CloseAction = Close;
         viewModel.EdgeSelectedAction = FocusDiameterEditor;
         // 설정 창(패밀리 · 스냅 · 기준점)은 모달이며 같은 ViewModel에 바인딩된다(docs/175 § E-5, docs/185). 닫히면 본 창을 다시 앞으로.
-        viewModel.OpenFamilySettingsAction = () =>
-        {
-            var dialog = new PipeLayoutFamilySettingsView(viewModel) { Owner = this };
-            dialog.ShowDialog();
-            Activate();
-        };
+        viewModel.OpenFamilySettingsAction = () => OpenSettings(0);
         // 수직분기 입면 창(docs/301 § D). 모달 — 닫힌 뒤 배치 ExternalEvent가 돈다.
         viewModel.OpenVerticalBranchDialog = dialogViewModel =>
         {
@@ -39,6 +34,11 @@ public partial class PipeLayoutView : Window
             dialog.ShowDialog();
             Activate();
         };
+        // UI 개편 — 통합 부속 목록. 캔버스 ItemsControl과 같은 컬렉션이라 기본 뷰 말고 별도 뷰에 필터를 건다
+        _fittingListView = new System.Windows.Data.ListCollectionView(viewModel.InlineFittings) { Filter = FilterFitting };
+        FittingList.ItemsSource = _fittingListView;
+        viewModel.InlineFittings.CollectionChanged += (_, _) => UpdateFittingFilterCounts();
+        UpdateFittingFilterCounts();
         // 창 단위 안전망(docs/235 § B). 창이 열려 있는 동안만 구독한다.
         Dispatcher.UnhandledException += OnDispatcherUnhandledException;
         Closed += (_, _) => Dispatcher.UnhandledException -= OnDispatcherUnhandledException;
@@ -57,7 +57,85 @@ public partial class PipeLayoutView : Window
     }
     private void OnLayoutCanvasSizeChanged(object sender, SizeChangedEventArgs e) => _viewModel.HandleCanvasSizeChanged(e.NewSize.Width, e.NewSize.Height);
 
-    /// <summary>선이 선택되면 "3. 배관 기준값"을 펼치고 관경 칸에 포커스·전체 선택(docs/233 § A-3).
+    /// <summary>설정 창(모달, 같은 VM). <paramref name="tabIndex"/> 0=패밀리, 1=밸브 · 부관, 2=스냅 · 기준점.</summary>
+    private void OpenSettings(int tabIndex)
+    {
+        var dialog = new PipeLayoutFamilySettingsView(_viewModel, tabIndex) { Owner = this };
+        dialog.ShowDialog();
+        Activate();
+    }
+
+    /// <summary>[부속] 탭 요약줄 "설정에서 변경" — 설정창 밸브 · 부관 탭으로 연다. 생성 중엔 명령과 같이 막는다.</summary>
+    private void OnOpenFittingSettingsClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.OpenFamilySettingsCommand.CanExecute(null)) OpenSettings(1);
+    }
+
+    private const int FittingTabIndex = 2;
+    private void OnValveToolClick(object sender, RoutedEventArgs e) { StepTabs.SelectedIndex = FittingTabIndex; FittingToolValve.IsChecked = true; }
+    private void OnJointToolClick(object sender, RoutedEventArgs e) { StepTabs.SelectedIndex = FittingTabIndex; FittingToolJoint.IsChecked = true; }
+    /// <summary>툴바 바이패스 — 칸 펼치고 세트 배치 켬. 토글 아님: 켜진 채 패널 버튼 누르면 꺼져 선 그리기로 빠지던 함정 막음. 끄기는 Esc·패널 버튼.</summary>
+    private void OnBypassToolClick(object sender, RoutedEventArgs e)
+    {
+        StepTabs.SelectedIndex = FittingTabIndex;
+        FittingToolBypass.IsChecked = true;
+        if (_viewModel.ToggleBypassPlacementCommand.CanExecute(null)) _viewModel.IsPlacingBypassSet = true;
+        LayoutCanvas.Focus();
+    }
+
+    /// <summary>⋯ 버튼 왼쪽 클릭으로 ContextMenu를 연다. 수동으로 열면 DataContext가 안 따라올 수 있어 버튼 것을 직접 넣는다.</summary>
+    private void OnOpenContextMenuClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { ContextMenu: { } menu } button) return;
+        menu.DataContext = button.DataContext;
+        menu.PlacementTarget = button;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
+    /// <summary>부속 목록 행 ⋯ 메뉴 — 종전 행 버튼과 같은 VM 명령에 그 행 항목을 넘긴다.</summary>
+    private void ExecuteFittingCommand(object sender, ICommand command)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not InlineFittingItem item) return;
+        if (command.CanExecute(item)) command.Execute(item);
+    }
+    private void OnFlipBypassClick(object sender, RoutedEventArgs e) => ExecuteFittingCommand(sender, _viewModel.FlipBypassSetCommand);
+    private void OnSwapBypassValvesClick(object sender, RoutedEventArgs e) => ExecuteFittingCommand(sender, _viewModel.SwapBypassValvesCommand);
+    private void OnApplyBypassValvesClick(object sender, RoutedEventArgs e) => ExecuteFittingCommand(sender, _viewModel.ApplyBypassValvesCommand);
+    private void OnRemoveFittingClick(object sender, RoutedEventArgs e) => ExecuteFittingCommand(sender, _viewModel.RemoveFittingCommand);
+
+    private readonly System.ComponentModel.ICollectionView _fittingListView;
+
+    private bool FilterFitting(object obj)
+    {
+        if (obj is not InlineFittingItem item) return false;
+        if (FittingFilterValve.IsChecked == true) return !item.IsJoint && !item.IsBypassSet;
+        if (FittingFilterJoint.IsChecked == true) return item.IsJoint;
+        if (FittingFilterBypass.IsChecked == true) return item.IsBypassSet;
+        return true;
+    }
+
+    /// <summary>XAML 파싱 중(IsChecked="True")에도 불린다 — 뷰 만들기 전이면 건너뜀.</summary>
+    private void OnFittingFilterChecked(object sender, RoutedEventArgs e) => _fittingListView?.Refresh();
+
+    /// <summary>필터 칩에 개수 표시.</summary>
+    private void UpdateFittingFilterCounts()
+    {
+        var items = _viewModel.InlineFittings;
+        FittingFilterAll.Content = $"전체 {items.Count}";
+        FittingFilterValve.Content = $"밸브 {items.Count(x => !x.IsJoint && !x.IsBypassSet)}";
+        FittingFilterJoint.Content = $"이음관 {items.Count(x => x.IsJoint)}";
+        FittingFilterBypass.Content = $"바이패스 {items.Count(x => x.IsBypassSet)}";
+    }
+
+    /// <summary>선택 카드 [삭제] — Delete 키와 같은 동작.</summary>
+    private void OnDeleteSelectionClick(object sender, RoutedEventArgs e)
+    {
+        HandleCanvasShortcut(Key.Delete);
+        LayoutCanvas.Focus();
+    }
+
+    /// <summary>선이 선택되면 캔버스 선택 카드의 관경 칸에 포커스·전체 선택(docs/233 § A-3). 종전엔 "3. 배관 기준값" 섹션을 펼쳤다.
     /// Dispatcher로 미루는 이유: 선 클릭 핸들러(<see cref="OnEdgeMouseLeftButtonDown"/>)가 VM 호출 뒤 <c>LayoutCanvas.Focus()</c>를 부르므로
     /// 동기로 옮기면 곧바로 빼앗긴다. 드래그 중에도 마우스는 캔버스가 캡처하고 있어 포커스 위치와 무관하다.
     /// 섹션 펼침은 기존 <see cref="OnSectionExpanded"/>가 나머지를 접는다.</summary>
@@ -65,8 +143,7 @@ public partial class PipeLayoutView : Window
     {
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, () =>
         {
-            SectionPipe.IsExpanded = true;
-            DiameterTextBox.BringIntoView();
+            // 카드는 HasCanvasSelection 바인딩으로 이미 보임(DataBind가 Input보다 먼저 처리)
             DiameterTextBox.Focus();
             DiameterTextBox.SelectAll();
             _diameterTextAtAutoFocus = DiameterTextBox.Text;
@@ -287,16 +364,5 @@ public partial class PipeLayoutView : Window
                 : LogicalTreeHelper.GetParent(node);
         }
         return null;
-    }
-
-    /// <summary>우측 패널 아코디언은 한 번에 하나만 펼친다(docs/185). 펼친 섹션 말고 나머지를 접는다.</summary>
-    private void OnSectionExpanded(object sender, RoutedEventArgs e)
-    {
-        // Expander.Expanded는 라우팅 이벤트라 섹션 안에 든 다른 Expander(현재는 없음)도 여기로 올라올 수 있다.
-        // sender(구독한 섹션)와 원본이 다르면 남의 이벤트이므로 건드리지 않는다.
-        if (!ReferenceEquals(sender, e.OriginalSource)) return;
-        foreach (var child in PanelSections.Children)
-            if (child is System.Windows.Controls.Expander other && !ReferenceEquals(other, sender))
-                other.IsExpanded = false;
     }
 }

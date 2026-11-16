@@ -1,4 +1,4 @@
-using DHBIMWATER.Application.Interfaces;
+﻿using DHBIMWATER.Application.Interfaces;
 using DHBIMWATER.Core.Piping;
 using DHBIMWATER.UI.ViewModels.Modeling;
 using Xunit;
@@ -96,7 +96,7 @@ public sealed class PipeLayoutPipeKindTests
                 view.Show();
                 void Pump() => System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
                 Pump();
-                ((System.Windows.Controls.Expander)view.FindName("SectionPipe")).IsExpanded = true;
+                ((System.Windows.Controls.TabControl)view.FindName("StepTabs")).SelectedIndex = 1;   // UI 개편 — 아코디언 섹션 3 → [2 배관] 탭
                 Pump();
                 vm.IsSteelSelected = true;
                 Pump();

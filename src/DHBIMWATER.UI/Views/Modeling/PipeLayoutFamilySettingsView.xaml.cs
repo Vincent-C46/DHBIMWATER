@@ -6,9 +6,11 @@ namespace DHBIMWATER.UI.Views.Modeling;
 /// <summary>PipeLayout 패밀리·파라미터 설정 창(docs/175 § E-5). DataContext는 <see cref="PipeLayoutViewModel"/> 그대로다.</summary>
 public partial class PipeLayoutFamilySettingsView : Window
 {
-    public PipeLayoutFamilySettingsView(PipeLayoutViewModel viewModel)
+    /// <param name="initialTabIndex">처음 열 탭. 0=패밀리, 1=밸브 · 부관, 2=스냅 · 기준점.</param>
+    public PipeLayoutFamilySettingsView(PipeLayoutViewModel viewModel, int initialTabIndex = 0)
     {
         InitializeComponent();
+        if (initialTabIndex >= 0 && initialTabIndex < SettingsTabs.Items.Count) SettingsTabs.SelectedIndex = initialTabIndex;
         DataContext = viewModel;
         // [저장]은 창을 닫아야 저장이 실행된다(모달 창이 떠 있는 동안 ExternalEvent가 처리되지 않음). 닫히면 위임을 거둔다.
         viewModel.CloseFamilySettingsAction = Close;

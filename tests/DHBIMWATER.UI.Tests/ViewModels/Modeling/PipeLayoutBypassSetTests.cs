@@ -567,6 +567,82 @@ public sealed class PipeLayoutBypassSetTests
         Assert.NotEqual(unselected.Fill, selected.Fill);
     }
 
+    /// <summary>실창 — 부속 탭 바이패스 칸 [세트 배치] 누르면 배치 모드가 켜지고 본관 클릭이 세트를 놓아야 한다(UI 개편 회귀).</summary>
+    [Fact]
+    public void RealWindow_BypassPanelButton_EntersPlacement()
+    {
+        string? report = null; Exception? err = null;
+        var t = new System.Threading.Thread(() =>
+        {
+            try
+            {
+                var vm = CreateMainPipeViewModel();
+                if (System.Windows.Application.Current == null) _ = new System.Windows.Application();
+                var view = new DHBIMWATER.UI.Views.Modeling.PipeLayoutView(vm) { WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, ShowInTaskbar = false, ShowActivated = false };
+                void Pump() => System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                view.Show(); Pump();
+                var log = new List<string>();
+                string St(string s) => $"{s}: bypass={vm.IsPlacingBypassSet} placing={vm.IsPlacingFitting} mode={vm.Mode} text={vm.InteractionModeText}";
+                ((System.Windows.Controls.TabControl)view.FindName("StepTabs")).SelectedIndex = 2; Pump();
+                ((System.Windows.Controls.RadioButton)view.FindName("FittingToolBypass")).IsChecked = true; Pump();
+                log.Add(St("panel shown"));
+                var button = FindButton(view, b => b.Content as string == vm.BypassPlacementButtonText);
+                Assert.NotNull(button);
+                ((System.Windows.Automation.Provider.IInvokeProvider)new System.Windows.Automation.Peers.ButtonAutomationPeer(button!).GetPattern(System.Windows.Automation.Peers.PatternInterface.Invoke)).Invoke();
+                Pump();
+                log.Add(St("after button"));
+                // 툴바 경로: 켜진 상태에서 툴바 눌러도 꺼지면 안 됨(토글 함정)
+                var tool = FindButton(view, b => System.Windows.Automation.AutomationProperties.GetName(b) == "바이패스 도구");
+                Assert.NotNull(tool);
+                ((System.Windows.Automation.Provider.IInvokeProvider)new System.Windows.Automation.Peers.ButtonAutomationPeer(tool!).GetPattern(System.Windows.Automation.Peers.PatternInterface.Invoke)).Invoke();
+                Pump();
+                log.Add(St("after toolbar"));
+                vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2000, 50)));
+                vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 50)));
+                log.Add($"sets={vm.BypassSetItems.Count}");
+                view.Close();
+                report = string.Join(" ;; ", log);
+            }
+            catch (Exception ex) { err = ex; }
+        });
+        t.SetApartmentState(System.Threading.ApartmentState.STA); t.Start(); t.Join();
+        Assert.Null(err);
+        Assert.Contains("after button: bypass=True placing=True", report);
+        Assert.Contains("after toolbar: bypass=True placing=True", report);
+        Assert.Contains("sets=1", report);
+    }
+
+    /// <summary>바이패스 밸브 패밀리가 비어도 세트 배치 중엔 캔버스 클릭이 선을 그리지 않는다.</summary>
+    [Fact]
+    public void BypassPlacement_WithoutValveFamily_DoesNotDrawLine()
+    {
+        var vm = CreateMainPipeViewModel();
+        vm.BypassValveFamilyName = null;
+        var edges = vm.Edges.Count;
+        vm.IsPlacingBypassSet = true;
+
+        Assert.True(vm.IsPlacingFitting);
+        vm.HandleCanvasMove(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 50)));
+        vm.HandleCanvasClick(vm.Transform.ToScreen(new Point2D(2000, 3000)));
+
+        Assert.False(vm.IsDrawing);
+        Assert.Equal(edges, vm.Edges.Count);
+        Assert.Empty(vm.BypassSetItems);
+        Assert.Contains("바이패스", vm.Status);
+    }
+
+    private static System.Windows.Controls.Button? FindButton(DependencyObject root, Func<System.Windows.Controls.Button, bool> match)
+    {
+        for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+            if (child is System.Windows.Controls.Button b && b.IsVisible && match(b)) return b;
+            if (FindButton(child, match) is { } found) return found;
+        }
+        return null;
+    }
+
     private static PipeLayoutViewModel CreateMainPipeViewModel(double diameterMm = 1650)
     {
         var vm = CreateViewModel();

@@ -19,7 +19,7 @@
         <Border Grid.Row="1" Background="White" CornerRadius="12" Margin="20,12" Padding="16">
             <!-- 패밀리 매핑과 스냅·기준점을 한 창에 모았다(docs/185). 우측 패널에는 자주 쓰는 입력만 남긴다.
                  [저장]은 패밀리·파라미터 매핑만 프로젝트에 기록한다 — 스냅·기준점은 예전처럼 이번 세션에만 적용된다. -->
-            <TabControl Style="{StaticResource PrimaryTabControlStyle}">
+            <TabControl x:Name="SettingsTabs" Style="{StaticResource PrimaryTabControlStyle}">
                 <TabItem Header="패밀리" Style="{StaticResource PrimaryTabItemStyle}">
                     <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="0,10,0,0">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,6"><TextBlock Text="저장 범위" FontSize="11" Foreground="#7F8C8D" VerticalAlignment="Center"/><ContentControl Style="{StaticResource HelpIconStyle}" Tag="여기서 고른 패밀리·파라미터는 [저장]을 누르면 프로젝트에 남고, 다음에 창을 열 때 그대로 돌아옵니다. 저장값이 없는 칸만 이름으로 추정합니다."/></StackPanel>
@@ -68,6 +68,41 @@
                 <TextBlock Text="이경관 큰 쪽 직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding ReducerLargeParameterNames, Mode=OneWay}" SelectedItem="{Binding ReducerLargeDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,10"/>
                 <TextBlock Text="이경관 작은 쪽 직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding ReducerSmallParameterNames, Mode=OneWay}" SelectedItem="{Binding ReducerSmallDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
                 <TextBlock Text="이경관은 아직 자동 배치하지 않습니다. 매핑만 저장됩니다." Foreground="#B03A2E" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,0"/>
+            </StackPanel></Border>
+                    </StackPanel></ScrollViewer>
+                </TabItem>
+                <!-- UI 개편 — 본창 [부속] 탭에서 옮겨온 매핑값(배치마다 안 바꿈). 바인딩은 종전 본창 칸과 같은 VM 속성.
+                     저장은 아래 [지금 저장] 하나(종전 [밸브부관 설정 저장]과 같은 SaveFamilySettingsCommand). -->
+                <TabItem Header="밸브 · 부관" Style="{StaticResource PrimaryTabItemStyle}">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="0,10,0,0">
+            <Border Background="#F7F9FB" BorderBrush="#DCE6EE" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,10"><StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="밸브 (패밀리별 기억)" FontWeight="Bold" Foreground="#4A6FA5"/><ContentControl Style="{StaticResource HelpIconStyle}" Tag="직경 파라미터는 밸브 패밀리마다 따로 기억합니다. 대상 패밀리를 바꾸면 그 패밀리 값이 나옵니다. 본창 [부속] 탭의 밸브 패밀리와 같은 칸입니다."/></StackPanel>
+                <TextBlock Text="대상 패밀리 (배관 밸브류)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding ValveFamilyNames, Mode=OneWay}" SelectedValue="{Binding SelectedValveFamilyName, Mode=TwoWay}" SelectedValuePath="Name" DisplayMemberPath="Name" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,8"/>
+                <TextBlock Text="인스턴스 직경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding ValveParameterNames, Mode=OneWay}" SelectedItem="{Binding ValveDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,8"/>
+                <!-- docs/233 § B-3 — 값 안 씀, 관경과 대조만 -->
+                <TextBlock Text="유형 직경 매개변수 (확인용)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding ValveTypeParameterNames, Mode=OneWay}" SelectedItem="{Binding ValveTypeDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
+                <TextBlock Text="{Binding ValveTypeDiameterText, Mode=OneWay}" FontSize="11" TextWrapping="Wrap" Foreground="#7F8C8D"/>
+            </StackPanel></Border>
+            <Border Background="#F7F9FB" BorderBrush="#DCE6EE" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,10"><StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="바이패스 밸브" FontWeight="Bold" Foreground="#4A6FA5"/><ContentControl Style="{StaticResource HelpIconStyle}" Tag="본창 [부속] 탭 바이패스의 밸브 1 패밀리 기준입니다. 밸브 2 직경 파라미터는 위 밸브 칸의 패밀리별 값을 씁니다."/></StackPanel>
+                <TextBlock Text="밸브 1 패밀리" FontWeight="SemiBold"/><TextBlock Text="{Binding BypassValveFamilyName, Mode=OneWay}" Foreground="#34495E" Margin="0,4,0,8"/>
+                <TextBlock Text="인스턴스 직경 파라미터" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding BypassValveParameterNames, Mode=OneWay}" SelectedItem="{Binding BypassValveDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
+            </StackPanel></Border>
+            <Border Background="#F7F9FB" BorderBrush="#DCE6EE" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,10"><StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="이음관" FontWeight="Bold" Foreground="#4A6FA5"/><ContentControl Style="{StaticResource HelpIconStyle}" Tag="이음관 구경 파라미터는 전역 1개입니다(docs/167 § C). 이음관 길이는 패밀리가 구경에서 자동 계산합니다."/></StackPanel>
+                <TextBlock Text="구경 파라미터 (선택)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding JointParameterNames, Mode=OneWay}" SelectedItem="{Binding JointDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
+            </StackPanel></Border>
+            <!-- docs/229 § B / docs/232 § B — 콤보마다 컬렉션 따로(공유 시 Clear로 다른 칸 비워짐) -->
+            <Border Background="#F7F9FB" BorderBrush="#DCE6EE" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,10"><StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="밸브부관 A (본관 T자)" FontWeight="Bold" Foreground="#4A6FA5"/><ContentControl Style="{StaticResource HelpIconStyle}" Tag="수평분기는 예, 수직분기는 아니오로 자동 설정합니다. 바꾸려면 배치 후 특성창에서 조정하세요."/></StackPanel>
+                <TextBlock Text="패밀리 (배관 부속류, 커넥터 3~4개)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding SegmentFamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding ValveTeeFamilyTypeName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,8"/>
+                <TextBlock Text="주관 직경 파라미터" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding ValveTeeMainParameterNames, Mode=OneWay}" SelectedItem="{Binding ValveTeeMainDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,8"/>
+                <TextBlock Text="분기 직경 파라미터" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding ValveTeeBranchParameterNames, Mode=OneWay}" SelectedItem="{Binding ValveTeeBranchDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
+            </StackPanel></Border>
+            <Border Background="#F7F9FB" BorderBrush="#DCE6EE" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,10"><StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="밸브부관 B (바이패스 90°)" FontWeight="Bold" Foreground="#4A6FA5"/><ContentControl Style="{StaticResource HelpIconStyle}" Tag="첫 번째 커넥터가 밸브 쪽입니다. 본관 구경을 이 파라미터에 넣고, 부관 관경은 패밀리가 정합니다."/></StackPanel>
+                <TextBlock Text="패밀리 (배관 부속류, 커넥터 2개)" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding SegmentFamilyTypeNames, Mode=OneWay}" SelectedItem="{Binding ValveBendFamilyTypeName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,8"/>
+                <TextBlock Text="본관 구경 파라미터" FontWeight="SemiBold"/><ComboBox ItemsSource="{Binding ValveBendParameterNames, Mode=OneWay}" SelectedItem="{Binding ValveBendDiameterParameterName, Mode=TwoWay}" Style="{StaticResource PrimaryComboBoxStyle}" Margin="0,4,0,4"/>
             </StackPanel></Border>
                     </StackPanel></ScrollViewer>
                 </TabItem>

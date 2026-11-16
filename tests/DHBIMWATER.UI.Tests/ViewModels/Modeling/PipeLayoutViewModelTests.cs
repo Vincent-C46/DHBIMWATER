@@ -614,7 +614,7 @@ public sealed class PipeLayoutViewModelTests
     }
 
     [Fact]
-    public void IsPlacingFitting_IsFalseInSelectionMode_WhenFamilyRemainsSelected()
+    public void IsPlacingFitting_IsFalseInSelectionMode_AndTypeSelectionCleared()
     {
         var vm = CreateViewModel();
         vm.SelectedFamilyTypeName = "밸브 : DN100";
@@ -622,8 +622,42 @@ public sealed class PipeLayoutViewModelTests
 
         vm.Mode = PipeLayoutMode.Selection;
 
+        // UI 개편 동작 변경 B — 그리기 모드 떠나면 유형 선택 비움(같은 유형 다시 눌러 재진입되게)
         Assert.False(vm.IsPlacingFitting);
-        Assert.Equal("밸브 : DN100", vm.SelectedFamilyTypeName);
+        Assert.Null(vm.SelectedFamilyTypeName);
+    }
+
+    [Fact]
+    public void SelectingValveOrJointType_InSelectionMode_EntersPlacement()
+    {
+        var vm = CreateViewModel();
+        vm.Mode = PipeLayoutMode.Selection;
+
+        vm.SelectedFamilyTypeName = "밸브 : DN100";
+        Assert.True(vm.IsDrawMode);
+        Assert.True(vm.IsPlacingFitting);
+
+        vm.Mode = PipeLayoutMode.Selection;
+        vm.SelectedJointFamilyTypeName = "이음관 : DN100";
+        Assert.True(vm.IsDrawMode);
+        Assert.True(vm.IsPlacingFitting);
+    }
+
+    [Fact]
+    public void DefaultDiameterMm_DoesNotChangeSelectedEdge()
+    {
+        var vm = CreateDrawingViewModel();
+        DisableOsnap(vm);
+        Draw(vm, new Point2D(0, 0), new Point2D(1000, 0));
+        vm.Mode = PipeLayoutMode.Selection;
+        vm.SelectEdge(Assert.Single(vm.Edges).Id);
+
+        vm.DefaultDiameterMm = 450;
+
+        // UI 개편 동작 변경 A — 기본 관경 칸은 선택 관경을 안 건드림
+        Assert.Equal(300, vm.Edges.Single().DiameterMm);
+        Assert.Equal(450, vm.DefaultDiameterMm);
+        Assert.Equal(300, vm.DiameterMm);
     }
 
     [Fact]
@@ -2910,6 +2944,7 @@ public sealed class PipeLayoutViewModelTests
     public void CreateModelCommand_WithoutZone_SendsEmptyZone()
     {
         var vm = CreateDrawingViewModel();
+        vm.ValveRoomZone = "";   // 기본값(제수밸브실)을 사용자가 빈 칸으로 바꾼 경우
         Draw(vm, new Point2D(0, 0), new Point2D(1000, 0));
         PipeNetworkDefinition? request = null;
         vm.CreateModelAction = value => request = value;
@@ -2917,6 +2952,16 @@ public sealed class PipeLayoutViewModelTests
         vm.CreateModelCommand.Execute(null);
 
         Assert.Equal(string.Empty, request!.Zone);
+    }
+
+    [Fact]
+    public void StartupDefaults_FillZoneAndLevelNearestZero()
+    {
+        var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(levels: [new LevelInfo(1, "B1", -4200), new LevelInfo(2, "1층", 300), new LevelInfo(3, "2층", 4500)]));
+
+        Assert.Equal("제수밸브실", vm.ValveRoomZone);
+        Assert.Equal("1층", vm.ElevationLevel?.Name);
+        Assert.DoesNotContain("기준 레벨 선택 필요", vm.ValidationSummary);
     }
 
     [Fact]
@@ -3704,6 +3749,50 @@ public sealed class PipeLayoutViewModelTests
             Wall(3, tr, tl, new Point2D(widthMm, heightMm + thickness), new Point2D(0, heightMm + thickness)),
             Wall(4, tl, bl, new Point2D(-thickness, heightMm), new Point2D(-thickness, 0)),
         ]);
+    }
+
+    /// <summary>UI 개편 후 "기본값이 비어 있음" 진단 — 실제 창을 띄워 탭을 돌린 뒤 VM 기본값이 그대로인지 본다.</summary>
+    [Fact]
+    public void RealWindow_TabSwitching_KeepsDefaults()
+    {
+        string? report = null; Exception? err = null;
+        var t = new Thread(() =>
+        {
+            try
+            {
+                var vm = new PipeLayoutViewModel(new StubElementTypeQueryRepo(
+                    accessoryNames: ["게이트밸브 : DN100", "게이트밸브 : DN300", "버터플라이밸브 : DN300"],
+                    fittingNames: ["직관 : DN100", "단관 : DN100", "곡관90 : DN100", "T형 : DN100", "DH_특수_밸브부관 : DN100", "DH_특수_밸브부관(D형) : DN100", "이음관 : DN100"]));
+                string Snap() => System.Text.Json.JsonSerializer.Serialize(vm.ToFamilySettings())
+                    + $"|valve={vm.SelectedValveFamilyName}|bypass={vm.BypassValveFamilyName}/{vm.BypassSecondValveFamilyName}|joint={vm.SelectedJointFamilyName}"
+                    + $"|kind={vm.PipeKindLabel}|conn={vm.JointConnectionLabel}|steel={vm.SteelFittingClassLabel}|zone={vm.ValveRoomZone}"
+                    + $"|vdp={vm.ValveDiameterParameterName}|vtp={vm.ValveTypeDiameterParameterName}|jdp={vm.JointDiameterParameterName}|bvdp={vm.BypassValveDiameterParameterName}";
+                var before = Snap();
+                if (System.Windows.Application.Current == null) _ = new System.Windows.Application();
+                var view = new DHBIMWATER.UI.Views.Modeling.PipeLayoutView(vm) { WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, ShowInTaskbar = false, ShowActivated = false };
+                void Pump() => System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                view.Show(); Pump();
+                var lines = new List<string>();
+                void Check(string step) { var now = Snap(); if (now != before) lines.Add($"[{step}] before={before} || now={now}"); }
+                Check("show");
+                var tabs = (System.Windows.Controls.TabControl)view.FindName("StepTabs");
+                for (var i = 0; i < tabs.Items.Count; i++) { tabs.SelectedIndex = i; Pump(); Check($"main tab {i}"); }
+                foreach (var name in new[] { "FittingToolJoint", "FittingToolBypass", "FittingToolValve" })
+                { ((System.Windows.Controls.RadioButton)view.FindName(name)).IsChecked = true; Pump(); Check(name); }
+                var settings = new DHBIMWATER.UI.Views.Modeling.PipeLayoutFamilySettingsView(vm) { WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, ShowInTaskbar = false, ShowActivated = false };
+                settings.Show(); Pump(); Check("settings show");
+                var stabs = (System.Windows.Controls.TabControl)settings.FindName("SettingsTabs");
+                for (var i = 0; i < stabs.Items.Count; i++) { stabs.SelectedIndex = i; Pump(); Check($"settings tab {i}"); }
+                settings.Close(); Pump(); Check("settings close");
+                tabs.SelectedIndex = 0; Pump(); Check("back to tab 0");
+                view.Close();
+                report = lines.Count == 0 ? "" : string.Join(" ;; ", lines);
+            }
+            catch (Exception ex) { err = ex; }
+        });
+        t.SetApartmentState(ApartmentState.STA); t.Start(); t.Join();
+        Assert.Null(err);
+        Assert.Equal("", report);
     }
 
     private static PipeLayoutViewModel CreateViewModel(IEnumerable<string>? accessoryNames = null)
