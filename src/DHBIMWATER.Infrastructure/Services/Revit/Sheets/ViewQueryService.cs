@@ -23,7 +23,6 @@ namespace DHBIMWATER.Infrastructure.Services.Revit.Sheets
                     !v.IsTemplate &&
                     v.ViewType != ViewType.DrawingSheet &&
                     v.ViewType != ViewType.Schedule &&
-                    v.ViewType != ViewType.DraftingView &&
                     v.ViewType != ViewType.ProjectBrowser &&
                     v.ViewType != ViewType.SystemBrowser &&
                     v.ViewType != ViewType.Report

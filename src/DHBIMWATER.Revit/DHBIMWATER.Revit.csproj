@@ -80,6 +80,11 @@
     <Copy SourceFiles="@(_AddinFiles)" DestinationFolder="$(APPDATA)\Autodesk\Revit\Addins\2025" Condition="Exists('$(APPDATA)\Autodesk\Revit\Addins\2025')" SkipUnchangedFiles="false" />
     <Copy SourceFiles="@(_MainDll);@(_DidasDlls)" DestinationFolder="$(APPDATA)\Autodesk\Revit\Addins\2025\DHBIMWATER" Condition="Exists('$(APPDATA)\Autodesk\Revit\Addins\2025')" SkipUnchangedFiles="false" ContinueOnError="WarnAndContinue" />
 
+    <!-- Revit 2027 -->
+    <MakeDir Directories="$(APPDATA)\Autodesk\Revit\Addins\2027\DHBIMWATER" Condition="Exists('$(APPDATA)\Autodesk\Revit\Addins\2027')" />
+    <Copy SourceFiles="@(_AddinFiles)" DestinationFolder="$(APPDATA)\Autodesk\Revit\Addins\2027" Condition="Exists('$(APPDATA)\Autodesk\Revit\Addins\2027')" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(_MainDll);@(_DidasDlls)" DestinationFolder="$(APPDATA)\Autodesk\Revit\Addins\2027\DHBIMWATER" Condition="Exists('$(APPDATA)\Autodesk\Revit\Addins\2027')" SkipUnchangedFiles="false" ContinueOnError="WarnAndContinue" />
+
     <!-- Revit 2026 -->
     <MakeDir Directories="$(APPDATA)\Autodesk\Revit\Addins\2026\DHBIMWATER" Condition="Exists('$(APPDATA)\Autodesk\Revit\Addins\2026')" />
     <Copy SourceFiles="@(_AddinFiles)" DestinationFolder="$(APPDATA)\Autodesk\Revit\Addins\2026" Condition="Exists('$(APPDATA)\Autodesk\Revit\Addins\2026')" SkipUnchangedFiles="false" />
